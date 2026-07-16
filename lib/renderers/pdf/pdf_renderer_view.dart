@@ -128,7 +128,22 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
             initialSettings: InAppWebViewSettings(
               javaScriptEnabled: true,
               transparentBackground: false,
-              supportZoom: true,
+              // PDF.js owns zoom. System WebView pinch/double-tap zoom
+              // double-scales canvas + text layer and looks "deformed" on phones.
+              supportZoom: false,
+              builtInZoomControls: false,
+              displayZoomControls: false,
+              // Prefer a single scroll owner (the HTML page).
+              disableHorizontalScroll: true,
+              // Hybrid composition is more stable for long PDF canvas pages
+              // on modern Android; falls back safely on other platforms.
+              useHybridComposition: true,
+              // Avoid Android text autosizing that can reflow the text layer.
+              textZoom: 100,
+              mediaPlaybackRequiresUserGesture: true,
+              allowsInlineMediaPlayback: true,
+              // Keep background opaque to reduce compositor flicker.
+              underPageBackgroundColor: const Color(0xFFFAFAF7),
             ),
             onWebViewCreated: (controller) {
               _rendererController = PdfRendererController(controller);

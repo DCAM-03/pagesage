@@ -45,8 +45,8 @@ void main() {
     expect(restored.paragraphSpacing, 12);
     expect(restored.pageMargin, 24);
     expect(restored.readerMode, ReaderMode.continuous);
-    expect(restored.pdfScale, 1.2);
-    expect(restored.pdfZoomMode, PdfZoomMode.custom);
+    expect(restored.pdfScale, 1.0);
+    expect(restored.pdfZoomMode, PdfZoomMode.fitWidth);
     expect(restored.reduceMotion, isFalse);
   });
 

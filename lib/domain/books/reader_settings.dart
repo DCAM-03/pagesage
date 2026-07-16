@@ -103,8 +103,10 @@ final class ReaderSettings {
     this.paragraphSpacing = 12,
     this.pageMargin = 24,
     this.readerMode = ReaderMode.continuous,
-    this.pdfScale = 1.2,
-    this.pdfZoomMode = PdfZoomMode.custom,
+    // Fit-width is the least surprising default on phones and small windows;
+    // custom 1.2x used to overflow and look "squashed" under old CSS max-width.
+    this.pdfScale = 1.0,
+    this.pdfZoomMode = PdfZoomMode.fitWidth,
     this.themePreset = ReaderThemePreset.day,
     this.reduceMotion = false,
     this.desktopTocOpen = true,
@@ -217,9 +219,9 @@ final class ReaderSettings {
       readerMode: ReaderMode.fromValue(
         json['readerMode'] as String? ?? ReaderMode.continuous.value,
       ),
-      pdfScale: _asDouble(json['pdfScale']) ?? 1.2,
+      pdfScale: _asDouble(json['pdfScale']) ?? 1.0,
       pdfZoomMode: PdfZoomMode.fromValue(
-        json['pdfZoomMode'] as String? ?? PdfZoomMode.custom.value,
+        json['pdfZoomMode'] as String? ?? PdfZoomMode.fitWidth.value,
       ),
       themePreset: ReaderThemePreset.fromValue(
         json['themePreset'] as String? ?? ReaderThemePreset.day.value,
