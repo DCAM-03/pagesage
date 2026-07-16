@@ -1,0 +1,12 @@
+# Project-level Codex configuration for PageSage.
+#
+# The current Codex CLI also stores MCP registrations globally when using
+# `codex mcp add`; keep this file as the repository-level declaration of the
+# MCPs that are relevant to this project.
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
+
+[mcp_servers.dart]
+command = "dart"
+args = ["mcp-server"]

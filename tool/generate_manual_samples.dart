@@ -1,0 +1,472 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:archive/archive.dart';
+import 'package:path/path.dart' as p;
+
+const defaultManualSamplesPath = '.codex-run/samples';
+
+Future<List<GeneratedSample>> generateManualSamples({
+  String outputPath = defaultManualSamplesPath,
+}) async {
+  final outputDir = Directory(outputPath);
+  await outputDir.create(recursive: true);
+
+  final samples = <GeneratedSample>[
+    GeneratedSample(
+      fileName: 'standard.epub',
+      description: '标准 EPUB：2 章、EPUB3 目录、常规段落。',
+      write: (file) => file.writeAsBytes(
+        buildEpub(
+          title: 'PageSage Standard EPUB',
+          includeNav: true,
+          chapters: const [
+            EpubSampleChapter(
+              fileName: 'chapter1.xhtml',
+              title: '第一章 进入书库',
+              body: '''
+                <h1>第一章 进入书库</h1>
+                <p>这是 PageSage 的本地验收样本。它用于检查导入、打开、目录跳转、书签、笔记和保存进度。</p>
+                <p>正文保持原创，不依赖外部版权材料。阅读时请检查行宽、段距、工具栏自动隐藏和当前章节提示。</p>
+              ''',
+            ),
+            EpubSampleChapter(
+              fileName: 'chapter2.xhtml',
+              title: '第二章 阅读循环',
+              body: '''
+                <h1>第二章 阅读循环</h1>
+                <p>关闭应用后重新打开，应恢复到上次阅读位置附近。也可以在本章添加高亮和摘录笔记。</p>
+                <p>搜索关键词：PageSage、local-first、notebook。</p>
+              ''',
+            ),
+          ],
+        ),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
+      fileName: 'long-text.epub',
+      description: '长文本 EPUB：长标题、长段落、代码块和长单词。',
+      write: (file) => file.writeAsBytes(
+        buildEpub(
+          title: 'PageSage Long Text Layout EPUB With Very Long Title',
+          includeNav: true,
+          chapters: [
+            EpubSampleChapter(
+              fileName: 'chapter1.xhtml',
+              title: '长文本、窄屏和字体缩放布局验收章节',
+              body:
+                  '''
+                <h1>长文本、窄屏和字体缩放布局验收章节</h1>
+                <p>${List.filled(18, '这是一段用于检查阅读器长段落换行、滚动位置、搜索命中和移动端窄屏排版的原创文本。').join()}</p>
+                <pre><code>Future&lt;void&gt; validateReader() async {
+  await openBook('long-text.epub');
+  await changeFontSize(22);
+  await createNote('layout-check');
+}</code></pre>
+                <p>LongUnbrokenTokenForOverflowValidationLongUnbrokenTokenForOverflowValidationLongUnbrokenTokenForOverflowValidation</p>
+              ''',
+            ),
+            const EpubSampleChapter(
+              fileName: 'chapter2.xhtml',
+              title: '第二章 无障碍焦点',
+              body: '''
+                <h1>第二章 无障碍焦点</h1>
+                <p>使用 Tab、方向键和 Esc 检查阅读器工具栏、目录、搜索、Notebook 和 AI 面板的焦点顺序。</p>
+              ''',
+            ),
+          ],
+        ),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
+      fileName: 'image.epub',
+      description: '带图片 EPUB：内嵌原创小 PNG，用于图片占位和正文环绕检查。',
+      write: (file) => file.writeAsBytes(
+        buildEpub(
+          title: 'PageSage Image EPUB',
+          includeNav: true,
+          includeImage: true,
+          chapters: const [
+            EpubSampleChapter(
+              fileName: 'chapter1.xhtml',
+              title: '图片章节',
+              body: '''
+                <h1>图片章节</h1>
+                <p>下面是一张内嵌的本地生成图片。它用于检查图片、说明文字和阅读宽度。</p>
+                <figure>
+                  <img src="images/checker.png" alt="PageSage sample checker image"/>
+                  <figcaption>PageSage 本地验收图片。</figcaption>
+                </figure>
+                <p>图片后正文应该继续保持可读，不应被工具栏遮挡。</p>
+              ''',
+            ),
+          ],
+        ),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
+      fileName: 'no-toc.epub',
+      description: '无目录 EPUB：验证章节列表 fallback。',
+      write: (file) => file.writeAsBytes(
+        buildEpub(
+          title: 'PageSage No TOC EPUB',
+          includeNav: false,
+          chapters: const [
+            EpubSampleChapter(
+              fileName: 'chapter1.xhtml',
+              title: '无目录第一章',
+              body: '<h1>无目录第一章</h1><p>该样本没有 nav.xhtml，阅读器应回退到章节列表。</p>',
+            ),
+            EpubSampleChapter(
+              fileName: 'chapter2.xhtml',
+              title: '无目录第二章',
+              body: '<h1>无目录第二章</h1><p>用于检查目录面板和章节标题 fallback。</p>',
+            ),
+          ],
+        ),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
+      fileName: 'large.epub',
+      description: '大型 EPUB：40 章，用于导入、索引、取消和滚动性能检查。',
+      write: (file) => file.writeAsBytes(
+        buildEpub(
+          title: 'PageSage Large EPUB',
+          includeNav: true,
+          chapters: List.generate(
+            40,
+            (index) => EpubSampleChapter(
+              fileName: 'chapter${index + 1}.xhtml',
+              title: '大型样本章节 ${index + 1}',
+              body:
+                  '<h1>大型样本章节 ${index + 1}</h1>'
+                  '<p>${List.filled(24, '本章用于制造足够的导入、索引和滚动负载。').join()}</p>',
+            ),
+          ),
+        ),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
+      fileName: 'standard-text.pdf',
+      description: '标准文本 PDF：3 页文本，用于页码、搜索、缩放和保存进度。',
+      write: (file) => file.writeAsBytes(
+        buildTextPdf(const [
+          'PageSage PDF sample page 1. Search keyword local-first reader.',
+          'PageSage PDF sample page 2. Use this page for jump and zoom checks.',
+          'PageSage PDF sample page 3. Add bookmark and restore progress here.',
+        ]),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
+      fileName: 'large-text.pdf',
+      description: '大 PDF：80 页文本，用于滚动、页码跳转和长任务取消。',
+      write: (file) => file.writeAsBytes(
+        buildTextPdf(
+          List.generate(
+            80,
+            (index) =>
+                'Large PDF page ${index + 1}. PageSage generated validation text for scrolling, indexing, and cancellation.',
+          ),
+        ),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
+      fileName: 'image-only.pdf',
+      description: '无文本层 PDF：只有矢量图形，用于搜索/划词禁用状态。',
+      write: (file) => file.writeAsBytes(buildImageOnlyPdf(), flush: true),
+    ),
+    GeneratedSample(
+      fileName: 'broken.pdf',
+      description: '损坏 PDF：用于可恢复错误 UI。',
+      write: (file) => file.writeAsBytes(
+        ascii.encode('%PDF-1.4\n% PageSage intentionally broken sample\n'),
+        flush: true,
+      ),
+    ),
+  ];
+
+  for (final sample in samples) {
+    await sample.write(File(p.join(outputDir.path, sample.fileName)));
+  }
+  await File(
+    p.join(outputDir.path, 'README.md'),
+  ).writeAsString(buildSamplesReadme(samples), flush: true);
+  return samples;
+}
+
+Uint8List buildEpub({
+  required String title,
+  required List<EpubSampleChapter> chapters,
+  required bool includeNav,
+  bool includeImage = false,
+}) {
+  final manifestItems = <String>[
+    for (var i = 0; i < chapters.length; i += 1)
+      '<item id="chapter${i + 1}" href="${chapters[i].fileName}" media-type="application/xhtml+xml"/>',
+    if (includeNav)
+      '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
+    if (includeImage)
+      '<item id="checker" href="images/checker.png" media-type="image/png"/>',
+  ];
+  final spineItems = <String>[
+    for (var i = 0; i < chapters.length; i += 1)
+      '<itemref idref="chapter${i + 1}"/>',
+  ];
+
+  final archive = Archive()
+    ..addFile(ArchiveFile.string('mimetype', 'application/epub+zip'))
+    ..addFile(
+      ArchiveFile.string('META-INF/container.xml', '''
+<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+'''),
+    )
+    ..addFile(
+      ArchiveFile.string('OEBPS/content.opf', '''
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="book-id">urn:uuid:pagesage-${_slug(title)}</dc:identifier>
+    <dc:title>${_escapeXml(title)}</dc:title>
+    <dc:language>zh-CN</dc:language>
+    <dc:creator>PageSage Local Samples</dc:creator>
+  </metadata>
+  <manifest>
+    ${manifestItems.join('\n    ')}
+  </manifest>
+  <spine>
+    ${spineItems.join('\n    ')}
+  </spine>
+</package>
+'''),
+    );
+
+  if (includeNav) {
+    archive.addFile(
+      ArchiveFile.string('OEBPS/nav.xhtml', '''
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <head><title>${_escapeXml(title)} 目录</title></head>
+  <body>
+    <nav epub:type="toc">
+      <ol>
+        ${chapters.map((chapter) => '<li><a href="${chapter.fileName}">${_escapeXml(chapter.title)}</a></li>').join('\n        ')}
+      </ol>
+    </nav>
+  </body>
+</html>
+'''),
+    );
+  }
+
+  for (final chapter in chapters) {
+    archive.addFile(
+      ArchiveFile.string('OEBPS/${chapter.fileName}', '''
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>${_escapeXml(chapter.title)}</title>
+    <style>
+      body { font-family: serif; line-height: 1.7; }
+      pre { white-space: pre-wrap; border: 1px solid #999; padding: 12px; }
+      img { max-width: 100%; }
+    </style>
+  </head>
+  <body>
+    ${chapter.body}
+  </body>
+</html>
+'''),
+    );
+  }
+
+  if (includeImage) {
+    archive.addFile(
+      ArchiveFile('OEBPS/images/checker.png', _checkerPng.length, _checkerPng),
+    );
+  }
+
+  return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
+Uint8List buildTextPdf(List<String> pageTexts) {
+  final pageObjects = <String>[];
+  final contentObjects = <String>[];
+  final fontObjectNumber = 3 + pageTexts.length * 2;
+  for (var i = 0; i < pageTexts.length; i += 1) {
+    final pageObjectNumber = 3 + i * 2;
+    final contentObjectNumber = pageObjectNumber + 1;
+    final escaped = _escapePdfText(pageTexts[i]);
+    final operations =
+        '''
+BT
+/F1 13 Tf
+72 730 Td
+($escaped) Tj
+0 -28 Td
+(Generated by PageSage local manual samples.) Tj
+ET''';
+    pageObjects.add(
+      '$pageObjectNumber 0 obj\n'
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+      '/Contents $contentObjectNumber 0 R '
+      '/Resources << /Font << /F1 $fontObjectNumber 0 R >> >> >>\n'
+      'endobj\n',
+    );
+    contentObjects.add(
+      '$contentObjectNumber 0 obj\n'
+      '<< /Length ${ascii.encode(operations).length} >>\n'
+      'stream\n$operations\nendstream\n'
+      'endobj\n',
+    );
+  }
+
+  final kids = [
+    for (var i = 0; i < pageTexts.length; i += 1) '${3 + i * 2} 0 R',
+  ].join(' ');
+  return _writePdfObjects([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [$kids] /Count ${pageTexts.length} >>',
+    for (var i = 0; i < pageTexts.length; i += 1) ...[
+      _objectBody(pageObjects[i]),
+      _objectBody(contentObjects[i]),
+    ],
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]);
+}
+
+Uint8List buildImageOnlyPdf() {
+  const operations = '''
+0.90 0.90 0.86 rg
+72 120 468 560 re
+f
+0.16 0.18 0.20 RG
+2 w
+72 120 468 560 re
+S
+0.30 0.42 0.60 rg
+120 610 180 40 re
+f
+0.75 0.35 0.22 rg
+120 540 260 28 re
+f
+0.20 0.55 0.38 rg
+120 490 220 28 re
+f''';
+  return _writePdfObjects([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>',
+    '<< /Length ${ascii.encode(operations).length} >>\nstream\n$operations\nendstream',
+  ]);
+}
+
+String buildSamplesReadme(List<GeneratedSample> samples) {
+  final buffer = StringBuffer()
+    ..writeln('# PageSage Manual Samples')
+    ..writeln()
+    ..writeln(
+      '这些文件由 `dart run tool/generate_manual_samples.dart` 本地生成，不进入生产资源包。',
+    )
+    ..writeln()
+    ..writeln('| 文件 | 用途 |')
+    ..writeln('| --- | --- |');
+  for (final sample in samples) {
+    buffer.writeln('| `${sample.fileName}` | ${sample.description} |');
+  }
+  return buffer.toString();
+}
+
+Uint8List _writePdfObjects(List<String> bodies) {
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < bodies.length; i += 1) {
+    offsets.add(ascii.encode(buffer.toString()).length);
+    buffer.write('${i + 1} 0 obj\n${bodies[i]}\nendobj\n');
+  }
+  final xrefOffset = ascii.encode(buffer.toString()).length;
+  buffer
+    ..write('xref\n0 ${bodies.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${bodies.length + 1} /Root 1 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return Uint8List.fromList(ascii.encode(buffer.toString()));
+}
+
+String _objectBody(String object) {
+  final lines = object.trim().split('\n');
+  return lines.sublist(1, lines.length - 1).join('\n');
+}
+
+String _escapePdfText(String text) {
+  return text
+      .replaceAll('\\', r'\\')
+      .replaceAll('(', r'\(')
+      .replaceAll(')', r'\)');
+}
+
+String _escapeXml(String text) {
+  return text
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&apos;');
+}
+
+String _slug(String text) {
+  return text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+}
+
+final _checkerPng = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAWElEQVR4nO3PQQ0AIBDAMMC/5+ONAvZoFSzZnQVm7b0O8G8B3JYAWwJsCbAlwJYAWwJsCbAlwJYAWwJsCbAlwJYAWwJsCbAlwJYAWwJsCbAlwJYAWwK8AF2pAi/voHMUAAAAAElFTkSuQmCC',
+);
+
+final class EpubSampleChapter {
+  const EpubSampleChapter({
+    required this.fileName,
+    required this.title,
+    required this.body,
+  });
+
+  final String fileName;
+  final String title;
+  final String body;
+}
+
+final class GeneratedSample {
+  const GeneratedSample({
+    required this.fileName,
+    required this.description,
+    required this.write,
+  });
+
+  final String fileName;
+  final String description;
+  final Future<void> Function(File file) write;
+}
+
+Future<void> main(List<String> args) async {
+  final outputPath = args.isEmpty ? defaultManualSamplesPath : args.first;
+  final samples = await generateManualSamples(outputPath: outputPath);
+  stdout.writeln('Generated ${samples.length} manual samples in $outputPath');
+  for (final sample in samples) {
+    stdout.writeln('- ${sample.fileName}: ${sample.description}');
+  }
+}

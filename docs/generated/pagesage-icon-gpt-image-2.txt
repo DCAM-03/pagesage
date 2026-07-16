@@ -1,0 +1,5 @@
+model=gpt-image-2
+endpoint=(local-generation-endpoint-redacted)
+bytes=905007
+prompt=PageSage local-first ebook reader app icon, teal sage green, open book + leaf, flat product design
+note=Generated asset metadata only; do not store personal API endpoints or keys in-repo.

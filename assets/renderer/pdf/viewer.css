@@ -1,0 +1,257 @@
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--reader-bg, #fafaf7);
+  color: var(--reader-fg, #24251f);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow-x: hidden;
+  color-scheme: light;
+}
+
+html[data-theme="night"],
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+#toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100vw;
+  min-height: calc(48px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) 12px 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  background: color-mix(in srgb, var(--reader-bg, #fafaf7) 92%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--reader-fg, #24251f) 14%, transparent);
+}
+
+button,
+select {
+  flex: 0 0 auto;
+  min-height: 32px;
+  border: 1px solid color-mix(in srgb, var(--reader-fg, #24251f) 18%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--reader-bg, #fafaf7) 88%, var(--reader-fg, #24251f) 12%);
+  color: var(--reader-fg, #24251f);
+  white-space: nowrap;
+}
+
+button {
+  min-width: 40px;
+}
+
+select {
+  max-width: 180px;
+  padding: 0 8px;
+}
+
+#pageLabel {
+  flex: 0 0 auto;
+  min-width: 64px;
+  text-align: center;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+#stage {
+  display: grid;
+  grid-template-columns: minmax(0, max-content);
+  justify-content: center;
+  align-items: start;
+  gap: 16px;
+  box-sizing: border-box;
+  max-width: 100vw;
+  padding: var(--page-margin, 20px);
+}
+
+.pageContainer {
+  position: relative;
+  display: block;
+  max-width: calc(100vw - var(--page-margin, 20px) * 2);
+}
+
+.pageContainer[hidden] {
+  display: none;
+}
+
+.pageCanvas {
+  position: relative;
+  z-index: 1;
+  display: block;
+  max-width: 100%;
+  background: #fff;
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--reader-fg, #24251f) 18%, transparent);
+  border-radius: 2px;
+}
+
+/* Soft invert keeps text readable without a pure white paper flash. */
+html[data-theme="night"] .pageCanvas,
+html[data-theme="dark"] .pageCanvas {
+  background: #111;
+  filter: invert(0.9) hue-rotate(180deg) contrast(0.92) brightness(0.92);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* Green/sage eye-care: warm paper tint without full invert. */
+html[data-theme="green"] .pageCanvas,
+html[data-theme="sage"] .pageCanvas {
+  background: #eef5ea;
+  filter: sepia(0.18) saturate(0.85) brightness(0.97);
+}
+
+html[data-theme="paper"] .pageCanvas,
+html[data-theme="warm"] .pageCanvas,
+html[data-theme="amber"] .pageCanvas {
+  background: #f6ecda;
+  filter: sepia(0.22) saturate(0.9) brightness(0.98);
+}
+
+.textLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  line-height: 1;
+  opacity: 1;
+  user-select: text;
+  -webkit-user-select: text;
+  pointer-events: auto;
+}
+
+/* When the canvas is inverted, invert the transparent text layer back so
+   selection/highlight math stays aligned without recoloring glyphs twice. */
+html[data-theme="night"] .textLayer,
+html[data-theme="dark"] .textLayer {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.textLayer span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  cursor: text;
+  pointer-events: all;
+}
+
+.textLayer span::selection {
+  background: rgba(80, 125, 255, 0.35);
+}
+
+.textLayer span.searchHit {
+  color: transparent;
+  background: rgba(255, 214, 89, 0.42);
+  border-radius: 2px;
+}
+
+.textLayer span.focusHit {
+  color: transparent;
+  background: rgba(255, 196, 0, 0.55);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(255, 170, 0, 0.35);
+}
+
+.annotationLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Keep annotation marks readable under night invert. */
+html[data-theme="night"] .annotationLayer,
+html[data-theme="dark"] .annotationLayer {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.annotationMark {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: var(--annotation-color, rgba(255, 229, 138, 0.62));
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.annotationMark.underline {
+  height: 3px !important;
+  min-height: 3px;
+  margin-top: calc(var(--annotation-underline-offset, 1em) - 3px);
+  background: transparent;
+  border-bottom: 2px solid var(--annotation-color, rgba(255, 229, 138, 0.72));
+  border-radius: 0;
+}
+
+/* Paged modes: no document free-scroll; center the current page/spread. */
+html[data-paged="true"],
+html[data-paged="true"] body {
+  height: 100%;
+  overflow: hidden;
+}
+
+html[data-display-mode="double"] #stage,
+html[data-display-mode="single"] #stage {
+  min-height: calc(100vh - 49px);
+  align-content: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+html[data-display-mode="double"] #stage {
+  grid-template-columns: repeat(2, minmax(0, max-content));
+}
+
+/* Cover page alone in double mode: keep it centered. */
+html[data-display-mode="double"] #stage:has(.pageContainer:not([hidden]):only-of-type),
+html[data-display-mode="double"] #stage {
+  justify-items: center;
+}
+
+#textLayerStatus {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(36, 37, 31, 0.84);
+  color: #ffffff;
+  font-size: 13px;
+  text-align: center;
+  z-index: 3;
+}
+
+@media (max-width: 899px) {
+  #toolbar {
+    gap: 6px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  select {
+    max-width: 136px;
+  }
+
+  html[data-display-mode="double"] #stage {
+    grid-template-columns: minmax(0, max-content);
+  }
+}
+
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.001ms !important;
+}

@@ -1,0 +1,28 @@
+{
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "openaiDeveloperDocs",
+    "dart"
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(flutter doctor *)",
+      "Bash(flutter devices*)",
+      "Bash(flutter pub get*)",
+      "Bash(flutter analyze*)",
+      "Bash(flutter test*)",
+      "Bash(flutter build windows*)",
+      "Bash(flutter build apk*)",
+      "Bash(flutter build appbundle*)",
+      "Bash(dart format *)",
+      "Bash(dart --version*)",
+      "Bash(dart mcp-server*)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(adb devices*)",
+      "Bash(ebook-convert --version*)",
+      "mcp__openaiDeveloperDocs__*",
+      "mcp__dart__*"
+    ]
+  }
+}

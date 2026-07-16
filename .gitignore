@@ -1,0 +1,82 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+.codex-run/
+
+# Platform ephemeral / local machine files
+**/windows/flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/android/.gradle/
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/**/GeneratedPluginRegistrant.kt
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/android/build/
+
+# Local preview / release drop folders (APK, zipped runners)
+/dist/
+*.apk
+*.aab
+*.ipa
+
+# Secrets and local env (never commit)
+.env
+.env.*
+*.pem
+*.jks
+*.keystore
+secrets/
+**/google-services.json
+**/GoogleService-Info.plist
+**/key.properties
+
+# Claude Code local overrides
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Codex local run logs under project config
+.codex/*.log
+.codex/*.err.log
+.codex/*.out.log
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Local tooling binaries
+/tools/nuget.exe

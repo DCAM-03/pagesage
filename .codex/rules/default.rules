@@ -1,0 +1,24 @@
+# Low-risk project command allowlist for PageSage.
+# Keep this file free of secrets and machine-specific paths.
+
+prefix_rule(pattern=["codex", "mcp", "list"], decision="allow")
+prefix_rule(pattern=["codex", "mcp", "get"], decision="allow")
+
+prefix_rule(pattern=["flutter", "doctor", "-v"], decision="allow")
+prefix_rule(pattern=["flutter", "devices"], decision="allow")
+prefix_rule(pattern=["flutter", "pub", "get"], decision="allow")
+prefix_rule(pattern=["flutter", "analyze"], decision="allow")
+prefix_rule(pattern=["flutter", "test"], decision="allow")
+prefix_rule(pattern=["flutter", "build", "windows"], decision="allow")
+prefix_rule(pattern=["flutter", "build", "apk"], decision="allow")
+prefix_rule(pattern=["flutter", "build", "appbundle"], decision="allow")
+
+prefix_rule(pattern=["dart", "format", "."], decision="allow")
+prefix_rule(pattern=["dart", "format", "--output=none", "--set-exit-if-changed", "."], decision="allow")
+prefix_rule(pattern=["dart", "--version"], decision="allow")
+
+prefix_rule(pattern=["git", "status", "--short"], decision="allow")
+prefix_rule(pattern=["git", "diff", "--stat"], decision="allow")
+
+prefix_rule(pattern=["adb", "devices"], decision="allow")
+prefix_rule(pattern=["ebook-convert", "--version"], decision="allow")
