@@ -11,8 +11,16 @@
   let renderVersion = 0;
   let scrollReportTimer = null;
   let lazyRenderTimer = null;
-  /** @type {Map<number, {pageView: HTMLElement, scale: number, rendered: boolean, rendering: boolean}>} */
+  let locationReportTimer = null;
+  /** Active PDF.js render tasks, keyed by page number — cancelled when pages leave the window. */
+  const pageRenderTasks = new Map();
+  /** @type {Map<number, {pageView: HTMLElement, scale: number, rendered: boolean, rendering: boolean, width: number, height: number, top: number}>} */
   const pageRenderState = new Map();
+  /** Uniform/sampled page metrics for virtual continuous layout on phones. */
+  let pageMetrics = [];
+  let virtualTotalHeight = 0;
+  let useVirtualContinuous = false;
+  let lastReportedPage = 0;
 
   const pageLabel = document.getElementById("pageLabel");
   const stage = document.getElementById("stage");
@@ -131,15 +139,97 @@
     if (!pageView || displayMode !== "continuous") {
       return 0;
     }
+    if (useVirtualContinuous && pageMetrics[pageNumber - 1]) {
+      return Math.max(window.scrollY - pageMetrics[pageNumber - 1].top, 0);
+    }
     return Math.max(window.scrollY - pageView.offsetTop, 0);
   }
 
-  function reportLocation() {
+  function pageNumberFromScroll() {
+    if (!pdfDoc) {
+      return 1;
+    }
+    if (useVirtualContinuous && pageMetrics.length) {
+      const y = window.scrollY + Math.max(window.innerHeight * 0.28, 48);
+      // Binary search metrics tops.
+      let lo = 0;
+      let hi = pageMetrics.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const top = pageMetrics[mid].top;
+        const bottom = top + pageMetrics[mid].height;
+        if (y < top) {
+          hi = mid - 1;
+        } else if (y > bottom) {
+          lo = mid + 1;
+        } else {
+          return mid + 1;
+        }
+      }
+      return Math.min(Math.max(lo + 1, 1), pdfDoc.numPages);
+    }
+    const viewportAnchor = window.scrollY + Math.max(window.innerHeight * 0.35, 96);
+    let closestPage = pageNumber;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const pageView of stage.querySelectorAll(".pageContainer")) {
+      const number = Number(pageView.dataset.page || 0);
+      const distance = Math.abs(pageView.offsetTop - viewportAnchor);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestPage = number;
+      }
+    }
+    return closestPage;
+  }
+
+  function updateCurrentPageFromScroll() {
+    if (!pdfDoc || displayMode !== "continuous") {
+      return;
+    }
+    const closestPage = pageNumberFromScroll();
+    if (closestPage !== pageNumber) {
+      pageNumber = closestPage;
+      updateVisiblePages();
+      scheduleLazyRender();
+      // Only bridge to Flutter when the page actually changes.
+      if (closestPage !== lastReportedPage) {
+        scheduleLocationReport(false);
+      }
+    } else {
+      scheduleLazyRender();
+    }
+  }
+
+  function scrollToPage(number, offset) {
+    pageNumber = normalizePageNumber(number);
+    updateVisiblePages();
+    if (displayMode === "continuous") {
+      if (useVirtualContinuous && pageMetrics[pageNumber - 1]) {
+        window.scrollTo(0, pageMetrics[pageNumber - 1].top + Number(offset || 0));
+      } else {
+        const pageView = pageViewFor(pageNumber);
+        if (pageView) {
+          window.scrollTo(0, pageView.offsetTop + Number(offset || 0));
+        }
+      }
+    } else {
+      // Single/double: pin to top so only the current spread is visible.
+      window.scrollTo(0, 0);
+    }
+    scheduleLazyRender();
+  }
+
+
+  function reportLocation(options) {
     if (!pdfDoc) {
       return;
     }
+    // Excerpt scanning walks every text span with layout reads — too hot for
+    // mobile scroll ticks. Only compute on explicit idle reports.
+    const includeExcerpt =
+      options && options.includeExcerpt === true && !isNarrowViewport();
     const scale = Number(pageViewFor(pageNumber)?.dataset.scale || zoom);
-    const excerpt = excerptNearViewport(pageNumber);
+    const excerpt = includeExcerpt ? excerptNearViewport(pageNumber) : "";
     send("locationChanged", {
       locator: {
         type: "pdf",
@@ -153,6 +243,19 @@
       pageNumber,
       totalPages: pdfDoc.numPages,
     });
+    lastReportedPage = pageNumber;
+  }
+
+  function scheduleLocationReport(includeExcerpt) {
+    if (locationReportTimer) {
+      window.clearTimeout(locationReportTimer);
+    }
+    // Phones: report far less often; desktop keeps snappier progress saves.
+    const delay = isNarrowViewport() ? 420 : 120;
+    locationReportTimer = window.setTimeout(function () {
+      locationReportTimer = null;
+      reportLocation({ includeExcerpt: Boolean(includeExcerpt) });
+    }, delay);
   }
 
   function excerptNearViewport(page) {
@@ -165,20 +268,14 @@
       if (!spans.length) {
         return "";
       }
-      const viewportTop = window.scrollY + Math.max(window.innerHeight * 0.18, 48);
+      // Cap work: only inspect a few spans near the top of the page box.
+      const limit = Math.min(spans.length, 24);
       let best = "";
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (const span of spans) {
-        const text = (span.textContent || "").replace(/\s+/g, " ").trim();
-        if (!text) {
-          continue;
-        }
-        const rect = span.getBoundingClientRect();
-        const absoluteTop = window.scrollY + rect.top;
-        const distance = Math.abs(absoluteTop - viewportTop);
-        if (distance < bestDistance) {
-          bestDistance = distance;
+      for (let i = 0; i < limit; i += 1) {
+        const text = (spans[i].textContent || "").replace(/\s+/g, " ").trim();
+        if (text) {
           best = text;
+          break;
         }
       }
       if (!best) {
@@ -219,11 +316,21 @@
   }
 
   function canvasOutputScale(cssWidth, cssHeight) {
-    // High-DPI phones (3x) + full-page PDF canvases easily OOM / jank.
+    // Phones: prefer 1x raster. Reading does not need retina PDF bitmaps, and
+    // 2–3x canvases are a primary heat source on mid-range Android.
     const dpr = Math.max(window.devicePixelRatio || 1, 1);
-    const maxDpr = isNarrowViewport() ? 1.75 : 2.5;
+    const maxDpr = isNarrowViewport() ? 1.15 : 2.5;
     let outputScale = Math.min(dpr, maxDpr);
-    const maxPixels = isNarrowViewport() ? 3.5e6 : 12e6;
+    if (isNarrowViewport()) {
+      // Hard cap pixel budget roughly to one 1080p frame per page.
+      const maxPixels = 2.0e6;
+      const pixels = Math.max(cssWidth, 1) * Math.max(cssHeight, 1) * outputScale * outputScale;
+      if (pixels > maxPixels) {
+        outputScale = Math.sqrt(maxPixels / (Math.max(cssWidth, 1) * Math.max(cssHeight, 1)));
+      }
+      return Math.max(Math.min(outputScale, 1.15), 1);
+    }
+    const maxPixels = 12e6;
     const pixels = Math.max(cssWidth, 1) * Math.max(cssHeight, 1) * outputScale * outputScale;
     if (pixels > maxPixels) {
       outputScale = Math.sqrt(maxPixels / (Math.max(cssWidth, 1) * Math.max(cssHeight, 1)));
@@ -232,13 +339,31 @@
   }
 
   function continuousRenderRadius() {
-    // Keep a small window of fully rasterized pages around the viewport.
-    return isNarrowViewport() ? 1 : 2;
+    // Mobile: only the current page (+ optional neighbor after idle).
+    return isNarrowViewport() ? 0 : 2;
   }
 
-  function releasePageRender(state) {
-    if (!state || (!state.rendered && !state.rendering)) {
+  function cancelPageRenderTask(number) {
+    const task = pageRenderTasks.get(number);
+    if (task && typeof task.cancel === "function") {
+      try {
+        task.cancel();
+      } catch (_) {
+        // ignore cancel races
+      }
+    }
+    pageRenderTasks.delete(number);
+  }
+
+  function releasePageRender(state, number) {
+    if (!state) {
       return;
+    }
+    if (number) {
+      cancelPageRenderTask(number);
+    }
+    if (!state.rendered && !state.rendering) {
+      // Still drop empty layers if the node will be removed.
     }
     const canvas = state.pageView.querySelector(".pageCanvas");
     const textLayer = state.pageView.querySelector(".textLayer");
@@ -250,57 +375,153 @@
       // Drop GPU/CPU pixel buffers; keep CSS box via pageContainer size.
       canvas.width = 1;
       canvas.height = 1;
-      canvas.style.width = state.pageView.style.width;
-      canvas.style.height = state.pageView.style.height;
+      canvas.style.width = `${state.width || 1}px`;
+      canvas.style.height = `${state.height || 1}px`;
     }
     if (textLayer) {
       textLayer.replaceChildren();
     }
+    const annotationLayer = state.pageView.querySelector(".annotationLayer");
+    if (annotationLayer) {
+      annotationLayer.replaceChildren();
+    }
     state.rendered = false;
     state.rendering = false;
+  }
+
+  function destroyPageState(number) {
+    const state = pageRenderState.get(number);
+    if (!state) {
+      return;
+    }
+    releasePageRender(state, number);
+    if (state.pageView && state.pageView.parentNode) {
+      state.pageView.parentNode.removeChild(state.pageView);
+    }
+    pageRenderState.delete(number);
   }
 
   function scheduleLazyRender() {
     if (lazyRenderTimer) {
       window.clearTimeout(lazyRenderTimer);
     }
+    // Wait until scrolling settles before spending CPU on rasterization.
+    const delay = isNarrowViewport() ? 140 : 60;
     lazyRenderTimer = window.setTimeout(function () {
       lazyRenderTimer = null;
       ensurePagesAround(pageNumber, renderVersion);
-    }, 60);
+    }, delay);
+  }
+
+  function windowRangeFor(centerPage) {
+    const center = normalizePageNumber(centerPage);
+    if (displayMode === "continuous") {
+      const radius = continuousRenderRadius();
+      // After idle on mobile, still prefetch one neighbor when memory allows.
+      const prefetch = isNarrowViewport() ? 1 : radius;
+      return {
+        start: Math.max(1, center - prefetch),
+        end: Math.min(pdfDoc.numPages, center + prefetch),
+      };
+    }
+    if (displayMode === "double") {
+      const spreadStart = spreadStartFor(center);
+      return {
+        start: Math.max(1, spreadStart),
+        end: Math.min(pdfDoc.numPages, spreadStart === 1 ? 1 : spreadStart + 1),
+      };
+    }
+    return { start: center, end: center };
   }
 
   async function ensurePagesAround(centerPage, version) {
     if (!pdfDoc || version !== renderVersion) {
       return;
     }
-    const center = normalizePageNumber(centerPage);
-    let start;
-    let end;
-    if (displayMode === "continuous") {
-      const radius = continuousRenderRadius();
-      start = Math.max(1, center - radius);
-      end = Math.min(pdfDoc.numPages, center + radius);
-    } else if (displayMode === "double") {
-      const spreadStart = spreadStartFor(center);
-      start = Math.max(1, spreadStart);
-      end = Math.min(pdfDoc.numPages, spreadStart === 1 ? 1 : spreadStart + 1);
-    } else {
-      start = center;
-      end = center;
+    if (useVirtualContinuous) {
+      await syncVirtualWindow(centerPage, version);
+      return;
     }
 
-    // Free far pages first so memory stays bounded while scrolling.
-    const keepPad = displayMode === "continuous" ? continuousRenderRadius() + 1 : 1;
+    const range = windowRangeFor(centerPage);
+    const keepPad = isNarrowViewport() ? 1 : continuousRenderRadius() + 1;
     for (const [number, state] of pageRenderState.entries()) {
-      if (number < start - keepPad || number > end + keepPad) {
-        releasePageRender(state);
+      if (number < range.start - keepPad || number > range.end + keepPad) {
+        releasePageRender(state, number);
       }
     }
 
-    for (let number = start; number <= end; number += 1) {
+    // Render current page first, then neighbors.
+    const order = [];
+    const center = normalizePageNumber(centerPage);
+    order.push(center);
+    for (let number = range.start; number <= range.end; number += 1) {
+      if (number !== center) {
+        order.push(number);
+      }
+    }
+    for (const number of order) {
       if (version !== renderVersion) {
         return;
+      }
+      await renderPageIfNeeded(number, version);
+    }
+
+    if (version === renderVersion) {
+      highlightSearchResults();
+      drawAnnotations();
+    }
+  }
+
+  async function syncVirtualWindow(centerPage, version) {
+    if (!pdfDoc || version !== renderVersion || !pageMetrics.length) {
+      return;
+    }
+    const range = windowRangeFor(centerPage);
+    // Drop pages outside a tight keep set.
+    const keepPad = 1;
+    for (const number of Array.from(pageRenderState.keys())) {
+      if (number < range.start - keepPad || number > range.end + keepPad) {
+        destroyPageState(number);
+      }
+    }
+
+    const center = normalizePageNumber(centerPage);
+    const order = [center];
+    for (let number = range.start; number <= range.end; number += 1) {
+      if (number !== center) {
+        order.push(number);
+      }
+    }
+
+    for (const number of order) {
+      if (version !== renderVersion) {
+        return;
+      }
+      const metric = pageMetrics[number - 1];
+      if (!metric) {
+        continue;
+      }
+      let state = pageRenderState.get(number);
+      if (!state) {
+        const pageView = createPageViewFromMetric(number, metric);
+        if (useVirtualContinuous) {
+          pageView.style.position = "absolute";
+          pageView.style.left = "50%";
+          pageView.style.top = `${metric.top}px`;
+          pageView.style.transform = "translateX(-50%)";
+        }
+        stage.appendChild(pageView);
+        state = {
+          pageView,
+          scale: metric.scale,
+          rendered: false,
+          rendering: false,
+          width: metric.width,
+          height: metric.height,
+          top: metric.top,
+        };
+        pageRenderState.set(number, state);
       }
       await renderPageIfNeeded(number, version);
     }
@@ -327,11 +548,14 @@
       }
       const scale = Number(state.pageView.dataset.scale) || resolveZoomForPage(page);
       const viewport = page.getViewport({ scale });
-      await renderPageView(page, state.pageView, viewport, scale);
-      if (version === renderVersion) {
+      await renderPageView(page, state.pageView, viewport, scale, number, version);
+      if (version === renderVersion && pageRenderState.get(number) === state) {
         state.rendered = true;
       }
     } catch (error) {
+      if (error && (error.name === "RenderingCancelledException" || /cancel/i.test(String(error.message || error)))) {
+        return;
+      }
       console.warn("PDF page render failed", number, error);
     } finally {
       if (state) {
@@ -340,9 +564,44 @@
     }
   }
 
+  async function buildPageMetrics(version) {
+    pageMetrics = [];
+    virtualTotalHeight = 0;
+    if (!pdfDoc) {
+      return;
+    }
+    const gap = isNarrowViewport() ? 10 : 16;
+    // Sample page 1 for size. Most books share a single page size; this avoids
+    // walking every page just to build spacers (major open-time heat).
+    const first = await pdfDoc.getPage(1);
+    if (version !== renderVersion) {
+      return;
+    }
+    const baseScale = resolveZoomForPage(first);
+    const baseViewport = first.getViewport({ scale: baseScale });
+    const width = Math.max(Math.floor(baseViewport.width), 1);
+    const height = Math.max(Math.floor(baseViewport.height), 1);
+    let top = 0;
+    for (let number = 1; number <= pdfDoc.numPages; number += 1) {
+      pageMetrics.push({
+        width,
+        height,
+        scale: baseScale,
+        top,
+      });
+      top += height + gap;
+    }
+    // Remove trailing gap for total height.
+    virtualTotalHeight = Math.max(top - gap, height);
+  }
+
   async function renderDocument(options) {
     if (!pdfDoc) {
       return;
+    }
+    // Cancel any in-flight page renders from the previous layout.
+    for (const number of Array.from(pageRenderTasks.keys())) {
+      cancelPageRenderTask(number);
     }
     const version = ++renderVersion;
     const restorePage = Math.min(
@@ -352,10 +611,35 @@
     const restoreOffset = Number(options && options.restoreOffset ? options.restoreOffset : 0);
     stage.replaceChildren();
     pageRenderState.clear();
+    pageMetrics = [];
+    virtualTotalHeight = 0;
+    // Mobile continuous mode: virtualize. Never mount hundreds of page shells.
+    useVirtualContinuous = isNarrowViewport() && displayMode === "continuous";
+    stage.classList.toggle("virtual-continuous", useVirtualContinuous);
+    stage.style.position = useVirtualContinuous ? "relative" : "";
+    stage.style.height = "";
     updateDisplayMode();
 
-    // Phase 1: light page shells only (correct layout sizes, no full raster).
-    // This keeps scroll metrics stable without freezing the phone on large PDFs.
+    if (useVirtualContinuous) {
+      await buildPageMetrics(version);
+      if (version !== renderVersion) {
+        return;
+      }
+      stage.style.height = `${virtualTotalHeight}px`;
+      pageNumber = restorePage;
+      updateVisiblePages();
+      updateZoomPreset();
+      reportCapability();
+      await ensurePagesAround(pageNumber, version);
+      if (version !== renderVersion) {
+        return;
+      }
+      scrollToPage(pageNumber, restoreOffset);
+      scheduleLocationReport(false);
+      return;
+    }
+
+    // Desktop / paged: light shells for layout, rasterize nearby pages only.
     for (let number = 1; number <= pdfDoc.numPages; number += 1) {
       if (version !== renderVersion) {
         return;
@@ -370,8 +654,11 @@
         scale,
         rendered: false,
         rendering: false,
+        width: Math.floor(viewport.width),
+        height: Math.floor(viewport.height),
+        top: 0,
       });
-      if (number % 8 === 0) {
+      if (number % 12 === 0) {
         await yieldToMain();
       }
     }
@@ -383,30 +670,35 @@
     updateVisiblePages();
     updateZoomPreset();
     reportCapability();
-    // Phase 2: rasterize only the pages near the restore target.
     await ensurePagesAround(pageNumber, version);
     if (version !== renderVersion) {
       return;
     }
     scrollToPage(pageNumber, restoreOffset);
-    setTimeout(reportLocation, 50);
+    scheduleLocationReport(false);
   }
 
   function createPageView(number, viewport, scale) {
     const cssWidth = Math.max(Math.floor(viewport.width), 1);
     const cssHeight = Math.max(Math.floor(viewport.height), 1);
+    return createPageViewBox(number, cssWidth, cssHeight, scale);
+  }
+
+  function createPageViewFromMetric(number, metric) {
+    return createPageViewBox(number, metric.width, metric.height, metric.scale);
+  }
+
+  function createPageViewBox(number, cssWidth, cssHeight, scale) {
     const pageView = document.createElement("section");
     pageView.className = "pageContainer";
     pageView.dataset.page = String(number);
     pageView.dataset.scale = String(scale);
-    // Fixed CSS box preserves aspect ratio; never rely on max-width-only shrink.
     pageView.style.width = `${cssWidth}px`;
     pageView.style.height = `${cssHeight}px`;
     pageView.setAttribute("aria-label", `PDF 第 ${number} 页`);
 
     const canvas = document.createElement("canvas");
     canvas.className = "pageCanvas";
-    // Placeholder buffer until lazy render fills pixels.
     canvas.width = 1;
     canvas.height = 1;
     canvas.style.width = `${cssWidth}px`;
@@ -438,11 +730,12 @@
     return layer;
   }
 
-  async function renderPageView(page, pageView, viewport, scale) {
+  async function renderPageView(page, pageView, viewport, scale, pageNumberForTask, version) {
     const canvas = pageView.querySelector(".pageCanvas");
     if (!canvas) {
       return;
     }
+    cancelPageRenderTask(pageNumberForTask);
     const context = canvas.getContext("2d", { alpha: false });
     const cssWidth = Math.max(Math.floor(viewport.width), 1);
     const cssHeight = Math.max(Math.floor(viewport.height), 1);
@@ -451,7 +744,6 @@
     canvas.height = Math.max(Math.floor(cssHeight * outputScale), 1);
     canvas.style.width = `${cssWidth}px`;
     canvas.style.height = `${cssHeight}px`;
-    // Keep container / text / annotation layers locked to the same CSS box.
     pageView.style.width = `${cssWidth}px`;
     pageView.style.height = `${cssHeight}px`;
     const textLayer = pageView.querySelector(".textLayer");
@@ -464,12 +756,34 @@
       annotationLayer.style.width = `${cssWidth}px`;
       annotationLayer.style.height = `${cssHeight}px`;
     }
-    await page.render({
+    const renderTask = page.render({
       canvasContext: context,
       viewport,
       transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
-    }).promise;
-    await renderTextLayer(page, textLayer, viewport, scale);
+    });
+    if (pageNumberForTask) {
+      pageRenderTasks.set(pageNumberForTask, renderTask);
+    }
+    try {
+      await renderTask.promise;
+    } finally {
+      if (pageNumberForTask) {
+        pageRenderTasks.delete(pageNumberForTask);
+      }
+    }
+    if (version && version !== renderVersion) {
+      return;
+    }
+    // Text layer is expensive (thousands of absolute spans). On phones skip it
+    // unless search/selection needs it — reading-only path stays cool.
+    const needTextLayer =
+      documentTextLayerAvailable &&
+      (!isNarrowViewport() || lastSearchResults.length > 0);
+    if (needTextLayer) {
+      await renderTextLayer(page, textLayer, viewport, scale);
+    } else if (textLayer) {
+      textLayer.replaceChildren();
+    }
   }
 
   function resolveZoomForPage(page) {
@@ -629,19 +943,6 @@
     return stage.querySelector(`.pageContainer[data-page="${number}"]`);
   }
 
-  function scrollToPage(number, offset) {
-    pageNumber = normalizePageNumber(number);
-    updateVisiblePages();
-    const pageView = pageViewFor(pageNumber);
-    if (pageView && displayMode === "continuous") {
-      window.scrollTo(0, pageView.offsetTop + Number(offset || 0));
-    } else {
-      // Single/double: pin to top so only the current spread is visible.
-      window.scrollTo(0, 0);
-    }
-    scheduleLazyRender();
-  }
-
   function turnPages(direction) {
     if (!pdfDoc) {
       return;
@@ -656,31 +957,7 @@
       return;
     }
     scrollToPage(next, 0);
-    reportLocation();
-  }
-
-  function updateCurrentPageFromScroll() {
-    if (!pdfDoc || displayMode !== "continuous") {
-      return;
-    }
-    const viewportAnchor = window.scrollY + Math.max(window.innerHeight * 0.35, 96);
-    let closestPage = pageNumber;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    for (const pageView of stage.querySelectorAll(".pageContainer")) {
-      const number = Number(pageView.dataset.page || 0);
-      const distance = Math.abs(pageView.offsetTop - viewportAnchor);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestPage = number;
-      }
-    }
-    if (closestPage !== pageNumber) {
-      pageNumber = closestPage;
-      updateVisiblePages();
-      scheduleLazyRender();
-    } else {
-      scheduleLazyRender();
-    }
+    scheduleLocationReport(false);
   }
 
   function updateZoomPreset() {
@@ -818,7 +1095,7 @@
     }
     scrollToPage(nextPage, Number(locator && locator.scrollOffset ? locator.scrollOffset : 0));
     flashLocator(locator);
-    reportLocation();
+    scheduleLocationReport(false);
   }
 
   function flashLocator(locator) {
@@ -901,6 +1178,9 @@
       const lower = trimmed.toLocaleLowerCase();
       const results = [];
       for (let page = 1; page <= pdfDoc.numPages; page += 1) {
+        if (isNarrowViewport() && page % 4 === 0) {
+          await yieldToMain();
+        }
         const pdfPage = await pdfDoc.getPage(page);
         const textContent = await pdfPage.getTextContent();
         const text = (textContent.items || []).map((item) => item.str || "").join(" ").trim();
@@ -938,6 +1218,12 @@
         }
       }
       lastSearchResults = results;
+      // Pages may have been rasterized without a text layer on phones. Force a
+      // cheap re-render of the nearby window so search hits can paint.
+      for (const state of pageRenderState.values()) {
+        state.rendered = false;
+      }
+      await ensurePagesAround(pageNumber, renderVersion);
       highlightSearchResults();
       send("searchResults", { query: trimmed, total: results.length, results });
     } catch (error) {
@@ -1230,17 +1516,19 @@
       renderDocument({ restorePage: pageNumber });
     } else {
       scrollToPage(pageNumber, 0);
-      reportLocation();
+      scheduleLocationReport(false);
     }
   });
 
   window.addEventListener("scroll", function () {
+    // While scrolling, only track page index. Heavy location/excerpt reports
+    // wait until idle — critical for mobile heat.
     window.clearTimeout(scrollReportTimer);
+    updateCurrentPageFromScroll();
     scrollReportTimer = window.setTimeout(function () {
-      updateCurrentPageFromScroll();
-      reportLocation();
-    }, 60);
-  });
+      scheduleLocationReport(false);
+    }, isNarrowViewport() ? 450 : 160);
+  }, { passive: true });
 
   let resizeTimer = null;
   window.addEventListener("resize", function () {
@@ -1254,15 +1542,28 @@
           updateVisiblePages();
         }
       }
-      // After orientation / Flutter inset changes, re-fit pages on phones.
-      if (pdfDoc && (zoomMode === "fit-width" || zoomMode === "fit-page" || isNarrowViewport())) {
+      // Re-fit only when viewport width changes meaningfully (rotation / split).
+      // Flutter mobile chrome show/hide often fires resize with same width and
+      // full re-render is a major heat source.
+      const width = window.innerWidth || 0;
+      const height = window.innerHeight || 0;
+      if (!window.__pageSageLastSize) {
+        window.__pageSageLastSize = { width: width, height: height };
+      }
+      const prev = window.__pageSageLastSize;
+      const widthChanged = Math.abs(width - prev.width) >= 24;
+      const heightChanged = Math.abs(height - prev.height) >= 96;
+      window.__pageSageLastSize = { width: width, height: height };
+      if (pdfDoc && (widthChanged || (heightChanged && (zoomMode === "fit-page")))) {
         if (isNarrowViewport() && zoomMode === "custom") {
           zoomMode = "fit-width";
         }
-        renderDocument({ restorePage: pageNumber, restoreOffset: currentScrollOffset() });
-      } else {
-        scheduleLazyRender();
+        if (zoomMode === "fit-width" || zoomMode === "fit-page" || widthChanged) {
+          renderDocument({ restorePage: pageNumber, restoreOffset: currentScrollOffset() });
+          return;
+        }
       }
+      scheduleLazyRender();
     }, 120);
   });
 
@@ -1384,12 +1685,12 @@
       case "Home":
         event.preventDefault();
         scrollToPage(1, 0);
-        reportLocation();
+        scheduleLocationReport(false);
         break;
       case "End":
         event.preventDefault();
         scrollToPage(pdfDoc.numPages, 0);
-        reportLocation();
+        scheduleLocationReport(false);
         break;
       default:
         break;

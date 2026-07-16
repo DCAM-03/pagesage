@@ -113,7 +113,9 @@ select {
   border-radius: 2px;
 }
 
-/* Soft invert keeps text readable without a pure white paper flash. */
+/* Soft invert keeps text readable without a pure white paper flash.
+   IMPORTANT: CSS filters on large canvases force continuous GPU compositing
+   and are a major phone heat source. Mobile disables filters below. */
 html[data-theme="night"] .pageCanvas,
 html[data-theme="dark"] .pageCanvas {
   background: #111;
@@ -133,6 +135,52 @@ html[data-theme="warm"] .pageCanvas,
 html[data-theme="amber"] .pageCanvas {
   background: #f6ecda;
   filter: sepia(0.22) saturate(0.9) brightness(0.98);
+}
+
+/* Mobile: drop canvas/text/annotation filters entirely. Background color still
+   follows theme; avoid live GPU filter over full-page bitmaps while scrolling. */
+@media (max-width: 899px) {
+  html[data-theme="night"] .pageCanvas,
+  html[data-theme="dark"] .pageCanvas,
+  html[data-theme="green"] .pageCanvas,
+  html[data-theme="sage"] .pageCanvas,
+  html[data-theme="paper"] .pageCanvas,
+  html[data-theme="warm"] .pageCanvas,
+  html[data-theme="amber"] .pageCanvas,
+  html[data-theme="night"] .textLayer,
+  html[data-theme="dark"] .textLayer,
+  html[data-theme="night"] .annotationLayer,
+  html[data-theme="dark"] .annotationLayer {
+    filter: none !important;
+  }
+
+  html[data-theme="night"] .pageCanvas,
+  html[data-theme="dark"] .pageCanvas {
+    background: #1a1a1a;
+    box-shadow: none;
+  }
+
+  html[data-theme="green"] .pageCanvas,
+  html[data-theme="sage"] .pageCanvas {
+    background: #e8efe4;
+    box-shadow: none;
+  }
+
+  html[data-theme="paper"] .pageCanvas,
+  html[data-theme="warm"] .pageCanvas,
+  html[data-theme="amber"] .pageCanvas {
+    background: #f3ead8;
+    box-shadow: none;
+  }
+
+  .pageCanvas {
+    box-shadow: none;
+  }
+
+  #stage.virtual-continuous {
+    /* Height is set in JS; keep paint cheap. */
+    will-change: auto;
+  }
 }
 
 .textLayer {

@@ -144,6 +144,16 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
               allowsInlineMediaPlayback: true,
               // Keep background opaque to reduce compositor flicker.
               underPageBackgroundColor: const Color(0xFFFAFAF7),
+              // Mobile heat: do not let the WebView over-scroll rubber-band
+              // thrash layout while the user flicks through pages.
+              disableVerticalScroll: false,
+              verticalScrollBarEnabled: false,
+              horizontalScrollBarEnabled: false,
+              // Cache only the active document; avoid keeping extra WebView
+              // history/back-forward list work around.
+              clearCache: false,
+              cacheEnabled: true,
+              preferredContentMode: UserPreferredContentMode.MOBILE,
             ),
             onWebViewCreated: (controller) {
               _rendererController = PdfRendererController(controller);
