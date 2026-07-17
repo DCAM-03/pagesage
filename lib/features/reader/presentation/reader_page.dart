@@ -265,17 +265,101 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!mounted || !context.appBreakpoint.isCompact) {
       return;
     }
-    _mobileChromeTimer = Timer(const Duration(seconds: 3), () {
+    // Slightly longer than before so users can reach bottom actions without
+    // the chrome vanishing mid-tap.
+    _mobileChromeTimer = Timer(const Duration(seconds: 5), () {
       if (mounted && !_selectionActionsOpen) {
         setState(() => _mobileChromeVisible = false);
       }
     });
   }
 
-  void _hideMobileChrome() {
-    _mobileChromeTimer?.cancel();
-    if (mounted && _mobileChromeVisible) {
-      setState(() => _mobileChromeVisible = false);
+  Future<void> _showMobileMoreSheet({
+    required BuildContext context,
+    required Book book,
+    required ReaderSettings settings,
+    required Bookmark? currentBookmark,
+  }) async {
+    _showMobileChrome(autoHide: false);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (sheetContext) {
+          final isPdf = book.format == BookFormat.pdf;
+          return SafeArea(
+            child: _MobileReaderMoreSheet(
+              book: book,
+              settings: settings,
+              bookmarked: currentBookmark != null,
+              searchAvailable: _rendererSearchAvailable != false,
+              textLayerAvailable: _rendererTextSelectionAvailable != false,
+              capabilityReason: _rendererSearchUnavailableReason,
+              onPageJump: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_showPageJump(context));
+                    }
+                  : null,
+              onZoomOut: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_adjustReaderScale(-1));
+                    }
+                  : null,
+              onZoomIn: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_adjustReaderScale(1));
+                    }
+                  : null,
+              onFitWidth: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_setPdfZoomMode(PdfZoomMode.fitWidth));
+                    }
+                  : null,
+              onFitPage: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_setPdfZoomMode(PdfZoomMode.fitPage));
+                    }
+                  : null,
+              onSearch: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_showInBookSearch(context));
+              },
+              onBookmark: () {
+                Navigator.of(sheetContext).pop();
+                _toggleBookmark(context, currentBookmark);
+              },
+              onNotebook: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_showNotebook(context));
+              },
+              onAi: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_showAiPanel(context));
+              },
+              onSettings: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_showReaderSettings(context, settings));
+              },
+              onQuickTheme: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_showQuickThemeSheet(context, settings));
+              },
+              onToggleReaderMode: () {
+                Navigator.of(sheetContext).pop();
+                unawaited(_toggleReaderMode(settings));
+              },
+            ),
+          );
+        },
+      );
+    } finally {
+      _scheduleMobileChromeAutoHide();
     }
   }
 
@@ -730,6 +814,20 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                 bottom: false,
                                 child: _MobileReaderTopBar(
                                   title: book.title,
+                                  progress:
+                                      _currentLocation?.progress ??
+                                      snapshot?.progress,
+                                  locationLabel: _readerLocationText(
+                                    book: book,
+                                    locator:
+                                        _currentLocation?.locator ??
+                                        snapshot?.locator,
+                                    chapterTitle:
+                                        _currentLocation?.chapterTitle ??
+                                        snapshot?.chapterTitle,
+                                    pageNumber: _currentLocation?.pageNumber,
+                                    totalPages: _currentLocation?.totalPages,
+                                  ),
                                   onBack: () async {
                                     await ref
                                         .read(
@@ -742,7 +840,17 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                       context.go('/library');
                                     }
                                   },
-                                  onHide: _hideMobileChrome,
+                                  onToc: () => unawaited(
+                                    _showTableOfContents(context, book),
+                                  ),
+                                  onMore: () => unawaited(
+                                    _showMobileMoreSheet(
+                                      context: context,
+                                      book: book,
+                                      settings: readerSettings,
+                                      currentBookmark: currentBookmark,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -770,64 +878,74 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                           snapshot?.chapterTitle,
                                       pageNumber: location?.pageNumber,
                                       totalPages: location?.totalPages,
-                                      settings: readerSettings,
                                       bookmarked: currentBookmark != null,
                                       searchAvailable:
                                           _rendererSearchAvailable != false,
-                                      textLayerAvailable:
-                                          _rendererTextSelectionAvailable !=
-                                          false,
-                                      capabilityReason:
-                                          _rendererSearchUnavailableReason,
-                                      onPageJump: () =>
-                                          unawaited(_showPageJump(context)),
-                                      onZoomOut: () =>
-                                          unawaited(_adjustReaderScale(-1)),
-                                      onZoomIn: () =>
-                                          unawaited(_adjustReaderScale(1)),
-                                      onFitWidth: () => unawaited(
-                                        _setPdfZoomMode(PdfZoomMode.fitWidth),
-                                      ),
-                                      onFitPage: () => unawaited(
-                                        _setPdfZoomMode(PdfZoomMode.fitPage),
-                                      ),
                                       onToc: () => unawaited(
                                         _showTableOfContents(context, book),
                                       ),
-                                      onSearch: () =>
-                                          unawaited(_showInBookSearch(context)),
+                                      onSearch: () => unawaited(
+                                        _showInBookSearch(context),
+                                      ),
                                       onBookmark: () => _toggleBookmark(
                                         context,
                                         currentBookmark,
                                       ),
-                                      onNotebook: () =>
-                                          unawaited(_showNotebook(context)),
-                                      onAi: () =>
-                                          unawaited(_showAiPanel(context)),
-                                      onSettings: () => _showReaderSettings(
-                                        context,
-                                        readerSettings,
-                                      ),
-                                      onQuickTheme: () => _showQuickThemeSheet(
-                                        context,
-                                        readerSettings,
+                                      onProgressTap: book.format == BookFormat.pdf
+                                          ? () => unawaited(
+                                              _showPageJump(context),
+                                            )
+                                          : null,
+                                      onMore: () => unawaited(
+                                        _showMobileMoreSheet(
+                                          context: context,
+                                          book: book,
+                                          settings: readerSettings,
+                                          currentBookmark: currentBookmark,
+                                        ),
                                       ),
                                     );
                                   },
                                 ),
                               ),
                             ),
-                          ] else if (context.appBreakpoint.isCompact)
+                          ] else if (context.appBreakpoint.isCompact) ...[
+                            // Edge tap zones only — never cover the whole page or
+                            // reading gestures / WebView scrolling break.
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              top: 0,
+                              height: 56,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onTap: () => _showMobileChrome(autoHide: true),
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              height: 72,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onTap: () => _showMobileChrome(autoHide: true),
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
                             Positioned(
                               right: AppSpacing.x3,
                               bottom: AppSpacing.x3,
                               child: SafeArea(
                                 top: false,
                                 child: _ReaderChromeRevealButton(
-                                  onPressed: _showMobileChrome,
+                                  onPressed: () =>
+                                      _showMobileChrome(autoHide: true),
                                 ),
                               ),
                             ),
+                          ],
                         ],
                       );
                     },
@@ -1992,20 +2110,20 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         return;
       }
       await showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        builder: (sheetContext) => SafeArea(
-          child: _SelectionActionSurface(
-            selection: selection,
-            compact: true,
-            onAction: (action) {
-              Navigator.of(sheetContext).pop();
-              unawaited(_handleSelectionAction(context, selection, action));
-            },
-            onDismiss: () => Navigator.of(sheetContext).pop(),
-          ),
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: _SelectionActionSurface(
+          selection: selection,
+          compact: true,
+          onAction: (action) {
+            Navigator.of(sheetContext).pop();
+            unawaited(_handleSelectionAction(context, selection, action));
+          },
+          onDismiss: () => Navigator.of(sheetContext).pop(),
         ),
-      );
+      ),
+    );
     } finally {
       _selectionActionsOpen = false;
       _lastSelectionActionKey = null;
@@ -2834,40 +2952,84 @@ final class _ReaderToolbarButton extends StatelessWidget {
 final class _MobileReaderTopBar extends StatelessWidget {
   const _MobileReaderTopBar({
     required this.title,
+    required this.progress,
+    required this.locationLabel,
     required this.onBack,
-    required this.onHide,
+    required this.onToc,
+    required this.onMore,
   });
 
   final String title;
+  final double? progress;
+  final String locationLabel;
   final Future<void> Function() onBack;
-  final VoidCallback onHide;
+  final VoidCallback onToc;
+  final VoidCallback onMore;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final percentage = ((progress ?? 0).clamp(0.0, 1.0) * 100).round();
     return _ReaderFloatingChrome(
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: '返回书库',
-            onPressed: () => unawaited(onBack()),
-            icon: const Icon(Icons.arrow_back),
-          ),
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: colorScheme.onSurface,
-                fontWeight: FontWeight.w600,
-              ),
+          SizedBox(
+            height: 48,
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: '返回书库',
+                  onPressed: () => unawaited(onBack()),
+                  icon: const Icon(Icons.arrow_back),
+                ),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        '$locationLabel · $percentage%',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: '目录',
+                  onPressed: onToc,
+                  icon: const Icon(Icons.toc),
+                ),
+                IconButton(
+                  tooltip: '更多',
+                  onPressed: onMore,
+                  icon: const Icon(Icons.more_horiz),
+                ),
+              ],
             ),
           ),
-          IconButton(
-            tooltip: '隐藏阅读控制',
-            onPressed: onHide,
-            icon: const Icon(Icons.keyboard_arrow_up),
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+              bottom: Radius.circular(AppRadius.lg),
+            ),
+            child: LinearProgressIndicator(
+              value: (progress ?? 0).clamp(0.0, 1.0),
+              minHeight: 2,
+              backgroundColor: colorScheme.surfaceContainerHighest,
+            ),
           ),
         ],
       ),
@@ -2883,23 +3045,13 @@ final class _MobileReaderBottomBar extends StatelessWidget {
     required this.chapterTitle,
     required this.pageNumber,
     required this.totalPages,
-    required this.settings,
     required this.bookmarked,
-    required this.onPageJump,
-    required this.onZoomOut,
-    required this.onZoomIn,
-    required this.onFitWidth,
-    required this.onFitPage,
     required this.onToc,
     required this.onSearch,
     required this.onBookmark,
-    required this.onNotebook,
-    required this.onAi,
-    required this.onSettings,
-    required this.onQuickTheme,
+    required this.onMore,
+    this.onProgressTap,
     this.searchAvailable = true,
-    this.textLayerAvailable = true,
-    this.capabilityReason,
   });
 
   final Book book;
@@ -2908,144 +3060,360 @@ final class _MobileReaderBottomBar extends StatelessWidget {
   final String? chapterTitle;
   final int? pageNumber;
   final int? totalPages;
-  final ReaderSettings settings;
   final bool bookmarked;
-  final VoidCallback onPageJump;
-  final VoidCallback onZoomOut;
-  final VoidCallback onZoomIn;
-  final VoidCallback onFitWidth;
-  final VoidCallback onFitPage;
   final VoidCallback onToc;
   final VoidCallback onSearch;
   final VoidCallback onBookmark;
-  final VoidCallback onNotebook;
-  final VoidCallback onAi;
-  final VoidCallback onSettings;
-  final VoidCallback onQuickTheme;
+  final VoidCallback onMore;
+  final VoidCallback? onProgressTap;
   final bool searchAvailable;
-  final bool textLayerAvailable;
-  final String? capabilityReason;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final percentage = ((progress ?? locator?.progress ?? 0).clamp(0, 1) * 100)
         .round();
+    final location = _readerLocationText(
+      book: book,
+      locator: locator,
+      chapterTitle: chapterTitle,
+      pageNumber: pageNumber,
+      totalPages: totalPages,
+    );
+
     return _ReaderFloatingChrome(
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.x3,
-              AppSpacing.x2,
-              AppSpacing.x3,
-              AppSpacing.x1,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _readerLocationText(
-                    book: book,
-                    locator: locator,
-                    chapterTitle: chapterTitle,
-                    pageNumber: pageNumber,
-                    totalPages: totalPages,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colorScheme.textSecondary,
-                  ),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onProgressTap,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.x4,
+                  AppSpacing.x2,
+                  AppSpacing.x4,
+                  AppSpacing.x1,
                 ),
-                const SizedBox(height: AppSpacing.x1),
-                Wrap(
-                  spacing: AppSpacing.x2,
-                  runSpacing: AppSpacing.x1,
+                child: Row(
                   children: [
-                    _StatusBarPill(label: '$percentage%'),
-                    _StatusBarPill(label: _readerScaleText(book, settings)),
-                    _StatusBarPill(label: settings.readerMode.label),
+                    Expanded(
+                      child: Text(
+                        location,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '$percentage%',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (onProgressTap != null) ...[
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.keyboard_arrow_up,
+                        size: 18,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ],
                   ],
                 ),
-              ],
+              ),
             ),
           ),
-          if (book.format == BookFormat.pdf)
-            _PdfQuickToolbar(
-              pageNumber: pageNumber,
-              totalPages: totalPages,
-              settings: settings,
-              bookmarked: bookmarked,
-              embedded: true,
-              searchAvailable: searchAvailable,
-              textLayerAvailable: textLayerAvailable,
-              capabilityReason: capabilityReason,
-              onPageJump: onPageJump,
-              onZoomOut: onZoomOut,
-              onZoomIn: onZoomIn,
-              onFitWidth: onFitWidth,
-              onFitPage: onFitPage,
-              onSearch: onSearch,
-              onBookmark: onBookmark,
-            ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+          Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.x1,
+              0,
               AppSpacing.x1,
               AppSpacing.x1,
-              AppSpacing.x2,
             ),
             child: Row(
               children: [
-                _MobileReaderActionButton(
-                  icon: Icons.toc,
-                  label: '目录',
-                  onPressed: onToc,
+                Expanded(
+                  child: _MobileReaderActionButton(
+                    icon: Icons.toc,
+                    label: '目录',
+                    onPressed: onToc,
+                  ),
                 ),
-                if (book.format != BookFormat.pdf) ...[
-                  _MobileReaderActionButton(
+                Expanded(
+                  child: _MobileReaderActionButton(
                     icon: Icons.search,
                     label: '搜索',
-                    onPressed: onSearch,
+                    onPressed: searchAvailable ? onSearch : () {},
+                    enabled: searchAvailable,
                   ),
-                  _MobileReaderActionButton(
+                ),
+                Expanded(
+                  child: _MobileReaderActionButton(
                     icon: bookmarked
                         ? Icons.bookmark
                         : Icons.bookmark_add_outlined,
-                    label: bookmarked ? '取消书签' : '书签',
+                    label: bookmarked ? '已书签' : '书签',
                     selected: bookmarked,
                     onPressed: onBookmark,
                   ),
-                ],
-                _MobileReaderActionButton(
-                  icon: Icons.library_books_outlined,
-                  label: '笔记',
-                  onPressed: onNotebook,
                 ),
-                _MobileReaderActionButton(
-                  icon: Icons.auto_awesome_outlined,
-                  label: 'AI',
-                  onPressed: onAi,
-                ),
-                _MobileReaderActionButton(
-                  icon: Icons.tune,
-                  label: '设置',
-                  onPressed: onSettings,
-                ),
-                _MobileReaderActionButton(
-                  icon: Icons.brightness_4_outlined,
-                  label: '主题',
-                  onPressed: onQuickTheme,
+                Expanded(
+                  child: _MobileReaderActionButton(
+                    icon: Icons.more_horiz,
+                    label: '更多',
+                    onPressed: onMore,
+                  ),
                 ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+final class _MobileReaderMoreSheet extends StatelessWidget {
+  const _MobileReaderMoreSheet({
+    required this.book,
+    required this.settings,
+    required this.bookmarked,
+    required this.searchAvailable,
+    required this.textLayerAvailable,
+    required this.onSearch,
+    required this.onBookmark,
+    required this.onNotebook,
+    required this.onAi,
+    required this.onSettings,
+    required this.onQuickTheme,
+    required this.onToggleReaderMode,
+    this.capabilityReason,
+    this.onPageJump,
+    this.onZoomOut,
+    this.onZoomIn,
+    this.onFitWidth,
+    this.onFitPage,
+  });
+
+  final Book book;
+  final ReaderSettings settings;
+  final bool bookmarked;
+  final bool searchAvailable;
+  final bool textLayerAvailable;
+  final String? capabilityReason;
+  final VoidCallback onSearch;
+  final VoidCallback onBookmark;
+  final VoidCallback onNotebook;
+  final VoidCallback onAi;
+  final VoidCallback onSettings;
+  final VoidCallback onQuickTheme;
+  final VoidCallback onToggleReaderMode;
+  final VoidCallback? onPageJump;
+  final VoidCallback? onZoomOut;
+  final VoidCallback? onZoomIn;
+  final VoidCallback? onFitWidth;
+  final VoidCallback? onFitPage;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isPdf = book.format == BookFormat.pdf;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.x4,
+        AppSpacing.x1,
+        AppSpacing.x4,
+        AppSpacing.x4,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '阅读操作',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.x1),
+          Text(
+            book.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (isPdf && (!textLayerAvailable || !searchAvailable)) ...[
+            const SizedBox(height: AppSpacing.x3),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.x3),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: colorScheme.statusWarning,
+                    ),
+                    const SizedBox(width: AppSpacing.x2),
+                    Expanded(
+                      child: Text(
+                        capabilityReason ??
+                            (!textLayerAvailable
+                                ? '此 PDF 没有可选择文本，划词与高亮不可用'
+                                : '此 PDF 不支持书内搜索'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.x3),
+          if (isPdf) ...[
+            Text(
+              'PDF',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.x2),
+            Wrap(
+              spacing: AppSpacing.x2,
+              runSpacing: AppSpacing.x2,
+              children: [
+                if (onPageJump != null)
+                  _MobileMoreChip(
+                    icon: Icons.pin_outlined,
+                    label: '跳转页码',
+                    onTap: onPageJump!,
+                  ),
+                if (onZoomOut != null)
+                  _MobileMoreChip(
+                    icon: Icons.zoom_out,
+                    label: '缩小',
+                    onTap: onZoomOut!,
+                  ),
+                if (onZoomIn != null)
+                  _MobileMoreChip(
+                    icon: Icons.zoom_in,
+                    label: '放大',
+                    onTap: onZoomIn!,
+                  ),
+                if (onFitWidth != null)
+                  _MobileMoreChip(
+                    icon: Icons.fit_screen_outlined,
+                    label: '适合宽度',
+                    selected: settings.pdfZoomMode == PdfZoomMode.fitWidth,
+                    onTap: onFitWidth!,
+                  ),
+                if (onFitPage != null)
+                  _MobileMoreChip(
+                    icon: Icons.fullscreen_outlined,
+                    label: '适合页面',
+                    selected: settings.pdfZoomMode == PdfZoomMode.fitPage,
+                    onTap: onFitPage!,
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.x4),
+          ],
+          Text(
+            '常用',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.x2),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.search),
+            title: const Text('书内搜索'),
+            enabled: searchAvailable,
+            onTap: searchAvailable ? onSearch : null,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              bookmarked ? Icons.bookmark : Icons.bookmark_add_outlined,
+            ),
+            title: Text(bookmarked ? '取消书签' : '添加书签'),
+            onTap: onBookmark,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.library_books_outlined),
+            title: const Text('笔记与标注'),
+            onTap: onNotebook,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.auto_awesome_outlined),
+            title: const Text('AI 助手'),
+            onTap: onAi,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.brightness_4_outlined),
+            title: const Text('快速主题'),
+            subtitle: Text(settings.themePreset.label),
+            onTap: onQuickTheme,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.view_day_outlined),
+            title: Text(
+              settings.readerMode == ReaderMode.paged ? '切换连续滚动' : '切换分页阅读',
+            ),
+            onTap: onToggleReaderMode,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.tune),
+            title: const Text('阅读设置'),
+            onTap: onSettings,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _MobileMoreChip extends StatelessWidget {
+  const _MobileMoreChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return FilterChip(
+      avatar: Icon(icon, size: 18),
+      label: Text(label),
+      selected: selected,
+      showCheckmark: false,
+      onSelected: (_) => onTap(),
+      selectedColor: colorScheme.secondaryContainer,
     );
   }
 }
@@ -3066,7 +3434,6 @@ final class _PdfQuickToolbar extends StatelessWidget {
     this.searchAvailable = true,
     this.textLayerAvailable = true,
     this.capabilityReason,
-    this.embedded = false,
   });
 
   final int? pageNumber;
@@ -3083,7 +3450,6 @@ final class _PdfQuickToolbar extends StatelessWidget {
   final bool searchAvailable;
   final bool textLayerAvailable;
   final String? capabilityReason;
-  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -3117,11 +3483,11 @@ final class _PdfQuickToolbar extends StatelessWidget {
           ),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: EdgeInsets.fromLTRB(
+          padding: const EdgeInsets.fromLTRB(
             AppSpacing.x2,
-            embedded ? AppSpacing.x1 : AppSpacing.x2,
             AppSpacing.x2,
-            embedded ? AppSpacing.x2 : AppSpacing.x2,
+            AppSpacing.x2,
+            AppSpacing.x2,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -3174,17 +3540,6 @@ final class _PdfQuickToolbar extends StatelessWidget {
       ],
     );
 
-    if (embedded) {
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: colorScheme.outlineVariant),
-            bottom: BorderSide(color: colorScheme.outlineVariant),
-          ),
-        ),
-        child: content,
-      );
-    }
     return _ReaderFloatingChrome(child: content);
   }
 }
@@ -3309,56 +3664,55 @@ final class _MobileReaderActionButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.selected = false,
+    this.enabled = true,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onPressed;
   final bool selected;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Tooltip(
-        message: label,
-        child: Semantics(
-          button: true,
-          selected: selected,
-          label: label,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            onTap: onPressed,
-            child: SizedBox(
-              width: 52,
-              height: 52,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x1),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      icon,
-                      color: selected
-                          ? colorScheme.primary
-                          : colorScheme.onSurface,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: selected
-                            ? colorScheme.primary
-                            : colorScheme.textSecondary,
-                      ),
-                    ),
-                  ],
+    final foreground = !enabled
+        ? colorScheme.onSurface.withValues(alpha: 0.38)
+        : selected
+        ? colorScheme.primary
+        : colorScheme.onSurface;
+    final secondary = !enabled
+        ? colorScheme.onSurface.withValues(alpha: 0.38)
+        : selected
+        ? colorScheme.primary
+        : colorScheme.onSurfaceVariant;
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        selected: selected,
+        label: label,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          onTap: enabled ? onPressed : null,
+          child: SizedBox(
+            height: 56,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: foreground),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         ),
@@ -3374,14 +3728,35 @@ final class _ReaderChromeRevealButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Material(
-      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
-      shape: const CircleBorder(),
-      elevation: 2,
-      child: IconButton(
-        tooltip: '显示阅读控制',
-        onPressed: onPressed,
-        icon: const Icon(Icons.keyboard_arrow_up),
+      color: colorScheme.surface.withValues(alpha: 0.96),
+      elevation: 3,
+      shadowColor: Colors.black26,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.x3,
+            vertical: AppSpacing.x2,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.menu, size: 18, color: colorScheme.onSurface),
+              const SizedBox(width: 6),
+              Text(
+                '菜单',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -3678,6 +4053,7 @@ final class _SelectionActionSurface extends StatelessWidget {
                 accent: true,
                 onTap: () => onAction(_SelectionAction.ai),
               ),
+              // Secondary actions last — keep the first row thumb-friendly.
               _SelectionChipAction(
                 icon: Icons.format_underlined,
                 label: '下划线',
