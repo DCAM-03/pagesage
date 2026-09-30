@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/files/app_paths.dart';
@@ -96,14 +98,70 @@ void main() {
     expect(sanitized, contains('[已隐藏密钥]'));
     expect(sanitized, contains('[本地路径]'));
   });
+
+  test(
+    'retry import task with existing bookId re-indexes without creating a second book',
+    () async {
+      final repository = _MemoryTaskRepository();
+      final tempDir = await Directory.systemTemp.createTemp('pagesage_retry_');
+      addTearDown(() => tempDir.delete(recursive: true));
+      final pdfPath = '${tempDir.path}/book-1.pdf';
+      // Minimal empty-text PDF (same structure as indexer tests).
+      await File(pdfPath).writeAsBytes(_minimalEmptyPdf());
+      final bookRepository = _FakeBookRepository(
+        books: {
+          'book-1': Book(
+            id: 'book-1',
+            title: 'Already Imported',
+            format: BookFormat.pdf,
+            libraryFilePath: pdfPath,
+            fileHash: 'same-hash',
+            fileSize: 10,
+            createdAt: 1,
+            updatedAt: 1,
+          ),
+        },
+      );
+      final searchRepository = _RecordingSearchRepository();
+      final controller = _controller(
+        repository,
+        bookRepository: bookRepository,
+        searchRepository: searchRepository,
+      );
+      final task = await repository.saveTask(
+        type: PageSageTaskType.importBook,
+        status: PageSageTaskStatus.failed,
+        sourcePath: r'C:\Users\Chaos\secret\scan.pdf',
+        bookId: 'book-1',
+        targetPath: pdfPath,
+        progress: 0.82,
+        message: '导入完成，索引失败，可重试索引',
+      );
+
+      await controller.retryTask(task);
+
+      final saved = (await repository.getTasks()).single;
+      expect(saved.status, PageSageTaskStatus.done);
+      expect(saved.message, '索引已重建');
+      expect(bookRepository.createCalls, 0);
+      expect(searchRepository.indexedBookIds, ['book-1']);
+    },
+  );
 }
 
 TaskCenterController _controller(
   _MemoryTaskRepository repository, {
   TaskCancellationRegistry? cancellationRegistry,
+  BookRepository? bookRepository,
+  SearchRepository? searchRepository,
 }) {
-  final bookRepository = _FakeBookRepository();
+  final books = bookRepository ?? _FakeBookRepository();
+  final search = searchRepository ?? _NoopSearchRepository();
   final registry = cancellationRegistry ?? TaskCancellationRegistry();
+  final indexer = SearchIndexer(
+    searchRepository: search,
+    bookRepository: books,
+  );
   return TaskCenterController(
     taskRepository: repository,
     importUseCase: ImportUseCase(
@@ -112,19 +170,13 @@ TaskCenterController _controller(
       hashService: HashService(),
       metadataExtractor: MetadataExtractor(appPaths: AppPaths()),
       appPaths: AppPaths(),
-      bookRepository: bookRepository,
-      searchIndexer: SearchIndexer(
-        searchRepository: _NoopSearchRepository(),
-        bookRepository: bookRepository,
-      ),
+      bookRepository: books,
+      searchIndexer: indexer,
       taskRepository: repository,
       taskCancellationRegistry: registry,
     ),
-    bookRepository: bookRepository,
-    searchIndexer: SearchIndexer(
-      searchRepository: _NoopSearchRepository(),
-      bookRepository: bookRepository,
-    ),
+    bookRepository: books,
+    searchIndexer: indexer,
     taskCancellationRegistry: registry,
   );
 }
@@ -212,21 +264,37 @@ final class _MemoryTaskRepository implements TaskRepository {
 }
 
 final class _FakeBookRepository implements BookRepository {
-  @override
-  Future<Book?> findByHash(String fileHash) async => null;
+  _FakeBookRepository({Map<String, Book>? books}) : _books = {...?books};
+
+  final Map<String, Book> _books;
+  int createCalls = 0;
 
   @override
-  Future<Book?> getBook(String id) async => null;
+  Future<Book?> findByHash(String fileHash) async {
+    for (final book in _books.values) {
+      if (book.fileHash == fileHash) {
+        return book;
+      }
+    }
+    return null;
+  }
 
   @override
-  Future<List<LibraryBook>> getLibrary() async => const [];
+  Future<Book?> getBook(String id) async => _books[id];
 
   @override
-  Stream<List<LibraryBook>> watchLibrary() => const Stream.empty();
+  Future<List<LibraryBook>> getLibrary() async =>
+      _books.values.map((book) => LibraryBook(book: book)).toList();
+
+  @override
+  Stream<List<LibraryBook>> watchLibrary() => Stream.value(
+    _books.values.map((book) => LibraryBook(book: book)).toList(),
+  );
 
   @override
   Future<Book> createImportedBook(NewBookDraft draft) async {
-    return Book(
+    createCalls += 1;
+    final book = Book(
       id: draft.id,
       title: draft.title,
       format: draft.format,
@@ -236,10 +304,14 @@ final class _FakeBookRepository implements BookRepository {
       createdAt: draft.createdAt,
       updatedAt: draft.createdAt,
     );
+    _books[book.id] = book;
+    return book;
   }
 
   @override
-  Future<void> deleteBook(String bookId) async {}
+  Future<void> deleteBook(String bookId) async {
+    _books.remove(bookId);
+  }
 
   @override
   Future<ReadingProgressSnapshot?> getProgress(String bookId) async => null;
@@ -308,5 +380,63 @@ final class _NoopSearchRepository implements SearchRepository {
   }) async {}
 
   @override
+  Future<void> indexTexts(List<SearchIndexEntry> entries) async {
+    for (final entry in entries) {
+      await indexText(
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId,
+        bookId: entry.bookId,
+        title: entry.title,
+        text: entry.text,
+        locator: entry.locator,
+        sortOrder: entry.sortOrder,
+      );
+    }
+  }
+
+  @override
   Future<List<SearchResult>> search(SearchQuery query) async => const [];
+}
+
+final class _RecordingSearchRepository extends _NoopSearchRepository {
+  final indexedBookIds = <String>[];
+
+  @override
+  Future<void> indexBookMetadata({
+    required String bookId,
+    required String title,
+    String? author,
+    String? description,
+  }) async {
+    indexedBookIds.add(bookId);
+  }
+}
+
+Uint8List _minimalEmptyPdf() {
+  const operations = 'q Q';
+  final objects = <String>[
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R '
+        '/Resources << /Font << /F1 5 0 R >> >> >>',
+    '<< /Length ${operations.length} >>\nstream\n$operations\nendstream',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i += 1) {
+    offsets.add(buffer.length);
+    buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xrefOffset = buffer.length;
+  buffer
+    ..write('xref\n0 ${objects.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return Uint8List.fromList(ascii.encode(buffer.toString()));
 }

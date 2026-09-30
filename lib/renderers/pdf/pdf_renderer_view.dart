@@ -3,17 +3,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../domain/annotations/annotation.dart';
 import '../../domain/books/book.dart';
 import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
+import '../../features/ocr/application/ocr_providers.dart';
 import '../common/renderer_command.dart';
 import '../common/renderer_event.dart';
 import '../common/web_renderer_helpers.dart';
 import 'pdf_renderer_controller.dart';
 import 'pdf_renderer_server.dart';
 
-final class PdfRendererView extends StatefulWidget {
+final class PdfRendererView extends ConsumerStatefulWidget {
   const PdfRendererView({
     required this.book,
     required this.settings,
@@ -24,6 +27,9 @@ final class PdfRendererView extends StatefulWidget {
     this.focusLocator,
     this.clearSearchHighlightsVersion = 0,
     this.jumpToken = 0,
+    this.ocrOverlayToken = 0,
+    this.ocrOverlayPage,
+    this.ocrOverlayBlocks = const [],
     super.key,
   });
 
@@ -35,14 +41,20 @@ final class PdfRendererView extends StatefulWidget {
   final String? searchQuery;
   final ReadingLocator? focusLocator;
   final int clearSearchHighlightsVersion;
+
   /// Soft jump token from the host (TOC / search) without remounting WebView.
   final int jumpToken;
 
+  /// Bumped when OCR geometry should be painted onto the page text layer.
+  final int ocrOverlayToken;
+  final int? ocrOverlayPage;
+  final List<Map<String, Object?>> ocrOverlayBlocks;
+
   @override
-  State<PdfRendererView> createState() => _PdfRendererViewState();
+  ConsumerState<PdfRendererView> createState() => _PdfRendererViewState();
 }
 
-final class _PdfRendererViewState extends State<PdfRendererView> {
+final class _PdfRendererViewState extends ConsumerState<PdfRendererView> {
   PdfRendererController? _rendererController;
   late Future<PdfRendererServer> _serverFuture;
   PdfRendererServer? _server;
@@ -59,6 +71,10 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
 
   @override
   void dispose() {
+    final active = ref.read(activePdfRendererControllerProvider);
+    if (identical(active, _rendererController)) {
+      ref.read(activePdfRendererControllerProvider.notifier).state = null;
+    }
     _server?.close();
     super.dispose();
   }
@@ -66,8 +82,18 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
   @override
   void didUpdateWidget(covariant PdfRendererView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.settings != widget.settings) {
-      _rendererController?.dispatch(RendererApplyThemeCommand(widget.settings));
+    final oldSettings = oldWidget.settings;
+    final nextSettings = widget.settings;
+    final themeOrZoomChanged =
+        oldSettings.pdfScale != nextSettings.pdfScale ||
+        oldSettings.pdfZoomMode != nextSettings.pdfZoomMode ||
+        oldSettings.readerMode != nextSettings.readerMode ||
+        oldSettings.themePreset != nextSettings.themePreset ||
+        oldSettings.pageMargin != nextSettings.pageMargin ||
+        oldSettings.reduceMotion != nextSettings.reduceMotion;
+    // ReaderSettings has no ==; only push JS when fields the bridge uses change.
+    if (themeOrZoomChanged) {
+      _rendererController?.dispatch(RendererApplyThemeCommand(nextSettings));
     }
     if (oldWidget.searchQuery != widget.searchQuery) {
       _applySearchQuery();
@@ -80,6 +106,9 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
     }
     if (oldWidget.annotations != widget.annotations) {
       _applyAnnotations();
+    }
+    if (oldWidget.ocrOverlayToken != widget.ocrOverlayToken) {
+      _applyOcrOverlay();
     }
     if (oldWidget.jumpToken != widget.jumpToken) {
       final locator = widget.initialProgress?.locator;
@@ -156,7 +185,10 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
               preferredContentMode: UserPreferredContentMode.MOBILE,
             ),
             onWebViewCreated: (controller) {
-              _rendererController = PdfRendererController(controller);
+              final pdfController = PdfRendererController(controller);
+              _rendererController = pdfController;
+              ref.read(activePdfRendererControllerProvider.notifier).state =
+                  pdfController;
               controller.addJavaScriptHandler(
                 handlerName: 'PageSageBridge',
                 callback: (arguments) {
@@ -187,16 +219,19 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
                 );
                 await _applySearchQuery();
                 await _applyAnnotations();
+                await _applyOcrOverlay();
               } on Object catch (error) {
                 widget.onEvent(RendererFailed(error.toString()));
               }
             },
             onConsoleMessage: (controller, consoleMessage) {
+              final message = consoleMessage.message;
+              final level = consoleMessage.messageLevel;
+              // Surface bridge diagnostics in `flutter run` logs.
+              debugPrint('[pdfjs] $message');
               // PDF.js frequently logs non-fatal "error" noise (fonts, optional
               // content). Never treat console text as a hard render failure —
               // bridge `failed` / onReceivedError remain the real signals.
-              final message = consoleMessage.message;
-              final level = consoleMessage.messageLevel;
               if (level == ConsoleMessageLevel.ERROR &&
                   (message.contains('PageSage') ||
                       message.contains('failed to open') ||
@@ -277,13 +312,30 @@ final class _PdfRendererViewState extends State<PdfRendererView> {
     );
   }
 
+  Future<void> _applyOcrOverlay() async {
+    if (!_loaded) {
+      return;
+    }
+    final page = widget.ocrOverlayPage;
+    if (page == null || page < 1 || widget.ocrOverlayBlocks.isEmpty) {
+      return;
+    }
+    await _rendererController?.dispatch(
+      RendererApplyOcrLayerCommand(
+        pageNumber: page,
+        blocks: widget.ocrOverlayBlocks,
+      ),
+    );
+  }
+
   Future<void> _waitForRendererBridge(InAppWebViewController controller) async {
     for (var attempt = 0; attempt < 30; attempt += 1) {
       final ready = await controller.evaluateJavascript(
         source:
             'Boolean(window.PageSageRenderer && '
             'typeof window.PageSageRenderer.open === "function" && '
-            'typeof window.PageSageRenderer.applyAnnotations === "function")',
+            'typeof window.PageSageRenderer.applyAnnotations === "function" && '
+            'typeof window.PageSageRenderer.applyOcrLayer === "function")',
       );
       if (ready == true || ready == 1 || ready == 'true') {
         return;

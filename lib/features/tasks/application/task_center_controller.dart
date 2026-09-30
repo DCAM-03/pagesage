@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -87,14 +88,26 @@ final class TaskCenterController {
   Future<void> retryTask(PageSageTask task) async {
     switch (task.type) {
       case PageSageTaskType.importBook:
+        // If the book row already exists (import finished, index failed / app
+        // killed mid-index), only re-index. Re-importing with allowDuplicate
+        // created a second shelf entry for the same file (user-reported bug).
+        final existingBookId = task.bookId?.trim();
+        if (existingBookId != null && existingBookId.isNotEmpty) {
+          final existing = await _bookRepository.getBook(existingBookId);
+          if (existing != null) {
+            await _retryIndex(task);
+            return;
+          }
+        }
         final sourcePath = task.sourcePath;
         if (sourcePath == null || sourcePath.isEmpty) {
           await _markRetryFailed(task, '缺少源文件路径，无法重试');
           return;
         }
+        // Never force-duplicate on retry; hash check still applies.
         await _importUseCase.importPath(
           sourcePath,
-          allowDuplicate: true,
+          allowDuplicate: false,
           taskId: task.id,
         );
       case PageSageTaskType.indexBook:
@@ -131,7 +144,21 @@ final class TaskCenterController {
     );
     final cancelToken = _taskCancellationRegistry.register(task.id);
     try {
-      await _searchIndexer.indexBook(book, cancelToken: cancelToken);
+      await _searchIndexer.indexBook(
+        book,
+        cancelToken: cancelToken,
+        onProgress: (progress, {message}) {
+          unawaited(
+            _taskRepository.updateStatus(
+              id: task.id,
+              status: PageSageTaskStatus.indexing,
+              progress: progress.clamp(0.05, 0.99),
+              bookId: book.id,
+              message: message ?? '正在重建索引',
+            ),
+          );
+        },
+      );
       await _taskRepository.updateStatus(
         id: task.id,
         status: PageSageTaskStatus.done,

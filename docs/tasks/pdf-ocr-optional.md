@@ -1,8 +1,8 @@
 # TASK-26：扫描版 PDF 本地 OCR（可选 / 后置）
 
-状态：规划中，**不进入当前 v1.0 实现范围**  
-日期：2026-07-16  
-优先级：v1.0 之后 / 用户反馈驱动  
+状态：Phase 0/1 已落地代码（2026-07-17）；Phase 2+ 仍后置  
+日期：2026-07-17  
+优先级：v1.0 不阻塞；当前页 OCR 已接入 Android/Windows 原生通道  
 
 ## 目标
 
@@ -208,31 +208,38 @@ ocr_status:  none | partial | complete | failed
 
 ### Phase 0
 
-- [ ] 无文本层 UI 文案与禁用原因统一。
-- [ ] 索引状态对「无可索引正文」语义清晰。
+- [x] 无文本层 UI 文案与禁用原因统一。
+- [x] 索引状态对「无可索引正文」语义清晰（`indexingStatus=no_text`）。
 
 ### Phase 1
 
-- [ ] 定义 `OcrEngine` / `OcrPageResult` domain 接口。
-- [ ] 实现 `PdfPageRasterizer`（优先 Dart 侧 PDF 渲染，后台任务友好）。
-- [ ] Android ML Kit 实现。
-- [ ] Windows WinRT 实现。
-- [ ] Reader「识别本页」入口与结果面板（复制 / 问 AI）。
-- [ ] 取消与错误提示。
-- [ ] 单元测试：use case + fake engine；双端各至少 1 份扫描样本手测。
+- [x] 定义 `OcrEngine` / `OcrPageResult` domain 接口。
+- [x] 实现 `PdfPageRasterizer`（平台 MethodChannel：Android PdfRenderer / Windows WinRT PDF）。
+- [x] Android ML Kit 实现（`pagesage/ocr` + `pagesage/pdf_raster`）。
+- [x] Windows WinRT 实现（`windows/runner/pagesage_native_channels.cpp`）。
+- [x] Reader「识别本页」入口与结果面板（复制 / 问 AI）。
+- [x] 取消与错误提示（generation + TaskCancelToken；会话缓存）。
+- [x] 单元测试：use case + fake engine；双端真实扫描样本手测仍待人工。
+- [x] 性能热路径（2026-07-17）：
+  - 原生一站式 `recognizePdfPage`（无 PNG 跨桥往返）
+  - PDF 文档句柄缓存 / OCR 引擎复用
+  - 默认 DPI 200、maxEdge 2200；会话 LRU + 并发去重
+  - `isAvailable` 结果缓存
 
 ### Phase 2
 
-- [ ] `ocr_pages` 表与 migration。
+- [x] `ocr_pages` 表与 migration（schemaVersion 3；文本 + blocks JSON 本地落库）。
+- [x] 识别结果会话缓存 + 磁盘缓存；翻回已识别页自动恢复叠加，无需再识别。
+- [x] 删书时级联清理 `ocr_pages`。
 - [ ] `PageSageTaskType.ocrPages` + 任务中心进度。
 - [ ] 选页范围 OCR。
 - [ ] `SearchIndexer` 增量索引 OCR 页。
 - [ ] 书内/全局搜索跳页。
-- [ ] 幂等覆盖、删书清理、部分完成后可继续。
+- [ ] 部分完成后可继续（任务队列语义）。
 
 ### Phase 3+
 
-- [ ] bbox 与高亮定位。
+- [x] 当前页 / 可见页 bbox 叠加（display-space export + 词级框；样式持续打磨）。
 - [ ] 可选 ONNX 引擎与按需模型下载。
 - [ ] 设置项：引擎、语言、清除 OCR 缓存。
 

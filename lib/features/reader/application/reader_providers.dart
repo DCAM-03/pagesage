@@ -64,6 +64,15 @@ final class ReaderSessionController {
       case RendererFailed():
         return;
       case RendererLocationChanged():
+        final previous = _pendingLocation;
+        // Skip no-op updates that only jitter fractional progress on the same page.
+        if (previous != null &&
+            previous.pageNumber == event.pageNumber &&
+            previous.locator.href == event.locator.href &&
+            previous.locator.chapterIndex == event.locator.chapterIndex &&
+            (previous.progress - event.progress).abs() < 0.0015) {
+          return;
+        }
         _pendingLocation = event;
         _pendingSave ??= Future<void>.delayed(
           const Duration(milliseconds: 700),

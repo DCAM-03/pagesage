@@ -187,6 +187,34 @@ void main() {
     );
     expect(weightedResults.first.type, SearchResultType.note);
   });
+
+  test('indexes texts in a single batch and remains searchable', () async {
+    await repository.indexTexts([
+      const SearchIndexEntry(
+        sourceType: 'book',
+        sourceId: 'book-epub:batch-1',
+        bookId: 'book-epub',
+        title: '批量一',
+        text: 'batchunique alpha term',
+        sortOrder: 1,
+      ),
+      const SearchIndexEntry(
+        sourceType: 'book',
+        sourceId: 'book-epub:batch-2',
+        bookId: 'book-epub',
+        title: '批量二',
+        text: 'batchunique beta term',
+        sortOrder: 2,
+      ),
+    ]);
+
+    final results = await repository.search(
+      const SearchQuery(query: 'batchunique'),
+    );
+    expect(results.length, greaterThanOrEqualTo(2));
+    expect(results.any((item) => item.sourceId == 'book-epub:batch-1'), isTrue);
+    expect(results.any((item) => item.sourceId == 'book-epub:batch-2'), isTrue);
+  });
 }
 
 Future<void> _insertBook(

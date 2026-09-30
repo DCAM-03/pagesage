@@ -120,27 +120,33 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   @override
   Widget build(BuildContext context) {
     final embedded = widget.embedded;
+    final gap = embedded ? AppSpacing.x2 : AppSpacing.x3;
     return SafeArea(
       top: !embedded,
       child: Padding(
         padding: EdgeInsets.only(
-          left: embedded ? AppSpacing.x3 : 20,
-          right: embedded ? AppSpacing.x3 : 20,
-          top: embedded ? AppSpacing.x2 : 0,
-          bottom: MediaQuery.viewInsetsOf(context).bottom + (embedded ? 8 : 16),
+          left: embedded ? AppSpacing.x2 : 20,
+          right: embedded ? AppSpacing.x2 : 20,
+          top: embedded ? AppSpacing.x1 : 0,
+          bottom: MediaQuery.viewInsetsOf(context).bottom + (embedded ? 6 : 16),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (!embedded) ...[
-              Text('AI', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: AppSpacing.x3),
+              Text(
+                'AI',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(height: gap),
             ],
             _AiPanelTabBar(
               tab: _tab,
               onChanged: (tab) => setState(() => _tab = tab),
             ),
-            const SizedBox(height: AppSpacing.x3),
+            SizedBox(height: gap),
             Expanded(
               child: switch (_tab) {
                 _AiPanelTab.compose => _buildCompose(context),
@@ -165,6 +171,9 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   }
 
   Widget _buildCompose(BuildContext context) {
+    final embedded = widget.embedded;
+    final sectionGap = embedded ? AppSpacing.x2 : AppSpacing.x3;
+    final textTheme = Theme.of(context).textTheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -179,28 +188,30 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                   widget.locator,
                 ),
                 expanded: _contextExpanded,
+                compact: embedded,
                 onToggleExpand: () =>
                     setState(() => _contextExpanded = !_contextExpanded),
                 contextController: _contextController,
                 onContextChanged: _refreshContextDescription,
                 onRangeChanged: _applyContextRange,
               ),
-              const SizedBox(height: AppSpacing.x3),
+              SizedBox(height: sectionGap),
               Text(
                 '快捷动作',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                style: textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: AppSpacing.x2),
+              const SizedBox(height: AppSpacing.x1),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 6,
+                runSpacing: 6,
                 children: [
                   for (final action in _kPromptActions)
                     _AiPromptChip(
                       label: action.label,
                       prompt: action.prompt,
+                      compact: embedded,
                       onPressed: () {
                         _promptController.text = action.prompt;
                         _promptController.selection = TextSelection.collapsed(
@@ -211,32 +222,37 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                     ),
                 ],
               ),
-              const SizedBox(height: AppSpacing.x3),
+              SizedBox(height: sectionGap),
               TextField(
                 controller: _promptController,
                 minLines: 1,
-                maxLines: 3,
+                maxLines: embedded ? 2 : 3,
+                style: textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  height: 1.4,
+                ),
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) {
                   if (!_loading) {
                     unawaited(_ask());
                   }
                 },
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: '问题',
                   hintText: '解释、翻译或自定义提问…',
-                  border: OutlineInputBorder(),
+                  isDense: embedded,
+                  border: const OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: AppSpacing.x2),
+              const SizedBox(height: AppSpacing.x1),
               Text(
-                '发送前可确认上下文范围，不会自动上传整本书。',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                '仅发送上方文本，不会上传整本书。',
+                style: textTheme.labelSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
               if (_loading) ...[
-                const SizedBox(height: AppSpacing.x3),
+                SizedBox(height: sectionGap),
                 const _AiStatusBanner(
                   icon: Icons.auto_awesome_outlined,
                   message: '正在生成回答，可随时取消。',
@@ -244,7 +260,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                 ),
               ],
               if (_error != null) ...[
-                const SizedBox(height: AppSpacing.x3),
+                SizedBox(height: sectionGap),
                 _AiStatusBanner(
                   icon: Icons.error_outline,
                   message: _error!,
@@ -270,36 +286,57 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                 ),
               ],
               if (_answer.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.x3),
+                SizedBox(height: sectionGap),
                 Text(
                   '回答',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  style: textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: AppSpacing.x2),
-                _AiAnswerBlock(answer: _answer),
+                const SizedBox(height: AppSpacing.x1),
+                _AiAnswerBlock(answer: _answer, compact: embedded),
                 const SizedBox(height: AppSpacing.x2),
                 Align(
                   alignment: Alignment.centerRight,
                   child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: 6,
+                    runSpacing: 6,
                     children: [
                       OutlinedButton.icon(
                         onPressed: _copyAnswer,
-                        icon: const Icon(Icons.copy_outlined),
+                        icon: const Icon(Icons.copy_outlined, size: 16),
                         label: const Text('复制'),
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                        ),
                       ),
                       OutlinedButton.icon(
                         onPressed: _loading ? null : _ask,
-                        icon: const Icon(Icons.refresh_outlined),
+                        icon: const Icon(Icons.refresh_outlined, size: 16),
                         label: const Text('重试'),
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                        ),
                       ),
                       OutlinedButton.icon(
                         onPressed: _saveAsNote,
-                        icon: const Icon(Icons.note_add_outlined),
-                        label: const Text('保存为笔记'),
+                        icon: const Icon(Icons.note_add_outlined, size: 16),
+                        label: const Text('笔记'),
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -308,7 +345,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
             ],
           ),
         ),
-        const SizedBox(height: AppSpacing.x3),
+        SizedBox(height: sectionGap),
         _buildActionBar(),
       ],
     );
@@ -670,19 +707,19 @@ final class _AiPanelTabChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.full),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 icon,
-                size: 16,
+                size: 15,
                 color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 5),
               Text(
                 label,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
                 ),
@@ -706,6 +743,7 @@ final class _AiContextCard extends StatelessWidget {
     required this.onContextChanged,
     required this.onRangeChanged,
     this.locationLabel,
+    this.compact = false,
   });
 
   final String description;
@@ -713,6 +751,7 @@ final class _AiContextCard extends StatelessWidget {
   final AiContextRange range;
   final String? locationLabel;
   final bool expanded;
+  final bool compact;
   final VoidCallback onToggleExpand;
   final TextEditingController contextController;
   final ValueChanged<String> onContextChanged;
@@ -721,38 +760,46 @@ final class _AiContextCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final aiAccent = colorScheme.aiAccent;
     final preview = text.trim().isEmpty ? '还没有可发送的文本' : text.trim();
+    final pad = compact ? AppSpacing.x2 : AppSpacing.x3;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: aiAccent.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: aiAccent.withValues(alpha: 0.22)),
+        color: aiAccent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: aiAccent.withValues(alpha: 0.18)),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.x3),
+        padding: EdgeInsets.all(pad),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(Icons.privacy_tip_outlined, color: aiAccent, size: 20),
-                const SizedBox(width: AppSpacing.x2),
+                Icon(
+                  Icons.privacy_tip_outlined,
+                  color: aiAccent,
+                  size: compact ? 16 : 18,
+                ),
+                SizedBox(width: compact ? 6 : AppSpacing.x2),
                 Expanded(
                   child: Text(
                     '将发送的文本',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: (compact ? textTheme.labelLarge : textTheme.titleSmall)
+                        ?.copyWith(fontWeight: FontWeight.w700),
                   ),
                 ),
                 _MetaChip(label: range.label, color: aiAccent),
               ],
             ),
-            const SizedBox(height: AppSpacing.x2),
+            SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
             DropdownButtonFormField<AiContextRange>(
               initialValue: range,
               isDense: true,
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurface,
+              ),
               decoration: const InputDecoration(
                 labelText: '上下文范围',
                 isDense: true,
@@ -772,9 +819,9 @@ final class _AiContextCard extends StatelessWidget {
                 }
               },
             ),
-            const SizedBox(height: AppSpacing.x2),
+            SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
             Wrap(
-              spacing: AppSpacing.x2,
+              spacing: AppSpacing.x1,
               runSpacing: AppSpacing.x1,
               children: [
                 _MetaChip(
@@ -784,42 +831,56 @@ final class _AiContextCard extends StatelessWidget {
                 ),
                 if (locationLabel != null && locationLabel!.trim().isNotEmpty)
                   _MetaChip(
-                    label: '位置仅用于回跳：$locationLabel',
+                    label: '回跳：$locationLabel',
                     color: colorScheme.onSurfaceVariant,
                     subtle: true,
                   ),
               ],
             ),
-            const SizedBox(height: AppSpacing.x2),
+            SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
             Text(
               preview,
-              maxLines: expanded ? null : 3,
+              maxLines: expanded ? null : (compact ? 2 : 3),
               overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                height: 1.45,
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurface,
+                height: 1.4,
+                fontSize: compact ? 13 : 14,
               ),
             ),
-            const SizedBox(height: AppSpacing.x1),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
                 onPressed: onToggleExpand,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 icon: Icon(
                   expanded ? Icons.expand_less : Icons.edit_outlined,
-                  size: 18,
+                  size: 16,
                 ),
-                label: Text(expanded ? '收起编辑' : '编辑发送文本'),
+                label: Text(
+                  expanded ? '收起' : '编辑',
+                  style: textTheme.labelMedium,
+                ),
               ),
             ),
             if (expanded) ...[
               TextField(
                 controller: contextController,
-                minLines: 3,
-                maxLines: 8,
+                minLines: compact ? 2 : 3,
+                maxLines: compact ? 6 : 8,
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurface,
+                  height: 1.4,
+                ),
                 onChanged: onContextChanged,
-                decoration: const InputDecoration(
-                  helperText: '默认只发送这里显示的文本，不会发送整本书',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  helperText: compact ? null : '默认只发送这里显示的文本，不会发送整本书',
+                  isDense: compact,
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ],
@@ -835,59 +896,128 @@ final class _AiPromptChip extends StatelessWidget {
     required this.label,
     required this.prompt,
     required this.onPressed,
+    this.compact = false,
   });
 
   final String label;
   final String prompt;
   final VoidCallback onPressed;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     // Action chips only fill the prompt — no sticky selected/check state.
     return ActionChip(
-      avatar: const Icon(Icons.auto_awesome_outlined, size: 16),
-      label: Text(label),
+      visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 4 : 6,
+        vertical: 0,
+      ),
+      labelPadding: EdgeInsets.symmetric(horizontal: compact ? 4 : 6),
+      avatar: Icon(Icons.auto_awesome_outlined, size: compact ? 14 : 16),
+      label: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium,
+      ),
       onPressed: onPressed,
     );
   }
 }
 
 final class _AiAnswerBlock extends StatelessWidget {
-  const _AiAnswerBlock({required this.answer});
+  const _AiAnswerBlock({required this.answer, this.compact = false});
 
   final String answer;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    // Side-rail answers read as dense docs, not page body text.
+    final bodySize = compact ? 13.0 : 14.0;
+    final bodyHeight = compact ? 1.45 : 1.5;
+    final bodyStyle = textTheme.bodySmall?.copyWith(
+      color: colorScheme.onSurface,
+      fontSize: bodySize,
+      height: bodyHeight,
+    );
+    final secondaryStyle = textTheme.labelSmall?.copyWith(
+      color: colorScheme.onSurfaceVariant,
+      fontSize: compact ? 12 : 13,
+      height: 1.4,
+    );
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+        color: colorScheme.surfaceContainerHighest.withValues(
+          alpha: compact ? 0.22 : 0.3,
+        ),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.8),
+          color: colorScheme.outlineVariant.withValues(alpha: 0.7),
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.x3),
+        padding: EdgeInsets.all(compact ? AppSpacing.x2 : AppSpacing.x3),
         child: MarkdownBody(
           data: answer,
           selectable: true,
           styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-            p: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5),
-            code: Theme.of(context).textTheme.bodySmall?.copyWith(
+            p: bodyStyle,
+            pPadding: EdgeInsets.only(bottom: compact ? 6 : 8),
+            h1: bodyStyle?.copyWith(
+              fontSize: compact ? 15 : 16,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+            h2: bodyStyle?.copyWith(
+              fontSize: compact ? 14 : 15,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+            h3: bodyStyle?.copyWith(
+              fontSize: compact ? 13.5 : 14.5,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+            h1Padding: EdgeInsets.only(top: compact ? 4 : 6, bottom: 4),
+            h2Padding: EdgeInsets.only(top: compact ? 4 : 6, bottom: 4),
+            h3Padding: EdgeInsets.only(top: compact ? 2 : 4, bottom: 2),
+            listBullet: bodyStyle,
+            listIndent: compact ? 16 : 20,
+            blockquote: secondaryStyle,
+            blockquotePadding: EdgeInsets.only(
+              left: compact ? 8 : 10,
+              top: 2,
+              bottom: 2,
+            ),
+            code: textTheme.labelSmall?.copyWith(
               fontFamily: 'monospace',
+              fontSize: compact ? 12 : 12.5,
+              color: colorScheme.onSurface,
               backgroundColor: colorScheme.surfaceContainerHighest.withValues(
                 alpha: 0.55,
               ),
             ),
+            codeblockPadding: EdgeInsets.all(compact ? 8 : 10),
             codeblockDecoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-              borderRadius: BorderRadius.circular(AppRadius.md),
+              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
             blockquoteDecoration: BoxDecoration(
               border: Border(
-                left: BorderSide(color: colorScheme.primary, width: 3),
+                left: BorderSide(
+                  color: colorScheme.primary.withValues(alpha: 0.55),
+                  width: 2,
+                ),
+              ),
+            ),
+            horizontalRuleDecoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+                ),
               ),
             ),
           ),

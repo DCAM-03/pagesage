@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "pagesage_native_channels.h"
 
 namespace {
 
@@ -47,6 +48,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  RegisterPagesageNativeChannels(flutter_controller_->engine()->messenger());
   drop_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(), "pagesage/window_drop",

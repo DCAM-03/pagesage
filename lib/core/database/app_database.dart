@@ -203,6 +203,28 @@ class ImportTasks extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Persisted OCR text + geometry for a single PDF page (local-only).
+@DataClassName('OcrPageRow')
+class OcrPages extends Table {
+  TextColumn get id => text()();
+  TextColumn get bookId => text()();
+  IntColumn get pageNumber => integer()();
+  TextColumn get body => text().named('text')();
+  TextColumn get language => text().nullable()();
+  TextColumn get engine => text().nullable()();
+  RealColumn get confidence => real().nullable()();
+
+  /// JSON list of {text,left,top,width,height} normalized boxes.
+  TextColumn get blocksJson => text()();
+  IntColumn get imageWidth => integer().nullable()();
+  IntColumn get imageHeight => integer().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 final class BookWithProgressRow {
   const BookWithProgressRow({required this.book, this.progress});
 
@@ -220,6 +242,24 @@ final class SearchMatchRow {
 @DriftAccessor(tables: [Books, ReadingProgress])
 class BookDao extends DatabaseAccessor<AppDatabase> with _$BookDaoMixin {
   BookDao(super.db);
+
+  /// Books only — progress is watched separately so reading saves do not
+  /// re-query/re-join the entire library on every locator tick.
+  Stream<List<BookRow>> watchBooks() {
+    return (select(books)..orderBy([
+          (book) => OrderingTerm.desc(book.lastOpenedAt),
+          (book) => OrderingTerm.desc(book.createdAt),
+        ]))
+        .watch();
+  }
+
+  Future<List<BookRow>> getBooks() {
+    return (select(books)..orderBy([
+          (book) => OrderingTerm.desc(book.lastOpenedAt),
+          (book) => OrderingTerm.desc(book.createdAt),
+        ]))
+        .get();
+  }
 
   Stream<List<BookWithProgressRow>> watchLibrary() =>
       _libraryQuery().watch().map(
@@ -351,6 +391,14 @@ class ProgressDao extends DatabaseAccessor<AppDatabase>
     )..where((row) => row.bookId.equals(bookId))).getSingleOrNull();
   }
 
+  Stream<List<ReadingProgressRow>> watchAllProgress() {
+    return select(readingProgress).watch();
+  }
+
+  Future<List<ReadingProgressRow>> getAllProgress() {
+    return select(readingProgress).get();
+  }
+
   Future<void> saveProgress(ReadingProgressCompanion progress) {
     return into(readingProgress).insertOnConflictUpdate(progress);
   }
@@ -424,9 +472,9 @@ class TagDao extends DatabaseAccessor<AppDatabase> with _$TagDaoMixin {
 
   /// All book→tags assignments for library list/filter without N+1 queries.
   Stream<Map<String, List<TagRow>>> watchTagsByBookId() {
-    final query = select(bookTags).join([
-      innerJoin(tags, tags.id.equalsExp(bookTags.tagId)),
-    ]);
+    final query = select(
+      bookTags,
+    ).join([innerJoin(tags, tags.id.equalsExp(bookTags.tagId))]);
     return query.watch().map((rows) {
       final map = <String, List<TagRow>>{};
       for (final row in rows) {
@@ -709,6 +757,17 @@ class SearchDao extends DatabaseAccessor<AppDatabase> with _$SearchDaoMixin {
 
   Future<void> upsertChunk(SearchChunksCompanion chunk) {
     return into(searchChunks).insertOnConflictUpdate(chunk);
+  }
+
+  /// Bulk upsert for book indexing. One SQLite batch keeps FTS triggers in-process
+  /// without N separate Dart↔DB round-trips.
+  Future<void> upsertChunks(List<SearchChunksCompanion> chunks) {
+    if (chunks.isEmpty) {
+      return Future<void>.value();
+    }
+    return batch((batch) {
+      batch.insertAllOnConflictUpdate(searchChunks, chunks);
+    });
   }
 
   Future<void> deleteBySource(String sourceType, String? sourceId) {
@@ -1045,6 +1104,42 @@ class SettingsDao extends DatabaseAccessor<AppDatabase>
   }
 }
 
+@DriftAccessor(tables: [OcrPages])
+class OcrPageDao extends DatabaseAccessor<AppDatabase> with _$OcrPageDaoMixin {
+  OcrPageDao(super.db);
+
+  Future<OcrPageRow?> getPage(String bookId, int pageNumber) {
+    return (select(ocrPages)..where(
+          (row) =>
+              row.bookId.equals(bookId) & row.pageNumber.equals(pageNumber),
+        ))
+        .getSingleOrNull();
+  }
+
+  Future<List<OcrPageRow>> getPagesForBook(String bookId) {
+    return (select(ocrPages)
+          ..where((row) => row.bookId.equals(bookId))
+          ..orderBy([(row) => OrderingTerm.asc(row.pageNumber)]))
+        .get();
+  }
+
+  Future<void> upsertPage(OcrPagesCompanion page) {
+    return into(ocrPages).insertOnConflictUpdate(page);
+  }
+
+  Future<void> deleteByBook(String bookId) {
+    return (delete(ocrPages)..where((row) => row.bookId.equals(bookId))).go();
+  }
+
+  Future<void> deletePage(String bookId, int pageNumber) {
+    return (delete(ocrPages)..where(
+          (row) =>
+              row.bookId.equals(bookId) & row.pageNumber.equals(pageNumber),
+        ))
+        .go();
+  }
+}
+
 @DriftAccessor(tables: [ImportTasks])
 class TaskDao extends DatabaseAccessor<AppDatabase> with _$TaskDaoMixin {
   TaskDao(super.db);
@@ -1115,6 +1210,7 @@ class TaskDao extends DatabaseAccessor<AppDatabase> with _$TaskDaoMixin {
     SearchChunks,
     AppSettings,
     ImportTasks,
+    OcrPages,
   ],
   daos: [
     BookDao,
@@ -1128,6 +1224,7 @@ class TaskDao extends DatabaseAccessor<AppDatabase> with _$TaskDaoMixin {
     SearchDao,
     SettingsDao,
     TaskDao,
+    OcrPageDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -1136,7 +1233,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1156,6 +1253,9 @@ class AppDatabase extends _$AppDatabase {
         await migrator.createTable(aiConversations);
         await migrator.createTable(searchChunks);
         await migrator.createTable(importTasks);
+      }
+      if (from < 3) {
+        await migrator.createTable(ocrPages);
       }
       await _createIndexesAndFts();
     },
@@ -1216,6 +1316,12 @@ class AppDatabase extends _$AppDatabase {
     );
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_search_chunks_source_id ON search_chunks(source_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_ocr_pages_book_id ON ocr_pages(book_id)',
+    );
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_ocr_pages_book_page ON ocr_pages(book_id, page_number)',
     );
     await customStatement('''
 CREATE VIRTUAL TABLE IF NOT EXISTS search_chunks_fts USING fts5(

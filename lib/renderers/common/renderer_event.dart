@@ -85,11 +85,20 @@ final class RendererCapabilityChanged extends RendererEvent {
     required this.textSelection,
     required this.search,
     this.reason,
+    this.nativeTextLayer,
+    this.ocrTextLayer,
   });
 
   final bool textSelection;
   final bool search;
   final String? reason;
+
+  /// True when the PDF itself has extractable text (not OCR overlay).
+  /// Null means the renderer did not report the field (legacy).
+  final bool? nativeTextLayer;
+
+  /// True when at least one OCR overlay is active in this viewer session.
+  final bool? ocrTextLayer;
 }
 
 final class RendererNotice extends RendererEvent {

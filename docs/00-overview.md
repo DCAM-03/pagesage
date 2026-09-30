@@ -77,6 +77,9 @@ PageSage 是一个可以管理、搜索、标注和询问书籍内容的本地�
 11. [assets-plan.md](assets-plan.md)  
    App 图标、空状态、默认封面、商店宣传图等图片资源规划。
 
+12. [v1-experience-freeze.md](v1-experience-freeze.md)  
+   v1.0 体验冻结清单：必须做 / 明确延后、扫描 PDF 策略、手测红线。
+
 原始总纲保留在 [product-technical-document.md](product-technical-document.md)，作为早期启动稿参考。
 
 ## 5. 首版技术决策

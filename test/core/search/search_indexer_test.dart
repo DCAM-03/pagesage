@@ -77,6 +77,37 @@ void main() {
     expect(first.text, contains('Alpha'));
   });
 
+  test('marks scan PDF without body text as no_text', () async {
+    final dir = await Directory.systemTemp.createTemp('pagesage_pdf_index_');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/image-only.pdf');
+    await file.writeAsBytes(_buildEmptyTextPdf());
+
+    final searchRepository = _FakeSearchRepository();
+    final bookRepository = _FakeBookRepository();
+    final indexer = SearchIndexer(
+      searchRepository: searchRepository,
+      bookRepository: bookRepository,
+    );
+    final book = _book(file.path, BookFormat.pdf);
+
+    await indexer.indexBook(book);
+
+    expect(bookRepository.statuses, ['running', 'no_text']);
+    expect(
+      searchRepository.entries.any(
+        (entry) => entry.sourceId == book.id && entry.title == book.title,
+      ),
+      isTrue,
+    );
+    expect(
+      searchRepository.entries.any(
+        (entry) => entry.sourceId.startsWith('${book.id}:pdf:'),
+      ),
+      isFalse,
+    );
+  });
+
   test('cancels PDF indexing and removes partial search entries', () async {
     final dir = await Directory.systemTemp.createTemp('pagesage_pdf_index_');
     addTearDown(() => dir.delete(recursive: true));
@@ -99,6 +130,36 @@ void main() {
 
     expect(bookRepository.statuses, ['running', 'pending']);
     expect(searchRepository.deletedBookIds, [book.id, book.id]);
+  });
+
+  test('reports progress while indexing PDF', () async {
+    final dir = await Directory.systemTemp.createTemp('pagesage_pdf_index_');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/sample.pdf');
+    await file.writeAsBytes(_buildTextPdf(['Hello PageSage PDF']));
+
+    final searchRepository = _FakeSearchRepository();
+    final bookRepository = _FakeBookRepository();
+    final indexer = SearchIndexer(
+      searchRepository: searchRepository,
+      bookRepository: bookRepository,
+    );
+    final book = _book(file.path, BookFormat.pdf);
+    final reports = <double>[];
+
+    await indexer.indexBook(
+      book,
+      onProgress: (progress, {message}) {
+        reports.add(progress);
+      },
+    );
+
+    expect(reports, isNotEmpty);
+    expect(reports.first, lessThanOrEqualTo(0.2));
+    expect(reports.last, greaterThanOrEqualTo(0.9));
+    for (var i = 1; i < reports.length; i += 1) {
+      expect(reports[i], greaterThanOrEqualTo(reports[i - 1] - 0.001));
+    }
   });
 }
 
@@ -158,6 +219,16 @@ Uint8List _buildTextPdf(List<String> texts) {
   final operations = texts
       .map((text) => 'BT /F1 12 Tf 72 720 Td (${_escapePdfText(text)}) Tj ET')
       .join('\n');
+  return _buildPdfWithContentStream(operations);
+}
+
+/// One blank page with no text operators — extractor reports hasText=false.
+Uint8List _buildEmptyTextPdf() {
+  const operations = 'q Q';
+  return _buildPdfWithContentStream(operations);
+}
+
+Uint8List _buildPdfWithContentStream(String operations) {
   final objects = <String>[
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -267,6 +338,21 @@ final class _FakeSearchRepository implements SearchRepository {
         sortOrder: sortOrder,
       ),
     );
+  }
+
+  @override
+  Future<void> indexTexts(List<SearchIndexEntry> entries) async {
+    for (final entry in entries) {
+      await indexText(
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId,
+        bookId: entry.bookId,
+        title: entry.title,
+        text: entry.text,
+        locator: entry.locator,
+        sortOrder: entry.sortOrder,
+      );
+    }
   }
 
   @override

@@ -137,7 +137,7 @@ void main() {
       'payload': {
         'textSelection': false,
         'search': false,
-        'reason': '此 PDF 没有可选择文本',
+        'reason': '此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别本页」提取文字。',
       },
     });
 
@@ -145,7 +145,7 @@ void main() {
     final capability = event as RendererCapabilityChanged;
     expect(capability.textSelection, isFalse);
     expect(capability.search, isFalse);
-    expect(capability.reason, '此 PDF 没有可选择文本');
+    expect(capability.reason, '此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别本页」提取文字。');
   });
 
   test('builds renderer command scripts', () {

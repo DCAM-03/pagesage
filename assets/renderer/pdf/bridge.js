@@ -5,9 +5,16 @@
   let zoomMode = "custom";
   let displayMode = "continuous";
   let settings = {};
+  /** PDF-native text layer (not OCR). */
+  let nativeTextLayerAvailable = false;
+  /** At least one OCR overlay is active in this viewer session. */
+  let ocrTextLayerAvailable = false;
+  /** Selection/search available via native text or OCR overlay. */
   let documentTextLayerAvailable = false;
   let lastSearchResults = [];
   let annotations = [];
+  /** @type {Map<number, Array<{text:string,left:number,top:number,width:number,height:number}>>} */
+  const ocrLayers = new Map();
   let renderVersion = 0;
   let scrollReportTimer = null;
   let lazyRenderTimer = null;
@@ -78,25 +85,44 @@
     root.dataset.theme = themeId || "day";
     root.dataset.reduceMotion = settings.reduceMotion ? "true" : "false";
 
-    if (!displayModeSelect.dataset.userSelected) {
+    const previousMode = displayMode;
+    // Flutter readerMode drives continuous vs paged. Prefer it unless the user
+    // explicitly picked a display mode this session (legacy HTML toolbar hook).
+    if (!displayModeSelect || !displayModeSelect.dataset.userSelected) {
       displayMode = preferredDisplayMode();
-      displayModeSelect.value = displayMode;
-      updateDisplayMode();
+      if (displayModeSelect) {
+        displayModeSelect.value = displayMode;
+      }
     }
 
     const nextZoomMode = normalizeZoomMode(settings.pdfZoomMode || zoomMode);
     const nextZoom = Number(settings.pdfScale || zoom);
     const zoomModeChanged = nextZoomMode !== zoomMode;
     const zoomChanged = Number.isFinite(nextZoom) && Math.abs(nextZoom - zoom) > 0.001;
-    if (pdfDoc && (zoomModeChanged || zoomChanged)) {
+    if (zoomModeChanged || zoomChanged) {
       zoomMode = nextZoomMode;
       if (zoomMode === "actual") {
         zoom = 1;
       } else if (Number.isFinite(nextZoom)) {
         zoom = Math.min(3, Math.max(0.5, nextZoom));
       }
-      renderDocument({ restorePage: pageNumber });
     }
+
+    if (!pdfDoc) {
+      updateDisplayMode();
+      return;
+    }
+
+    // Zoom/size geometry changed → full rebuild. Display mode alone → cheap path.
+    if (zoomModeChanged || zoomChanged) {
+      renderDocument({ restorePage: pageNumber, restoreOffset: currentScrollOffset() });
+      return;
+    }
+    if (previousMode !== displayMode) {
+      switchDisplayMode(displayMode, { restorePage: pageNumber });
+      return;
+    }
+    updateDisplayMode();
   }
 
   function normalizeZoomMode(value) {
@@ -107,10 +133,10 @@
   }
 
   function preferredDisplayMode() {
-    // Phones: continuous scroll is the least friction. Paged single without
-    // swipe feels broken; double-page never fits narrow widths.
+    // Phones: continuous for scroll reading; map Flutter "paged" to single
+    // (never double — spreads do not fit narrow widths).
     if (isNarrowViewport()) {
-      return "continuous";
+      return settings.readerMode === "paged" ? "single" : "continuous";
     }
     if (settings.readerMode === "paged") {
       return "double";
@@ -119,12 +145,29 @@
   }
 
   function reportCapability() {
+    documentTextLayerAvailable =
+      nativeTextLayerAvailable || ocrTextLayerAvailable;
     send("capabilityChanged", {
+      // Selection/search work with either native PDF text or OCR overlay.
       textSelection: documentTextLayerAvailable,
       search: documentTextLayerAvailable,
-      reason: documentTextLayerAvailable ? null : "此 PDF 没有可选择文本",
+      // Native-only flag: Flutter uses this to keep the OCR entry visible on
+      // scan PDFs even after OCR overlays make textSelection true.
+      nativeTextLayer: nativeTextLayerAvailable,
+      ocrTextLayer: ocrTextLayerAvailable,
+      // Keep reason for Flutter tooltips/disabled states only — do not surface
+      // as a floating toast. Persistent copy lives in menus/toolbars.
+      reason: nativeTextLayerAvailable
+        ? null
+        : ocrTextLayerAvailable
+          ? "已叠加 OCR 文本层，可划词。可再次「识别可见页」更新。"
+          : "此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别可见页」提取文字。",
     });
-    textLayerStatus.hidden = documentTextLayerAvailable;
+    // Hide the in-viewer banner permanently — it competes with Flutter chrome
+    // and feels like a sticky warning during reading.
+    if (textLayerStatus) {
+      textLayerStatus.hidden = true;
+    }
   }
 
   function currentProgress() {
@@ -187,16 +230,15 @@
       return;
     }
     const closestPage = pageNumberFromScroll();
-    if (closestPage !== pageNumber) {
-      pageNumber = closestPage;
-      updateVisiblePages();
-      scheduleLazyRender();
-      // Only bridge to Flutter when the page actually changes.
-      if (closestPage !== lastReportedPage) {
-        scheduleLocationReport(false);
-      }
-    } else {
-      scheduleLazyRender();
+    if (closestPage === pageNumber) {
+      // Same page: do not re-enter ensure/highlight on every scroll tick.
+      return;
+    }
+    pageNumber = closestPage;
+    updateVisiblePages();
+    scheduleLazyRender();
+    if (closestPage !== lastReportedPage) {
+      scheduleLocationReport(false);
     }
   }
 
@@ -339,8 +381,9 @@
   }
 
   function continuousRenderRadius() {
-    // Mobile: only the current page (+ optional neighbor after idle).
-    return isNarrowViewport() ? 0 : 2;
+    // Prefetch neighbors so fling/scroll does not wait for idle settle.
+    // Mobile stays tight for heat; desktop can keep a wider window.
+    return isNarrowViewport() ? 1 : 2;
   }
 
   function cancelPageRenderTask(number) {
@@ -381,6 +424,9 @@
     if (textLayer) {
       textLayer.replaceChildren();
     }
+    if (state.pageView && state.pageView.dataset.page) {
+      invalidateGlyphIndex(Number(state.pageView.dataset.page));
+    }
     const annotationLayer = state.pageView.querySelector(".annotationLayer");
     if (annotationLayer) {
       annotationLayer.replaceChildren();
@@ -406,7 +452,8 @@
       window.clearTimeout(lazyRenderTimer);
     }
     // Wait until scrolling settles before spending CPU on rasterization.
-    const delay = isNarrowViewport() ? 140 : 60;
+    // Keep mobile short so the next page is ready before the next fling.
+    const delay = isNarrowViewport() ? 90 : 48;
     lazyRenderTimer = window.setTimeout(function () {
       lazyRenderTimer = null;
       ensurePagesAround(pageNumber, renderVersion);
@@ -417,22 +464,31 @@
     const center = normalizePageNumber(centerPage);
     if (displayMode === "continuous") {
       const radius = continuousRenderRadius();
-      // After idle on mobile, still prefetch one neighbor when memory allows.
-      const prefetch = isNarrowViewport() ? 1 : radius;
       return {
-        start: Math.max(1, center - prefetch),
-        end: Math.min(pdfDoc.numPages, center + prefetch),
+        start: Math.max(1, center - radius),
+        end: Math.min(pdfDoc.numPages, center + radius),
       };
     }
     if (displayMode === "double") {
       const spreadStart = spreadStartFor(center);
+      // Prefetch next spread so double-page turns feel instant.
+      const end = Math.min(
+        pdfDoc.numPages,
+        spreadStart === 1 ? 2 : spreadStart + 3
+      );
       return {
         start: Math.max(1, spreadStart),
-        end: Math.min(pdfDoc.numPages, spreadStart === 1 ? 1 : spreadStart + 1),
+        end: end,
       };
     }
-    return { start: center, end: center };
+    // Single: current + next page prefetch.
+    return {
+      start: center,
+      end: Math.min(pdfDoc.numPages, center + 1),
+    };
   }
+
+  let lastEnsuredRangeKey = "";
 
   async function ensurePagesAround(centerPage, version) {
     if (!pdfDoc || version !== renderVersion) {
@@ -444,14 +500,20 @@
     }
 
     const range = windowRangeFor(centerPage);
+    const rangeKey = `${displayMode}:${range.start}-${range.end}:${version}`;
     const keepPad = isNarrowViewport() ? 1 : continuousRenderRadius() + 1;
     for (const [number, state] of pageRenderState.entries()) {
       if (number < range.start - keepPad || number > range.end + keepPad) {
-        releasePageRender(state, number);
+        // In paged modes we can drop far shells entirely to cut DOM cost.
+        if (displayMode === "single" || displayMode === "double") {
+          destroyPageState(number);
+        } else {
+          releasePageRender(state, number);
+        }
       }
     }
 
-    // Render current page first, then neighbors.
+    // Render current page first, then neighbors. Create light shells on demand.
     const order = [];
     const center = normalizePageNumber(centerPage);
     order.push(center);
@@ -464,10 +526,34 @@
       if (version !== renderVersion) {
         return;
       }
+      if (!pageRenderState.has(number)) {
+        const metric = pageMetrics[number - 1] || pageMetrics[0];
+        if (!metric) {
+          continue;
+        }
+        const pageView = createPageViewBox(
+          number,
+          metric.width,
+          metric.height,
+          metric.scale
+        );
+        stage.appendChild(pageView);
+        pageRenderState.set(number, {
+          pageView,
+          scale: metric.scale,
+          rendered: false,
+          rendering: false,
+          width: metric.width,
+          height: metric.height,
+          top: 0,
+        });
+      }
       await renderPageIfNeeded(number, version);
     }
 
-    if (version === renderVersion) {
+    if (version === renderVersion && rangeKey !== lastEnsuredRangeKey) {
+      lastEnsuredRangeKey = rangeKey;
+      // Only repaint overlays when the visible page set actually changed.
       highlightSearchResults();
       drawAnnotations();
     }
@@ -527,8 +613,12 @@
     }
 
     if (version === renderVersion) {
-      highlightSearchResults();
-      drawAnnotations();
+      const rangeKey = `v:${displayMode}:${range.start}-${range.end}:${version}`;
+      if (rangeKey !== lastEnsuredRangeKey) {
+        lastEnsuredRangeKey = rangeKey;
+        highlightSearchResults();
+        drawAnnotations();
+      }
     }
   }
 
@@ -595,6 +685,81 @@
     virtualTotalHeight = Math.max(top - gap, height);
   }
 
+  function shouldVirtualizeContinuous() {
+    // Virtual continuous is for long continuous scroll. Keep paged modes on
+    // simple shells. Threshold: more than a few pages.
+    return displayMode === "continuous" && !!pdfDoc && pdfDoc.numPages > 6;
+  }
+
+  function setStageLayoutMode(virtual) {
+    useVirtualContinuous = !!virtual;
+    stage.classList.toggle("virtual-continuous", useVirtualContinuous);
+    if (useVirtualContinuous) {
+      stage.style.position = "relative";
+      stage.style.display = "block";
+    } else {
+      stage.style.position = "";
+      stage.style.display = "";
+      stage.style.height = "";
+    }
+  }
+
+  /**
+   * Cheap display-mode switch: keep already-rasterized pages when possible.
+   * Only tears down shells when entering/leaving virtual continuous geometry.
+   */
+  async function switchDisplayMode(nextMode, options) {
+    if (!pdfDoc) {
+      displayMode = nextMode;
+      updateDisplayMode();
+      return;
+    }
+    const previousMode = displayMode;
+    const previousVirtual = useVirtualContinuous;
+    displayMode = nextMode;
+    const nextVirtual = shouldVirtualizeContinuous();
+    const restorePage = Math.min(
+      Math.max(Number(options && options.restorePage ? options.restorePage : pageNumber), 1),
+      pdfDoc.numPages
+    );
+
+    // Geometry model differs between virtual continuous and page shells.
+    if (previousVirtual !== nextVirtual) {
+      await renderDocument({ restorePage: restorePage });
+      return;
+    }
+
+    updateDisplayMode();
+    pageNumber = restorePage;
+    if (displayMode === "double") {
+      pageNumber = spreadStartFor(pageNumber);
+    }
+
+    // Entering single/double: prefer fit-page so a tall page doesn't force scroll.
+    if (
+      (displayMode === "single" || displayMode === "double") &&
+      (zoomMode === "custom" || zoomMode === "fit-width" || zoomMode === "actual")
+    ) {
+      // Fit-page changes viewport scale → must rebuild metrics/shells.
+      zoomMode = "fit-page";
+      await renderDocument({ restorePage: pageNumber });
+      return;
+    }
+
+    updateVisiblePages();
+    updateZoomPreset();
+    await ensurePagesAround(pageNumber, renderVersion);
+    if (displayMode === "continuous") {
+      scrollToPage(pageNumber, 0);
+    } else {
+      window.scrollTo(0, 0);
+    }
+    scheduleLocationReport(false);
+    if (previousMode !== displayMode) {
+      // no-op: kept for readability / future analytics
+    }
+  }
+
   async function renderDocument(options) {
     if (!pdfDoc) {
       return;
@@ -611,13 +776,13 @@
     const restoreOffset = Number(options && options.restoreOffset ? options.restoreOffset : 0);
     stage.replaceChildren();
     pageRenderState.clear();
+    invalidateGlyphIndex();
     pageMetrics = [];
     virtualTotalHeight = 0;
-    // Mobile continuous mode: virtualize. Never mount hundreds of page shells.
-    useVirtualContinuous = isNarrowViewport() && displayMode === "continuous";
-    stage.classList.toggle("virtual-continuous", useVirtualContinuous);
-    stage.style.position = useVirtualContinuous ? "relative" : "";
-    stage.style.height = "";
+    lastEnsuredRangeKey = "";
+    // Continuous mode: virtualize for books with more than a few pages.
+    // Never mount hundreds of page shells (major open/mode-switch heat).
+    setStageLayoutMode(shouldVirtualizeContinuous());
     updateDisplayMode();
 
     if (useVirtualContinuous) {
@@ -639,27 +804,68 @@
       return;
     }
 
-    // Desktop / paged: light shells for layout, rasterize nearby pages only.
-    for (let number = 1; number <= pdfDoc.numPages; number += 1) {
-      if (version !== renderVersion) {
-        return;
+    // Paged (single/double) or tiny continuous docs: light shells for nearby pages only.
+    // Still avoid walking every page for scale — sample page 1 then clone metrics.
+    await buildPageMetrics(version);
+    if (version !== renderVersion) {
+      return;
+    }
+    const metric = pageMetrics[0];
+    if (!metric) {
+      return;
+    }
+    // Always create the restore page shell immediately so open is never blank.
+    const initialRangeStart = Math.max(1, restorePage - (displayMode === "double" ? 1 : 0));
+    const initialRangeEnd = Math.min(
+      pdfDoc.numPages,
+      restorePage + (displayMode === "continuous" ? pdfDoc.numPages : displayMode === "double" ? 2 : 1)
+    );
+    if (displayMode === "continuous") {
+      for (let number = 1; number <= pdfDoc.numPages; number += 1) {
+        if (version !== renderVersion) {
+          return;
+        }
+        const pageView = createPageViewBox(
+          number,
+          metric.width,
+          metric.height,
+          metric.scale
+        );
+        stage.appendChild(pageView);
+        pageRenderState.set(number, {
+          pageView,
+          scale: metric.scale,
+          rendered: false,
+          rendering: false,
+          width: metric.width,
+          height: metric.height,
+          top: 0,
+        });
+        if (number % 24 === 0) {
+          await yieldToMain();
+        }
       }
-      const page = await pdfDoc.getPage(number);
-      const scale = resolveZoomForPage(page);
-      const viewport = page.getViewport({ scale });
-      const pageView = createPageView(number, viewport, scale);
-      stage.appendChild(pageView);
-      pageRenderState.set(number, {
-        pageView,
-        scale,
-        rendered: false,
-        rendering: false,
-        width: Math.floor(viewport.width),
-        height: Math.floor(viewport.height),
-        top: 0,
-      });
-      if (number % 12 === 0) {
-        await yieldToMain();
+    } else {
+      for (let number = initialRangeStart; number <= initialRangeEnd; number += 1) {
+        if (version !== renderVersion) {
+          return;
+        }
+        const pageView = createPageViewBox(
+          number,
+          metric.width,
+          metric.height,
+          metric.scale
+        );
+        stage.appendChild(pageView);
+        pageRenderState.set(number, {
+          pageView,
+          scale: metric.scale,
+          rendered: false,
+          rendering: false,
+          width: metric.width,
+          height: metric.height,
+          top: 0,
+        });
       }
     }
 
@@ -710,10 +916,15 @@
     textLayer.style.width = `${cssWidth}px`;
     textLayer.style.height = `${cssHeight}px`;
     textLayer.setAttribute("aria-label", `PDF 第 ${number} 页文本层`);
-    textLayer.addEventListener("mouseup", reportTextSelection);
-    textLayer.addEventListener("touchend", function () {
-      setTimeout(reportTextSelection, 50);
+    textLayer.addEventListener("mouseup", function () {
+      reportTextSelection({ immediate: true });
     });
+    textLayer.addEventListener("touchend", function () {
+      // Wait a beat for the browser to finalize the touch selection range.
+      reportTextSelection();
+    });
+    // Do not report on every keyup — that re-fires while the selection is
+    // still being adjusted and makes the host menu thrash.
 
     pageView.appendChild(canvas);
     pageView.appendChild(textLayer);
@@ -724,6 +935,9 @@
   function createAnnotationLayer(cssWidth, cssHeight) {
     const layer = document.createElement("div");
     layer.className = "annotationLayer";
+    layer.style.position = "absolute";
+    layer.style.left = "0";
+    layer.style.top = "0";
     layer.style.width = `${cssWidth}px`;
     layer.style.height = `${cssHeight}px`;
     layer.setAttribute("aria-hidden", "true");
@@ -776,13 +990,23 @@
     }
     // Text layer is expensive (thousands of absolute spans). On phones skip it
     // unless search/selection needs it — reading-only path stays cool.
+    // OCR overlay pages always need the text layer container for selectable spans.
+    const hasOcr = ocrLayers.has(pageNumberForTask);
     const needTextLayer =
-      documentTextLayerAvailable &&
-      (!isNarrowViewport() || lastSearchResults.length > 0);
-    if (needTextLayer) {
+      hasOcr ||
+      (documentTextLayerAvailable &&
+        (!isNarrowViewport() || lastSearchResults.length > 0));
+    if (needTextLayer && documentTextLayerAvailable && !hasOcr) {
       await renderTextLayer(page, textLayer, viewport, scale);
     } else if (textLayer) {
       textLayer.replaceChildren();
+      if (hasOcr) {
+        renderOcrLayerForPage(pageNumberForTask, textLayer, Math.floor(viewport.width), Math.floor(viewport.height));
+      }
+    }
+    // Marks are % of the page box. Redraw only this page after text/OCR is ready.
+    if (version === renderVersion) {
+      drawAnnotations({ page: pageNumberForTask });
     }
   }
 
@@ -837,12 +1061,17 @@
         const fontHeight = Math.max(Math.hypot(tx[2], tx[3]), 1);
         const angle = Math.atan2(tx[1], tx[0]);
         const left = tx[4];
+        // Baseline at tx[5]; box top = baseline - ascent (≈ fontHeight).
         const top = tx[5] - fontHeight;
         const span = document.createElement("span");
         span.textContent = item.str;
         span.style.left = `${left}px`;
         span.style.top = `${top}px`;
         span.style.fontSize = `${fontHeight}px`;
+        // Explicit height keeps getClientRects() near glyph size (anti cross-line bleed).
+        span.style.lineHeight = `${fontHeight}px`;
+        span.style.height = `${fontHeight}px`;
+        span.dataset.fontHeight = String(fontHeight);
         const transforms = [];
         if (Math.abs(angle) > 0.001) {
           transforms.push(`rotate(${angle}rad)`);
@@ -861,6 +1090,14 @@
         fragment.appendChild(span);
       }
       textLayer.appendChild(fragment);
+      // Client rects change after layout; drop stale spatial index for this page.
+      const pageNum = Number(
+        textLayer.closest(".pageContainer") &&
+          textLayer.closest(".pageContainer").dataset.page
+      );
+      if (pageNum) {
+        invalidateGlyphIndex(pageNum);
+      }
     } catch (error) {
       console.warn("PDF text layer unavailable", error);
     }
@@ -868,7 +1105,9 @@
 
   function updateDisplayMode() {
     document.documentElement.dataset.displayMode = displayMode;
-    displayModeSelect.value = displayMode;
+    if (displayModeSelect) {
+      displayModeSelect.value = displayMode;
+    }
     // Paged modes should not free-scroll the whole document.
     // Continuous keeps native scroll; single/double use page turns.
     const paged = displayMode === "single" || displayMode === "double";
@@ -904,6 +1143,25 @@
     return page % 2 === 0 ? page : page - 1;
   }
 
+  /**
+   * Pages currently on screen for OCR / selection actions.
+   * continuous/single → [current]; double → [left] or [left, right].
+   */
+  function getVisiblePages() {
+    if (!pdfDoc) {
+      return [];
+    }
+    if (displayMode === "double") {
+      const start = spreadStartFor(pageNumber);
+      if (start <= 1) {
+        return [1];
+      }
+      const right = Math.min(start + 1, pdfDoc.numPages);
+      return right > start ? [start, right] : [start];
+    }
+    return [normalizePageNumber(pageNumber)];
+  }
+
   function updateVisiblePages() {
     if (!pdfDoc) {
       return;
@@ -928,14 +1186,16 @@
       }
       pageView.hidden = !visible;
     }
-    if (displayMode === "double" && pageNumber > 1) {
-      const right = Math.min(pageNumber + 1, pdfDoc.numPages);
-      pageLabel.textContent =
-        right === pageNumber
-          ? `${pageNumber} / ${pdfDoc.numPages}`
-          : `${pageNumber}-${right} / ${pdfDoc.numPages}`;
-    } else {
-      pageLabel.textContent = `${pageNumber} / ${pdfDoc.numPages}`;
+    if (pageLabel) {
+      if (displayMode === "double" && pageNumber > 1) {
+        const right = Math.min(pageNumber + 1, pdfDoc.numPages);
+        pageLabel.textContent =
+          right === pageNumber
+            ? `${pageNumber} / ${pdfDoc.numPages}`
+            : `${pageNumber}-${right} / ${pdfDoc.numPages}`;
+      } else {
+        pageLabel.textContent = `${pageNumber} / ${pdfDoc.numPages}`;
+      }
     }
   }
 
@@ -956,6 +1216,10 @@
     if (next === pageNumber && direction !== 0) {
       return;
     }
+    // Raster the destination immediately so paged turns do not flash blank.
+    pageNumber = next;
+    updateVisiblePages();
+    ensurePagesAround(next, renderVersion);
     scrollToPage(next, 0);
     scheduleLocationReport(false);
   }
@@ -972,36 +1236,66 @@
     zoomPreset.value = fixed || "custom";
   }
 
-  function reportTextSelection() {
+  let lastReportedSelectionKey = "";
+  let selectionReportTimer = null;
+
+  function reportTextSelection(options) {
     if (!documentTextLayerAvailable) {
       return;
     }
+    const immediate = !!(options && options.immediate);
+    // Coalesce bursty mouseup/touchend/keyup so the host is not flooded and
+    // the native ::selection paint is not interrupted by Flutter rebuilds.
+    window.clearTimeout(selectionReportTimer);
+    if (!immediate) {
+      selectionReportTimer = window.setTimeout(function () {
+        reportTextSelection({ immediate: true });
+      }, 80);
+      return;
+    }
     const selection = window.getSelection();
-    const text = selection ? selection.toString().trim() : "";
+    const text = selection ? selection.toString().replace(/\s+/g, " ").trim() : "";
     if (!text) {
+      lastReportedSelectionKey = "";
       return;
     }
     const range = selection.rangeCount ? selection.getRangeAt(0) : null;
     if (!range || range.collapsed) {
+      lastReportedSelectionKey = "";
       return;
     }
     const container = range.commonAncestorContainer;
-    const element = container && container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
-    const pageView = element && element.closest ? element.closest(".pageContainer") : pageViewFor(pageNumber);
-    const selectedPage = Number(pageView && pageView.dataset.page ? pageView.dataset.page : pageNumber);
+    const element =
+      container && container.nodeType === Node.TEXT_NODE
+        ? container.parentElement
+        : container;
+    const pageView =
+      element && element.closest
+        ? element.closest(".pageContainer")
+        : pageViewFor(pageNumber);
+    const selectedPage = Number(
+      pageView && pageView.dataset.page ? pageView.dataset.page : pageNumber
+    );
+    // Selection geometry must match temporary ::selection (selected chars only).
     const selectionRects = normalizedSelectionRects(range, selectedPage);
-    // Prefer the first real client rect over getBoundingClientRect so multi-line
-    // selections anchor the action menu to the first line, not a tall union box.
     const firstClientRect = firstPositiveClientRect(range);
-    const boundingRect = firstClientRect || (range ? range.getBoundingClientRect() : null);
-    const sourceRect = boundingRect && boundingRect.width && boundingRect.height
-      ? {
-          x: boundingRect.left,
-          y: boundingRect.top,
-          width: boundingRect.width,
-          height: boundingRect.height,
-        }
-      : null;
+    const boundingRect =
+      firstClientRect || (range ? range.getBoundingClientRect() : null);
+    const sourceRect =
+      boundingRect && boundingRect.width && boundingRect.height
+        ? {
+            x: boundingRect.left,
+            y: boundingRect.top,
+            width: boundingRect.width,
+            height: boundingRect.height,
+          }
+        : null;
+    // Deduplicate identical logical selections (same page + text).
+    const selectionKey = `${selectedPage}\n${text}`;
+    if (selectionKey === lastReportedSelectionKey) {
+      return;
+    }
+    lastReportedSelectionKey = selectionKey;
     pageNumber = selectedPage;
     send("textSelected", {
       text,
@@ -1009,7 +1303,9 @@
         type: "pdf",
         page: selectedPage,
         scrollOffset: currentScrollOffset(),
-        zoom: Number(pageView && pageView.dataset.scale ? pageView.dataset.scale : zoom),
+        zoom: Number(
+          pageView && pageView.dataset.scale ? pageView.dataset.scale : zoom
+        ),
         progress: currentProgress(),
         excerpt: text,
         selectionRects,
@@ -1019,6 +1315,7 @@
     });
   }
 
+  
   function firstPositiveClientRect(range) {
     if (!range) {
       return null;
@@ -1031,31 +1328,55 @@
     return null;
   }
 
-  function normalizedSelectionRects(range, fallbackPage) {
-    if (!range) {
-      return [];
-    }
-    const rects = [];
-    for (const rect of Array.from(range.getClientRects())) {
-      if (rect.width <= 0 || rect.height <= 0) {
-        continue;
+  /**
+   * Mature PDF overlay approach (Hypothesis / PDF.js-style):
+   * 1) Capture browser selection client rects (one strip per visual line).
+   * 2) Store as page-normalized 0..1 boxes (scales with zoom automatically).
+   * 3) Highlight paints the line box (slight inset).
+   * 4) Underline paints a thin bar on the BOTTOM of that same box
+   *    (y + height - thickness) — never invent a mid-line baseline.
+   *
+   * Avoid complex "glyph snap" rewrites of y/height: they drift across fonts.
+   */
+
+  /**
+   * Permanent annotation geometry (Hypothesis / PDF.js overlay style):
+   * 1) Capture selection via Range.getClientRects() (one strip per visual line).
+   * 2) Clamp each strip against overlapping text-layer glyph boxes (anti-bleed).
+   * 3) Store page-normalized 0..1 rects so marks scale with zoom/window.
+   * 4) Highlight fills the line strip; underline is a thin bar on its BOTTOM edge.
+   * Never invent mid-line baselines from font metrics alone.
+   */
+
+  function sortRectsTopLeft(items) {
+    items.sort(function (a, b) {
+      if (a.page !== b.page) {
+        return a.page - b.page;
       }
-      const pageView = pageViewForRect(rect) || pageViewFor(fallbackPage);
-      if (!pageView) {
-        continue;
+      if (Math.abs(a.y - b.y) > 0.0005) {
+        return a.y - b.y;
       }
-      const pageRect = pageView.getBoundingClientRect();
-      if (pageRect.width <= 0 || pageRect.height <= 0) {
-        continue;
+      if (Math.abs((a.cy || a.y) - (b.cy || b.y)) > 0.0005) {
+        return (a.cy || a.y) - (b.cy || b.y);
       }
-      const x = clamp((rect.left - pageRect.left) / pageRect.width, 0, 1);
-      const y = clamp((rect.top - pageRect.top) / pageRect.height, 0, 1);
-      const width = clamp(rect.width / pageRect.width, 0, 1 - x);
-      const height = clamp(rect.height / pageRect.height, 0, 1 - y);
-      const page = Number(pageView.dataset.page || fallbackPage);
-      rects.push({ page, x, y, width, height });
-    }
-    return rects;
+      return a.x - b.x;
+    });
+    return items;
+  }
+
+  function pageBoxSize(pageView) {
+    return {
+      width: Math.max(
+        pageView.clientWidth || 0,
+        Number(String(pageView.style.width || "").replace("px", "")) || 0,
+        1
+      ),
+      height: Math.max(
+        pageView.clientHeight || 0,
+        Number(String(pageView.style.height || "").replace("px", "")) || 0,
+        1
+      ),
+    };
   }
 
   function pageViewForRect(rect) {
@@ -1073,6 +1394,646 @@
       }
     }
     return null;
+  }
+
+  /**
+   * Spatial index of text-layer spans for a page.
+   * Buckets by Y so selection clamping is O(nearby lines), not O(all spans).
+   */
+  const glyphIndexByPage = new Map(); // page -> { pageTop, bucketH, buckets: Map }
+
+  function invalidateGlyphIndex(pageNumber) {
+    if (pageNumber) {
+      glyphIndexByPage.delete(Number(pageNumber));
+      return;
+    }
+    glyphIndexByPage.clear();
+  }
+
+  function buildGlyphIndex(pageView) {
+    const page = Number(pageView.dataset.page || 0);
+    if (!page) {
+      return null;
+    }
+    const textLayer = pageView.querySelector(".textLayer");
+    if (!textLayer) {
+      return null;
+    }
+    const pageRect = pageView.getBoundingClientRect();
+    if (!(pageRect.height > 0)) {
+      return null;
+    }
+    // ~3% of page height per bucket (≈ one line band on typical text pages).
+    const bucketH = Math.max(pageRect.height * 0.03, 8);
+    const buckets = new Map();
+    const spans = textLayer.querySelectorAll("span");
+    for (let i = 0; i < spans.length; i += 1) {
+      const span = spans[i];
+      const sr = span.getBoundingClientRect();
+      if (!(sr.width > 0.5) || !(sr.height > 0.5)) {
+        continue;
+      }
+      const fh = Number(span.dataset.fontHeight) || sr.height;
+      const top = sr.top;
+      const bottom = sr.top + fh;
+      const entry = {
+        left: sr.left,
+        right: sr.right,
+        top: top,
+        bottom: bottom,
+        width: sr.width,
+        height: fh,
+      };
+      const startBucket = Math.floor((top - pageRect.top) / bucketH);
+      const endBucket = Math.floor((bottom - pageRect.top) / bucketH);
+      for (let b = startBucket; b <= endBucket; b += 1) {
+        let list = buckets.get(b);
+        if (!list) {
+          list = [];
+          buckets.set(b, list);
+        }
+        list.push(entry);
+      }
+    }
+    const index = {
+      pageTop: pageRect.top,
+      pageBottom: pageRect.bottom,
+      bucketH: bucketH,
+      buckets: buckets,
+      builtAt: Date.now(),
+    };
+    glyphIndexByPage.set(page, index);
+    return index;
+  }
+
+  function glyphIndexForPageView(pageView) {
+    const page = Number(pageView.dataset.page || 0);
+    if (!page) {
+      return null;
+    }
+    let index = glyphIndexByPage.get(page);
+    // Rebuild when page moves (scroll) enough that client Y coordinates drift.
+    if (index) {
+      const pageRect = pageView.getBoundingClientRect();
+      if (Math.abs(pageRect.top - index.pageTop) > 0.5) {
+        index = null;
+      }
+    }
+    if (!index) {
+      index = buildGlyphIndex(pageView);
+    }
+    return index;
+  }
+
+  function forEachNearbyGlyphs(index, rect, visit) {
+    if (!index || !index.buckets.size) {
+      return;
+    }
+    const startBucket = Math.floor((rect.top - 2 - index.pageTop) / index.bucketH) - 1;
+    const endBucket = Math.floor((rect.bottom + 2 - index.pageTop) / index.bucketH) + 1;
+    const seen = new Set();
+    for (let b = startBucket; b <= endBucket; b += 1) {
+      const list = index.buckets.get(b);
+      if (!list) {
+        continue;
+      }
+      for (let i = 0; i < list.length; i += 1) {
+        const entry = list[i];
+        if (seen.has(entry)) {
+          continue;
+        }
+        seen.add(entry);
+        visit(entry);
+      }
+    }
+  }
+
+  /**
+   * Intersect a browser selection client rect with live text-layer glyph boxes.
+   * PDF text layers often return inflated selection heights that bleed into the
+   * next line; clamping to overlapping spans matches Hypothesis-style overlays.
+   */
+  function clampClientRectToGlyphs(rect, pageView) {
+    if (!rect || !pageView || !(rect.width > 0) || !(rect.height > 0)) {
+      return rect;
+    }
+    const index = glyphIndexForPageView(pageView);
+    if (!index) {
+      return rect;
+    }
+    let glyphTop = null;
+    let glyphBottom = null;
+    forEachNearbyGlyphs(index, rect, function (sr) {
+      // Require meaningful horizontal overlap with the selection strip.
+      const overlapW =
+        Math.min(rect.right, sr.right) - Math.max(rect.left, sr.left);
+      if (overlapW < Math.min(rect.width, sr.width) * 0.12) {
+        return;
+      }
+      // Vertical proximity: span intersects selection or sits inside inflated box.
+      if (sr.bottom < rect.top - 1 || sr.top > rect.bottom + 1) {
+        return;
+      }
+      if (glyphTop === null || sr.top < glyphTop) {
+        glyphTop = sr.top;
+      }
+      if (glyphBottom === null || sr.bottom > glyphBottom) {
+        glyphBottom = sr.bottom;
+      }
+    });
+    if (glyphTop === null || glyphBottom === null || glyphBottom <= glyphTop) {
+      return rect;
+    }
+    const glyphH = glyphBottom - glyphTop;
+    // If selection is clearly taller than glyphs, snap to the glyph band.
+    if (rect.height > glyphH * 1.12) {
+      return {
+        left: rect.left,
+        top: glyphTop,
+        width: rect.width,
+        height: glyphH,
+        right: rect.left + rect.width,
+        bottom: glyphTop + glyphH,
+      };
+    }
+    // Otherwise keep selection, but never extend past glyph band.
+    const top = Math.max(rect.top, glyphTop);
+    const bottom = Math.min(rect.bottom, glyphBottom);
+    if (bottom - top < glyphH * 0.35) {
+      return {
+        left: rect.left,
+        top: glyphTop,
+        width: rect.width,
+        height: glyphH,
+        right: rect.left + rect.width,
+        bottom: glyphTop + glyphH,
+      };
+    }
+    return {
+      left: rect.left,
+      top: top,
+      width: rect.width,
+      height: bottom - top,
+      right: rect.left + rect.width,
+      bottom: bottom,
+    };
+  }
+
+  function pageNormFromClientRect(rect, fallbackPage) {
+    if (!rect || !(rect.width > 0) || !(rect.height > 0)) {
+      return null;
+    }
+    const pageView = pageViewForRect(rect) || pageViewFor(fallbackPage);
+    if (!pageView) {
+      return null;
+    }
+    const clamped = clampClientRectToGlyphs(rect, pageView);
+    const pageRect = pageView.getBoundingClientRect();
+    if (!(pageRect.width > 0) || !(pageRect.height > 0)) {
+      return null;
+    }
+    const x = clamp((clamped.left - pageRect.left) / pageRect.width, 0, 1);
+    const y = clamp((clamped.top - pageRect.top) / pageRect.height, 0, 1);
+    const width = clamp(clamped.width / pageRect.width, 0, 1 - x);
+    const height = clamp(clamped.height / pageRect.height, 0, 1 - y);
+    // Drop full-page / multi-line artifacts.
+    if (height > 0.065 || width > 0.98 || width < 0.001 || height < 0.001) {
+      return null;
+    }
+    return {
+      page: Number(pageView.dataset.page || fallbackPage),
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      cy: y + height * 0.5,
+    };
+  }
+
+  /**
+   * Merge horizontal fragments on the same baseline.
+   * Keep a representative height (median-ish), never union bottoms that inflate bleed.
+   */
+  function mergeSameLineRects(items) {
+    if (!items.length) {
+      return [];
+    }
+    // Cluster ALL rects of this annotation by visual line (cy proximity),
+    // regardless of x order. Sequential x-merge left same-line clusters
+    // unmerged (legacy word boxes interleave), which double-painted lines.
+    const byPage = new Map();
+    for (const item of items) {
+      if (!byPage.has(item.page)) {
+        byPage.set(item.page, []);
+      }
+      byPage.get(item.page).push(item);
+    }
+    const merged = [];
+    for (const [page, list] of byPage.entries()) {
+      list.sort(function (a, b) {
+        return a.cy - b.cy;
+      });
+      const clusters = [];
+      for (const item of list) {
+        const last = clusters.length ? clusters[clusters.length - 1] : null;
+        const refH = Math.max(item.height, 0.004);
+        if (last && Math.abs(item.cy - last.cyRef) <= refH * 0.5) {
+          last.members.push(item);
+          continue;
+        }
+        clusters.push({ cyRef: item.cy, members: [item] });
+      }
+      for (const cluster of clusters) {
+        const ms = cluster.members;
+        const xs = ms.map(function (m) {
+          return m.x;
+        });
+        const rights = ms.map(function (m) {
+          return m.x + m.width;
+        });
+        const tops = ms
+          .map(function (m) {
+            return m.y;
+          })
+          .sort(function (a, b) {
+            return a - b;
+          });
+        const heights = ms
+          .map(function (m) {
+            return m.height;
+          })
+          .sort(function (a, b) {
+            return a - b;
+          });
+        // Median top/height is robust against legacy outlier boxes.
+        const y = tops[Math.floor(tops.length / 2)];
+        const h = heights[Math.floor(heights.length / 2)];
+        const x = Math.min.apply(null, xs);
+        const right = Math.max.apply(null, rights);
+        merged.push({
+          page: page,
+          x: x,
+          y: y,
+          width: Math.max(right - x, 0.001),
+          height: Math.max(h, 0.002),
+          cy: y + h * 0.5,
+        });
+      }
+    }
+    return sortRectsTopLeft(merged);
+  }
+
+  /** OCR line bands (normalized y ranges) for a page, sorted top→bottom. */
+  /**
+   * Distinct text LINE bands for a page, clustered top→bottom.
+   * Sources: OCR span dataset geometry, or native text-layer span client rects.
+   * Clustering matters: several spans share one visual line; treating each span
+   * as its own band made "next band" a same-line sibling and crushed heights.
+   */
+  function lineBandsForPage(page) {
+    const pageView = pageViewFor(page);
+    if (!pageView) {
+      return null;
+    }
+    const raw = [];
+    const ocrLayer = pageView.querySelector(".textLayer.ocrLayer");
+    if (ocrLayer) {
+      for (const span of ocrLayer.querySelectorAll(".ocrSpan")) {
+        const top = Number(span.dataset.top);
+        const height = Number(span.dataset.height);
+        if (Number.isFinite(top) && Number.isFinite(height) && height > 0) {
+          raw.push({ top: top, bottom: top + height });
+        }
+      }
+    } else {
+      const textLayer = pageView.querySelector(".textLayer");
+      if (!textLayer) {
+        return null;
+      }
+      const pageRect = pageView.getBoundingClientRect();
+      if (!(pageRect.height > 0)) {
+        return null;
+      }
+      for (const span of textLayer.querySelectorAll("span")) {
+        const r = span.getBoundingClientRect();
+        if (!(r.height > 0) || !(r.width > 0)) {
+          continue;
+        }
+        const top = (r.top - pageRect.top) / pageRect.height;
+        const height = r.height / pageRect.height;
+        if (height > 0 && height < 0.06) {
+          raw.push({ top: top, bottom: top + height });
+        }
+      }
+    }
+    if (!raw.length) {
+      return null;
+    }
+    raw.sort(function (a, b) {
+      return a.top - b.top;
+    });
+    // Cluster boxes whose tops fall within half a line height of the cluster.
+    const bands = [];
+    for (const box of raw) {
+      const last = bands.length ? bands[bands.length - 1] : null;
+      if (last && box.top - last.top < (last.bottom - last.top) * 0.55) {
+        last.top = Math.min(last.top, box.top);
+        last.bottom = Math.max(last.bottom, box.bottom);
+        continue;
+      }
+      bands.push({ top: box.top, bottom: box.bottom });
+    }
+    for (const band of bands) {
+      band.cy = (band.top + band.bottom) * 0.5;
+    }
+    return bands;
+  }
+
+  /**
+   * Paint-time safety net: snap each stored rect onto the nearest text line
+   * band, and cap height by the local line PITCH so a dense page (line box ≈
+   * pitch) never paints into the next line. Works for legacy tall rects too.
+   */
+  function snapRectsToLineBands(items) {
+    const bandsByPage = new Map();
+    const out = [];
+    for (const item of items) {
+      let bands = bandsByPage.get(item.page);
+      if (bands === undefined) {
+        bands = lineBandsForPage(item.page);
+        bandsByPage.set(item.page, bands);
+      }
+      if (!bands || !bands.length) {
+        // No line reference at all: cap so a legacy union box can never paint
+        // as a multi-line slab (single line is ≤ ~16‰ everywhere we've seen).
+        if (item.height > 0.016) {
+          item.height = 0.016;
+          item.cy = item.y + item.height * 0.5;
+        }
+        out.push(item);
+        continue;
+      }
+      // Legacy multi-line union rect: SPLIT into one strip per covered band.
+      const covered = bands.filter(function (band) {
+        const overlap =
+          Math.min(item.y + item.height, band.bottom) -
+          Math.max(item.y, band.top);
+        return overlap > (band.bottom - band.top) * 0.35;
+      });
+      if (covered.length >= 2) {
+        for (const band of covered) {
+          out.push(
+            clampStripToBand(
+              {
+                page: item.page,
+                x: item.x,
+                y: band.top,
+                width: item.width,
+                height: band.bottom - band.top,
+                cy: (band.top + band.bottom) * 0.5,
+              },
+              bands,
+              band
+            )
+          );
+        }
+        continue;
+      }
+      // Single line: snap tall/drifted rects onto the nearest band.
+      let best = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < bands.length; i += 1) {
+        const dist = Math.abs(bands[i].cy - item.cy);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = bands[i];
+        }
+      }
+      if (!best) {
+        out.push(item);
+        continue;
+      }
+      const bandH = best.bottom - best.top;
+      if (item.height > bandH * 1.15 || item.y < best.top - bandH * 0.5) {
+        item.y = best.top;
+        item.height = bandH;
+      } else {
+        item.y = Math.max(item.y, best.top);
+        item.height = Math.min(item.height, best.bottom - item.y);
+      }
+      out.push(clampStripToBand(item, bands, best));
+    }
+    return out;
+  }
+
+  /** Pitch cap within a band: never paint past ~78% of the local line pitch. */
+  function clampStripToBand(item, bands, band) {
+    const bandH = band.bottom - band.top;
+    const idx = bands.indexOf(band);
+    const nextBand = idx >= 0 ? bands[idx + 1] : null;
+    if (nextBand) {
+      const pitch = nextBand.top - band.top;
+      if (pitch > 0.002) {
+        const maxH = Math.max(pitch * 0.78, bandH * 0.5);
+        if (item.height > maxH) {
+          item.height = maxH;
+        }
+        const maxBottom = nextBand.top - 0.0012;
+        if (item.y + item.height > maxBottom) {
+          item.height = Math.max(maxBottom - item.y, bandH * 0.5);
+        }
+      }
+    }
+    item.cy = item.y + item.height * 0.5;
+    return item;
+  }
+
+  /** If two selected lines touch, shorten the upper strip from the bottom only. */
+  function preventAdjacentBleed(items) {
+    sortRectsTopLeft(items);
+    for (let i = 0; i < items.length - 1; i += 1) {
+      const cur = items[i];
+      const next = items[i + 1];
+      if (cur.page !== next.page) {
+        continue;
+      }
+      // Only trim against a TRUE next line — sub-line jitter used to be treated
+      // as "next line" and crushed marks into 2‰ slivers.
+      const pitch = next.y - cur.y;
+      if (pitch < Math.max(cur.height, next.height) * 0.7) {
+        continue;
+      }
+      const seam = 0.0012;
+      if (cur.y + cur.height > next.y - seam) {
+        cur.height = Math.max(next.y - seam - cur.y, cur.height * 0.5);
+        cur.cy = cur.y + cur.height * 0.5;
+      }
+    }
+    return items;
+  }
+
+  /**
+   * Geometry for permanent annotations = browser selection client rects,
+   * glyph-clamped so temporary ::selection and permanent marks stay aligned.
+   */
+  function normalizedSelectionRects(range, fallbackPage) {
+    if (!range) {
+      return [];
+    }
+    const items = [];
+    const rawDump = [];
+    for (const rect of Array.from(range.getClientRects())) {
+      rawDump.push(`${Math.round(rect.width)}x${Math.round(rect.height)}`);
+      const norm = pageNormFromClientRect(rect, fallbackPage);
+      if (norm) {
+        items.push(norm);
+      }
+    }
+    if (!items.length) {
+      return [];
+    }
+    const out = preventAdjacentBleed(mergeSameLineRects(items)).map(function (
+      item
+    ) {
+      return {
+        page: item.page,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+      };
+    });
+    console.log(
+      `[sel] raw=[${rawDump.join(",")}] final=` +
+        out
+          .map(function (r) {
+            return `p${r.page} y=${(r.y * 1000).toFixed(1)} h=${(r.height * 1000).toFixed(1)}`;
+          })
+          .join(" | ")
+    );
+    return out;
+  }
+
+  /**
+   * Drawable marks from stored line boxes.
+   * - Underline: thin bar on the bottom edge of each line box.
+   * - Highlight: fills the line box, ending just above the underline.
+   * - Coordinates stay page-relative % so they adapt to zoom/window size.
+   */
+  function prepareHighlightRects(rawRects, locatorPage, isUnderline) {
+    const items = [];
+    for (const rect of rawRects || []) {
+      if (!rect) {
+        continue;
+      }
+      const page = Number(rect.page || locatorPage || 0);
+      if (!page) {
+        continue;
+      }
+      let x = clamp(Number(rect.x || 0), 0, 1);
+      let y = clamp(Number(rect.y || 0), 0, 1);
+      let w = Number(rect.width || 0);
+      let h = Number(rect.height || 0);
+      if (!(w > 0) || !(h > 0) || w > 0.98) {
+        continue;
+      }
+      w = clamp(w, 0, 1 - x);
+      h = clamp(h, 0, 1 - y);
+      // Legacy multi-line mega-box: collapse to a readable single-line band.
+      if (h > 0.055) {
+        h = Math.min(h, 0.022);
+      }
+      items.push({
+        page: page,
+        x: x,
+        y: y,
+        width: w,
+        height: h,
+        cy: y + h * 0.5,
+      });
+    }
+    if (!items.length) {
+      return [];
+    }
+
+    const lines = preventAdjacentBleed(
+      snapRectsToLineBands(mergeSameLineRects(items))
+    );
+    console.log(
+      `[annot] stored=` +
+        items
+          .map(function (r) {
+            return `h=${(r.height * 1000).toFixed(1)}`;
+          })
+          .join(",") +
+        ` -> lines=` +
+        lines
+          .map(function (r) {
+            return `p${r.page} y=${(r.y * 1000).toFixed(1)} h=${(r.height * 1000).toFixed(1)}`;
+          })
+          .join(" | ") +
+        ` bands=${lineBandsForPage(lines.length ? lines[0].page : 0) ? "yes" : "NO"}`
+    );
+    const prepared = [];
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const item = lines[i];
+      const lineTop = item.y;
+      let lineBottom = item.y + item.height;
+
+      // Never invade the next selected line.
+      for (let j = i + 1; j < lines.length; j += 1) {
+        if (lines[j].page !== item.page) {
+          break;
+        }
+        if (lines[j].y > item.y + 0.0004) {
+          lineBottom = Math.min(lineBottom, lines[j].y - 0.0009);
+          break;
+        }
+      }
+      lineBottom = Math.max(lineBottom, lineTop + 0.0025);
+      const lineH = lineBottom - lineTop;
+
+      // Underline thickness: ~8% of line box, ~1.5–2.6 CSS px.
+      let uh = lineH * 0.08;
+      const pageView = pageViewFor(item.page);
+      if (pageView) {
+        const box = pageBoxSize(pageView);
+        const minH = 1.5 / Math.max(box.height, 1);
+        const maxH = 2.6 / Math.max(box.height, 1);
+        uh = clamp(uh, minH, maxH);
+      } else {
+        uh = clamp(uh, 0.0014, 0.0032);
+      }
+
+      if (isUnderline) {
+        // Classic overlay underline: stroke on the selection bottom edge.
+        prepared.push({
+          page: item.page,
+          x: item.x,
+          y: clamp(lineBottom - uh, 0, 1 - uh),
+          width: item.width,
+          height: uh,
+          kind: "underline",
+        });
+      } else {
+        // Highlight covers most of the selection box; stop just above underline.
+        // User preference: highlight bottom meets underline top.
+        const topInset = Math.min(lineH * 0.08, 0.0015);
+        const markY = lineTop + topInset;
+        const markBottom = lineBottom - uh;
+        const markH = Math.max(markBottom - markY, lineH * 0.45);
+        prepared.push({
+          page: item.page,
+          x: item.x,
+          y: clamp(markY, 0, 1),
+          width: item.width,
+          height: clamp(markH, 0.002, 1 - markY),
+          kind: "highlight",
+        });
+      }
+    }
+    return prepared;
   }
 
   function clamp(value, min, max) {
@@ -1171,7 +2132,9 @@
         return;
       }
       if (!pdfDoc || !documentTextLayerAvailable) {
-        send("renderNotice", { message: "此 PDF 没有可搜索文本" });
+        send("renderNotice", {
+          message: "此 PDF 没有可搜索文本",
+        });
         send("searchResults", { query: trimmed, total: 0, results: [] });
         return;
       }
@@ -1273,19 +2236,518 @@
     drawAnnotations();
   }
 
-  function drawAnnotations() {
-    for (const layer of stage.querySelectorAll(".annotationLayer")) {
-      layer.replaceChildren();
+  /**
+   * Overlay OCR text with normalized geometry onto a page text layer.
+   * payload: { page, replace?, blocks: [{text,left,top,width,height}] }
+   * Geometry is normalized 0..1 relative to the OCR bitmap / page box.
+   */
+  function applyOcrLayer(payload) {
+    if (!payload || !pdfDoc) {
+      return;
     }
-    for (const annotation of annotations) {
-      const rects = Array.isArray(annotation.rects) && annotation.rects.length
+    const page = Math.min(
+      Math.max(Number(payload.page || 0), 1),
+      pdfDoc.numPages
+    );
+    const replace = payload.replace !== false;
+    const incoming = Array.isArray(payload.blocks) ? payload.blocks : [];
+    const normalized = [];
+    for (const item of incoming) {
+      if (!item || !item.text) {
+        continue;
+      }
+      const text = String(item.text);
+      const left = Number(item.left);
+      const top = Number(item.top);
+      const width = Number(item.width);
+      const height = Number(item.height);
+      if (
+        !Number.isFinite(left) ||
+        !Number.isFinite(top) ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        // Keep plain text blocks without geometry as a fallback line later.
+        continue;
+      }
+      normalized.push({
+        text: text,
+        left: Math.min(Math.max(left, 0), 1),
+        top: Math.min(Math.max(top, 0), 1),
+        width: Math.min(Math.max(width, 0), 1),
+        height: Math.min(Math.max(height, 0), 1),
+      });
+    }
+    if (replace || !ocrLayers.has(page)) {
+      ocrLayers.set(page, normalized);
+    } else {
+      ocrLayers.set(page, (ocrLayers.get(page) || []).concat(normalized));
+    }
+
+    // Ensure the page shell exists and paint the layer immediately.
+    // Prefer canvas CSS size (matches OCR export space) over clientWidth.
+    function pageCssSize(view) {
+      if (!view) {
+        return { width: 1, height: 1 };
+      }
+      const canvas = view.querySelector(".pageCanvas");
+      const width = Math.max(
+        Number(String(view.style.width || "").replace("px", "")) || 0,
+        canvas && canvas.clientWidth ? canvas.clientWidth : 0,
+        view.clientWidth || 0,
+        1
+      );
+      const height = Math.max(
+        Number(String(view.style.height || "").replace("px", "")) || 0,
+        canvas && canvas.clientHeight ? canvas.clientHeight : 0,
+        view.clientHeight || 0,
+        1
+      );
+      return { width: width, height: height };
+    }
+
+    const pageView = pageViewFor(page);
+    if (pageView) {
+      const textLayer = pageView.querySelector(".textLayer");
+      if (textLayer) {
+        const size = pageCssSize(pageView);
+        renderOcrLayerForPage(page, textLayer, size.width, size.height);
+        // Marks may have painted before OCR bands existed — repaint clamped.
+        drawAnnotations({ page: page });
+      }
+    } else {
+      // Virtual continuous: force the page into the window so overlay can attach.
+      ensurePagesAround(page, renderVersion).then(function () {
+        const ready = pageViewFor(page);
+        const layer = ready && ready.querySelector(".textLayer");
+        if (layer) {
+          const size = pageCssSize(ready);
+          renderOcrLayerForPage(page, layer, size.width, size.height);
+          drawAnnotations({ page: page });
+        }
+      });
+    }
+    // OCR pages become selectable even if the PDF had no native text layer.
+    // Do NOT pretend the PDF has a *native* text layer — Flutter still needs
+    // the OCR entry for other pages / re-run.
+    if (normalized.length > 0) {
+      const wasOcr = ocrTextLayerAvailable;
+      ocrTextLayerAvailable = true;
+      documentTextLayerAvailable = true;
+      if (!wasOcr || !nativeTextLayerAvailable) {
+        reportCapability();
+      }
+    }
+  }
+
+  function clearOcrLayer(page) {
+    if (page) {
+      ocrLayers.delete(Number(page));
+      const pageView = pageViewFor(Number(page));
+      const textLayer = pageView && pageView.querySelector(".textLayer");
+      if (textLayer) {
+        textLayer.replaceChildren();
+      }
+      return;
+    }
+    ocrLayers.clear();
+    for (const pageView of stage.querySelectorAll(".pageContainer")) {
+      const textLayer = pageView.querySelector(".textLayer");
+      if (textLayer) {
+        textLayer.replaceChildren();
+      }
+    }
+  }
+
+  /**
+   * Export the currently rendered page canvas as a JPEG data URL for OCR.
+   * Using the *display* canvas (not a separate native re-render) keeps OCR
+   * coordinates 1:1 with the on-screen page box.
+   *
+   * @param {number|object} pageOrPayload 1-based page number or {page, quality}
+   * @returns {{page:number, width:number, height:number, dataUrl:string}|null}
+   */
+  function exportPageImage(pageOrPayload) {
+    if (!pdfDoc) {
+      return null;
+    }
+    const page = Math.min(
+      Math.max(
+        Number(
+          pageOrPayload && typeof pageOrPayload === "object"
+            ? pageOrPayload.page
+            : pageOrPayload
+        ) || pageNumber,
+        1
+      ),
+      pdfDoc.numPages
+    );
+    const qualityRaw =
+      pageOrPayload && typeof pageOrPayload === "object"
+        ? Number(pageOrPayload.quality)
+        : 0.86;
+    const quality = Math.min(Math.max(Number.isFinite(qualityRaw) ? qualityRaw : 0.86, 0.5), 0.95);
+
+    let pageView = pageViewFor(page);
+    const state = pageRenderState.get(page);
+    // If the page is not in the virtual window / not rasterized yet, force it.
+    if (!pageView || !state || !state.rendered) {
+      // Synchronous best-effort: kick ensure; caller may retry shortly.
+      ensurePagesAround(page, renderVersion);
+      pageView = pageViewFor(page);
+    }
+    if (!pageView) {
+      return null;
+    }
+    const canvas = pageView.querySelector(".pageCanvas");
+    if (!canvas || canvas.width <= 1 || canvas.height <= 1) {
+      return null;
+    }
+    // Prefer the CSS box size (matches text layer / overlay coordinates).
+    const cssWidth = Math.max(
+      pageView.clientWidth ||
+        Number(String(pageView.style.width || "").replace("px", "")) ||
+        canvas.clientWidth ||
+        1,
+      1
+    );
+    const cssHeight = Math.max(
+      pageView.clientHeight ||
+        Number(String(pageView.style.height || "").replace("px", "")) ||
+        canvas.clientHeight ||
+        1,
+      1
+    );
+
+    // Downscale very large retina canvases for OCR transfer while preserving
+    // aspect ratio. Overlay still uses CSS box + normalized geometry.
+    let exportCanvas = canvas;
+    const maxEdge = 1800;
+    const longest = Math.max(canvas.width, canvas.height);
+    if (longest > maxEdge) {
+      const factor = maxEdge / longest;
+      const w = Math.max(Math.floor(canvas.width * factor), 1);
+      const h = Math.max(Math.floor(canvas.height * factor), 1);
+      const tmp = document.createElement("canvas");
+      tmp.width = w;
+      tmp.height = h;
+      const ctx = tmp.getContext("2d");
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(canvas, 0, 0, w, h);
+        exportCanvas = tmp;
+      }
+    }
+
+    let dataUrl = "";
+    try {
+      dataUrl = exportCanvas.toDataURL("image/jpeg", quality);
+    } catch (error) {
+      console.warn("exportPageImage failed", error);
+      return null;
+    }
+    if (!dataUrl || dataUrl.length < 32) {
+      return null;
+    }
+    return {
+      page: page,
+      width: cssWidth,
+      height: cssHeight,
+      // Bitmap pixel size used for OCR (may differ from CSS when downscaled).
+      imageWidth: exportCanvas.width,
+      imageHeight: exportCanvas.height,
+      dataUrl: dataUrl,
+    };
+  }
+
+  function renderOcrLayerForPage(pageNumber, textLayer, cssWidth, cssHeight) {
+    if (!textLayer) {
+      return;
+    }
+    const blocks = layoutOcrLines(
+      ocrLayers.get(pageNumber) || [],
+      cssWidth,
+      cssHeight
+    );
+    textLayer.replaceChildren();
+    textLayer.classList.add("ocrLayer");
+    textLayer.style.width = `${cssWidth}px`;
+    textLayer.style.height = `${cssHeight}px`;
+    textLayer.style.color = "transparent";
+    textLayer.style.opacity = "1";
+    textLayer.style.background = "transparent";
+    const fragment = document.createDocumentFragment();
+    for (const block of blocks) {
+      const span = document.createElement("span");
+      span.className = "ocrSpan";
+      span.textContent = block.text;
+      span.dataset.left = String(block.left);
+      span.dataset.top = String(block.top);
+      span.dataset.width = String(block.width);
+      span.dataset.height = String(block.height);
+      span.style.left = `${block.leftPx}px`;
+      span.style.top = `${block.topPx}px`;
+      span.style.width = `${block.widthPx}px`;
+      span.style.height = `${block.heightPx}px`;
+      span.style.fontSize = `${block.fontSize}px`;
+      span.style.lineHeight = `${block.heightPx}px`;
+      span.style.letterSpacing = "0px";
+      span.style.whiteSpace = "pre";
+      span.style.overflow = "hidden";
+      span.style.transform = "none";
+      fragment.appendChild(span);
+    }
+    textLayer.appendChild(fragment);
+    // Brief flash so users can tell OCR landed.
+    textLayer.classList.remove("ocrLayerFresh");
+    void textLayer.offsetWidth;
+    textLayer.classList.add("ocrLayerFresh");
+    window.setTimeout(function () {
+      textLayer.classList.remove("ocrLayerFresh");
+    }, 900);
+  }
+
+  /** Build selectable OCR line hit targets from raw OCR boxes. */
+  function layoutOcrLines(rawBlocks, cssWidth, cssHeight) {
+    const items = [];
+    for (const block of rawBlocks || []) {
+      if (!block || !block.text) {
+        continue;
+      }
+      let left = Number(block.left);
+      let top = Number(block.top);
+      let width = Number(block.width);
+      let height = Number(block.height);
+      if (
+        !Number.isFinite(left) ||
+        !Number.isFinite(top) ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        continue;
+      }
+      left = clamp(left, 0, 0.999);
+      top = clamp(top, 0, 0.999);
+      width = clamp(width, 0.001, 1 - left);
+      height = clamp(height, 0.001, 1 - top);
+      if (height > 0.12) {
+        height = 0.04;
+      }
+      items.push({
+        text: String(block.text),
+        left: left,
+        top: top,
+        width: width,
+        height: height,
+      });
+    }
+    if (!items.length) {
+      // Fallback plain lines if geometry is missing.
+      const plain = [];
+      let y = 0.06;
+      for (const block of rawBlocks || []) {
+        if (!block || !block.text) {
+          continue;
+        }
+        plain.push({
+          text: String(block.text),
+          left: 0.06,
+          top: y,
+          width: 0.88,
+          height: 0.03,
+        });
+        y += 0.04;
+        if (y > 0.95) {
+          break;
+        }
+      }
+      return plain.map(function (line) {
+        return toLaidOutLine(line, cssWidth, cssHeight);
+      });
+    }
+
+    items.sort(function (a, b) {
+      const ac = a.top + a.height * 0.5;
+      const bc = b.top + b.height * 0.5;
+      if (Math.abs(ac - bc) > 0.006) {
+        return ac - bc;
+      }
+      return a.left - b.left;
+    });
+    const lines = [];
+    for (const item of items) {
+      const last = lines.length ? lines[lines.length - 1] : null;
+      if (!last) {
+        lines.push(Object.assign({}, item));
+        continue;
+      }
+      const refH = Math.max(Math.min(last.height, item.height), 0.004);
+      const sameLine =
+        Math.abs(
+          last.top + last.height * 0.5 - (item.top + item.height * 0.5)
+        ) <=
+        refH * 0.4;
+      const lastRight = last.left + last.width;
+      const gap = item.left - lastRight;
+      if (sameLine && gap >= -refH * 0.25 && gap <= refH * 1.2) {
+        const needsSpace =
+          !/\s$/.test(last.text) &&
+          !/^\s/.test(item.text) &&
+          !/[，。！？、；：,.!?;:)]$/.test(last.text) &&
+          !/^[，。！？、；：,.!?;:(]/.test(item.text);
+        last.text += (needsSpace ? " " : "") + item.text;
+        const right = Math.max(lastRight, item.left + item.width);
+        last.left = Math.min(last.left, item.left);
+        last.top = Math.min(last.top, item.top);
+        last.height = Math.max(last.height, item.height);
+        last.width = Math.max(right - last.left, 0.001);
+        continue;
+      }
+      lines.push(Object.assign({}, item));
+    }
+
+    lines.sort(function (a, b) {
+      if (Math.abs(a.top - b.top) > 0.002) {
+        return a.top - b.top;
+      }
+      return a.left - b.left;
+    });
+    return lines.map(function (line) {
+      return toLaidOutLine(line, cssWidth, cssHeight);
+    });
+  }
+
+  function toLaidOutLine(line, cssWidth, cssHeight) {
+    const leftPx = line.left * cssWidth;
+    let topPx = line.top * cssHeight;
+    // Mature-reader rule (PDF.js text layer): the span line box must equal the
+    // glyph box, so selection client rects — and thus annotations painted from
+    // them — are automatically glyph-tight. Never inflate height here.
+    let heightPx = Math.max(line.height * cssHeight, 6);
+    heightPx = Math.min(heightPx, cssHeight * 0.06, 30);
+    if (topPx + heightPx > cssHeight) {
+      heightPx = Math.max(cssHeight - topPx, 6);
+    }
+    const widthPx = Math.max(line.width * cssWidth, 8);
+    const fontSize = Math.max(Math.min(heightPx * 0.88, heightPx), 7);
+    return {
+      text: line.text,
+      left: leftPx / cssWidth,
+      top: topPx / cssHeight,
+      width: widthPx / cssWidth,
+      height: heightPx / cssHeight,
+      leftPx: leftPx,
+      topPx: topPx,
+      widthPx: widthPx,
+      heightPx: heightPx,
+      fontSize: fontSize,
+    };
+  }
+
+  function visibleAnnotationPages() {
+    const pages = [];
+    for (const [number, state] of pageRenderState.entries()) {
+      if (state && state.pageView) {
+        pages.push(Number(number));
+      }
+    }
+    pages.sort(function (a, b) {
+      return a - b;
+    });
+    return pages;
+  }
+
+  function annotationTouchesPages(annotation, pageSet) {
+    const rawRects =
+      Array.isArray(annotation.rects) && annotation.rects.length
         ? annotation.rects
         : annotation.locator && Array.isArray(annotation.locator.selectionRects)
           ? annotation.locator.selectionRects
           : [];
-      for (const rect of rects) {
-        const page = Number(rect.page || (annotation.locator && annotation.locator.page) || 0);
-        if (!page) {
+    for (const rect of rawRects) {
+      const page = Number(rect && rect.page ? rect.page : 0);
+      if (page && pageSet.has(page)) {
+        return true;
+      }
+    }
+    const locatorPage = Number(
+      annotation.locator && annotation.locator.page
+        ? annotation.locator.page
+        : 0
+    );
+    return !!(locatorPage && pageSet.has(locatorPage));
+  }
+
+  /**
+   * Draw permanent marks only for mounted page views (virtual window).
+   * Avoid O(all annotations × all pages) work on every scroll/render tick.
+   */
+  // TEMP diagnostics: magenta outline on marks, cyan outline on line bands.
+  const DEBUG_ANNOT_VISUAL = true;
+
+  function drawAnnotations(options) {
+    const onlyPage = options && Number(options.page) ? Number(options.page) : 0;
+    const targetPages = onlyPage
+      ? [onlyPage]
+      : visibleAnnotationPages();
+    if (!targetPages.length) {
+      return;
+    }
+    const pageSet = new Set(targetPages);
+
+    for (const page of targetPages) {
+      const pageView = pageViewFor(page);
+      const layer = pageView && pageView.querySelector(".annotationLayer");
+      if (!layer) {
+        continue;
+      }
+      layer.replaceChildren();
+      const box = pageBoxSize(pageView);
+      layer.style.width = `${box.width}px`;
+      layer.style.height = `${box.height}px`;
+      if (DEBUG_ANNOT_VISUAL) {
+        const bands = lineBandsForPage(page);
+        if (bands) {
+          for (const band of bands) {
+            const el = document.createElement("div");
+            el.style.position = "absolute";
+            el.style.left = "0";
+            el.style.width = "100%";
+            el.style.top = `${band.top * 100}%`;
+            el.style.height = `${(band.bottom - band.top) * 100}%`;
+            el.style.outline = "1px dashed rgba(0, 200, 220, 0.8)";
+            el.style.pointerEvents = "none";
+            layer.appendChild(el);
+          }
+        }
+      }
+    }
+
+    for (const annotation of annotations) {
+      if (!annotationTouchesPages(annotation, pageSet)) {
+        continue;
+      }
+      const rawRects =
+        Array.isArray(annotation.rects) && annotation.rects.length
+          ? annotation.rects
+          : annotation.locator && Array.isArray(annotation.locator.selectionRects)
+            ? annotation.locator.selectionRects
+            : [];
+      const locatorPage = Number(
+        annotation.locator && annotation.locator.page
+          ? annotation.locator.page
+          : 0
+      );
+      const isUnderline = annotation.style === "underline";
+      const prepared = prepareHighlightRects(rawRects, locatorPage, isUnderline);
+      for (const rect of prepared) {
+        const page = Number(rect.page || locatorPage || 0);
+        if (!page || !pageSet.has(page)) {
           continue;
         }
         const pageView = pageViewFor(page);
@@ -1293,20 +2755,47 @@
         if (!layer) {
           continue;
         }
+        const box = pageBoxSize(pageView);
+        layer.style.width = `${box.width}px`;
+        layer.style.height = `${box.height}px`;
+
+        // Pure % of current page box → scales with zoom/window automatically.
+        // Geometry already snapped to live text-layer glyph lines.
+        const leftPct = Number(rect.x || 0) * 100;
+        const topPct = Number(rect.y || 0) * 100;
+        const widthPct = Number(rect.width || 0) * 100;
+        let heightPct = Number(rect.height || 0) * 100;
+        // Only a tiny visibility floor (~1.5px), proportional via page height.
+        const minPct = (1.5 / Math.max(box.height, 1)) * 100;
+        heightPct = Math.max(heightPct, minPct);
+
+        const color = annotationColor(annotation.color);
         const mark = document.createElement("button");
         mark.type = "button";
-        mark.className = `annotationMark ${annotation.style === "underline" ? "underline" : "highlight"}`;
+        mark.className = `annotationMark ${isUnderline ? "underline" : "highlight"}`;
         mark.dataset.annotationId = String(annotation.id || "");
-        mark.style.left = `${Number(rect.x || 0) * 100}%`;
-        mark.style.top = `${Number(rect.y || 0) * 100}%`;
-        mark.style.width = `${Number(rect.width || 0) * 100}%`;
-        mark.style.height = `${Number(rect.height || 0) * 100}%`;
-        mark.style.setProperty("--annotation-color", annotationColor(annotation.color));
+        mark.style.left = `${leftPct}%`;
+        mark.style.top = `${topPct}%`;
+        mark.style.width = `${widthPct}%`;
+        mark.style.height = `${heightPct}%`;
+        mark.style.setProperty("--annotation-color", color);
+        if (isUnderline) {
+          // Medium stroke: clear under the glyphs, not a solid marker pen.
+          mark.style.background = underlineColor(annotation.color);
+          mark.style.border = "0";
+          mark.style.borderRadius = "1px";
+          mark.style.opacity = "0.78";
+          mark.style.mixBlendMode = "normal";
+        } else {
+          mark.style.background = color;
+        }
+        if (DEBUG_ANNOT_VISUAL) {
+          mark.style.outline = "1px solid magenta";
+        }
         mark.setAttribute("aria-label", "标注");
         mark.addEventListener("click", function (event) {
           event.preventDefault();
           event.stopPropagation();
-          // Debounce multi-fire from WebView / double-handlers.
           const now = Date.now();
           if (
             mark.dataset.lastClickAt &&
@@ -1333,18 +2822,35 @@
 
   function annotationColor(color) {
     if (color === "blue") {
-      return "rgba(185, 215, 255, 0.58)";
+      return "rgba(100, 170, 255, 0.34)";
     }
     if (color === "green") {
-      return "rgba(189, 236, 203, 0.58)";
+      return "rgba(96, 200, 130, 0.34)";
     }
     if (color === "red") {
-      return "rgba(255, 184, 184, 0.58)";
+      return "rgba(255, 120, 120, 0.32)";
     }
     if (color === "purple") {
-      return "rgba(216, 199, 255, 0.58)";
+      return "rgba(180, 140, 255, 0.34)";
     }
-    return "rgba(255, 229, 138, 0.62)";
+    return "rgba(255, 220, 90, 0.34)";
+  }
+
+  /** Medium underline stroke (clearer than highlight fill, softer than ink). */
+  function underlineColor(color) {
+    if (color === "blue") {
+      return "rgba(55, 125, 220, 0.7)";
+    }
+    if (color === "green") {
+      return "rgba(40, 150, 90, 0.7)";
+    }
+    if (color === "red") {
+      return "rgba(215, 70, 70, 0.7)";
+    }
+    if (color === "purple") {
+      return "rgba(140, 85, 215, 0.7)";
+    }
+    return "rgba(195, 145, 20, 0.7)";
   }
 
   async function open(payload) {
@@ -1356,7 +2862,11 @@
       applySettings(payload.settings || {});
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
       pdfDoc = await window.pdfjsLib.getDocument(payload.fileUrl).promise;
-      documentTextLayerAvailable = await detectDocumentTextLayer();
+      nativeTextLayerAvailable = await detectDocumentTextLayer();
+      // Opening a document resets OCR overlays for this viewer session.
+      ocrTextLayerAvailable = false;
+      ocrLayers.clear();
+      documentTextLayerAvailable = nativeTextLayerAvailable;
       reportCapability();
       const locator = payload.locator || {};
       pageNumber = Math.min(Math.max(Number(locator.page || 1), 1), pdfDoc.numPages);
@@ -1375,17 +2885,30 @@
         zoom = Number(settings.pdfScale || zoom);
       }
       // Force continuous on phones even if settings say paged/double.
-      if (!displayModeSelect.dataset.userSelected) {
+      if (!displayModeSelect || !displayModeSelect.dataset.userSelected) {
         displayMode = preferredDisplayMode();
-        displayModeSelect.value = displayMode;
+        if (displayModeSelect) {
+          displayModeSelect.value = displayMode;
+        }
         updateDisplayMode();
       }
-      await reportOutline();
+      // Outline can be slow on huge PDFs; don't block first paint.
+      unawaitedOutline();
       await renderDocument({ restorePage: pageNumber, restoreOffset: Number(locator.scrollOffset || 0) });
       send("ready");
     } catch (error) {
       reportError(error);
     }
+  }
+
+  function unawaitedOutline() {
+    Promise.resolve()
+      .then(function () {
+        return reportOutline();
+      })
+      .catch(function (error) {
+        console.warn("PDF outline unavailable", error);
+      });
   }
 
   async function detectDocumentTextLayer() {
@@ -1465,60 +2988,49 @@
     return pageIndex + 1;
   }
 
-  document.getElementById("prev").addEventListener("click", function () {
+  document.getElementById("prev")?.addEventListener("click", function () {
     turnPages(-1);
   });
 
-  document.getElementById("next").addEventListener("click", function () {
+  document.getElementById("next")?.addEventListener("click", function () {
     turnPages(1);
   });
 
-  document.getElementById("zoomOut").addEventListener("click", async function () {
+  document.getElementById("zoomOut")?.addEventListener("click", async function () {
     zoomMode = "custom";
     zoom = Math.max(0.5, zoom - 0.1);
     await renderDocument({ restorePage: pageNumber });
   });
 
-  document.getElementById("zoomIn").addEventListener("click", async function () {
+  document.getElementById("zoomIn")?.addEventListener("click", async function () {
     zoomMode = "custom";
     zoom = Math.min(3, zoom + 0.1);
     await renderDocument({ restorePage: pageNumber });
   });
 
-  zoomPreset.addEventListener("change", async function () {
-    const value = zoomPreset.value;
-    if (value === "fit-width" || value === "fit-page" || value === "actual") {
-      zoomMode = value;
-    } else {
-      const nextZoom = Number(value);
-      if (Number.isFinite(nextZoom)) {
-        zoomMode = "custom";
-        zoom = Math.min(3, Math.max(0.5, nextZoom));
+  if (zoomPreset) {
+    zoomPreset.addEventListener("change", async function () {
+      const value = zoomPreset.value;
+      if (value === "fit-width" || value === "fit-page" || value === "actual") {
+        zoomMode = value;
+      } else {
+        const nextZoom = Number(value);
+        if (Number.isFinite(nextZoom)) {
+          zoomMode = "custom";
+          zoom = Math.min(3, Math.max(0.5, nextZoom));
+        }
       }
-    }
-    await renderDocument({ restorePage: pageNumber });
-  });
+      await renderDocument({ restorePage: pageNumber });
+    });
+  }
 
-  displayModeSelect.addEventListener("change", function () {
-    displayModeSelect.dataset.userSelected = "true";
-    displayMode = displayModeSelect.value;
-    updateDisplayMode();
-    // Entering single/double: fit the spread so users don't need to scroll a tall page.
-    if (displayMode === "single" || displayMode === "double") {
-      if (zoomMode === "custom" || zoomMode === "fit-width" || zoomMode === "actual") {
-        zoomMode = "fit-page";
-      }
-      renderDocument({ restorePage: pageNumber });
-      return;
-    }
-    // Back to continuous: keep current page and allow scroll again.
-    if (zoomMode === "fit-width" || zoomMode === "fit-page") {
-      renderDocument({ restorePage: pageNumber });
-    } else {
-      scrollToPage(pageNumber, 0);
-      scheduleLocationReport(false);
-    }
-  });
+  if (displayModeSelect) {
+    displayModeSelect.addEventListener("change", function () {
+      displayModeSelect.dataset.userSelected = "true";
+      // Cheap mode switch when possible; full rebuild only if geometry requires it.
+      switchDisplayMode(displayModeSelect.value, { restorePage: pageNumber });
+    });
+  }
 
   window.addEventListener("scroll", function () {
     // While scrolling, only track page index. Heavy location/excerpt reports
@@ -1534,7 +3046,7 @@
   window.addEventListener("resize", function () {
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(function () {
-      if (!displayModeSelect.dataset.userSelected) {
+      if (!displayModeSelect || !displayModeSelect.dataset.userSelected) {
         const nextMode = preferredDisplayMode();
         if (nextMode !== displayMode) {
           displayMode = nextMode;
@@ -1705,5 +3217,9 @@
     clearSearchHighlights,
     applyAnnotations,
     clearAnnotations,
+    applyOcrLayer,
+    clearOcrLayer,
+    exportPageImage,
+    getVisiblePages,
   };
 })();

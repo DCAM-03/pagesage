@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf_document/pdf_document.dart';
 import 'package:xml/xml.dart';
@@ -52,47 +52,56 @@ final class MetadataExtractor {
     String bookId,
     TaskCancelToken? cancelToken,
   ) async {
-    final bytes = await file.readAsBytes();
+    // Stream the zip from disk so large EPUBs do not need a second full-file
+    // buffer on top of the import copy/hash pass. Always close the handle
+    // (Windows keeps the temp file locked otherwise).
     cancelToken?.throwIfCancelled();
-    final archive = ZipDecoder().decodeBytes(bytes);
-    cancelToken?.throwIfCancelled();
-    final container = _fileByName(archive, 'META-INF/container.xml');
-    if (container == null) {
-      return const BookMetadata();
+    final input = InputFileStream(file.path);
+    try {
+      final archive = ZipDecoder().decodeStream(input);
+      cancelToken?.throwIfCancelled();
+      final container = _fileByName(archive, 'META-INF/container.xml');
+      if (container == null) {
+        return const BookMetadata();
+      }
+      final containerXml = _parseXml(_readArchiveText(container));
+      final rootfile = containerXml
+          .findAllElements('rootfile', namespace: '*')
+          .firstOrNull
+          ?.getAttribute('full-path');
+      if (rootfile == null || rootfile.isEmpty) {
+        return const BookMetadata();
+      }
+      final opfFile = _fileByName(archive, rootfile);
+      if (opfFile == null) {
+        return const BookMetadata();
+      }
+      final opf = _parseXml(_readArchiveText(opfFile));
+      final metadata = opf
+          .findAllElements('metadata', namespace: '*')
+          .firstOrNull;
+      final title = _text(metadata, 'title');
+      final author = _text(metadata, 'creator');
+      final language = _text(metadata, 'language');
+      final description = _text(metadata, 'description');
+      cancelToken?.throwIfCancelled();
+      final coverPath = await _extractEpubCover(
+        archive: archive,
+        opf: opf,
+        opfPath: rootfile,
+        bookId: bookId,
+        cancelToken: cancelToken,
+      );
+      return BookMetadata(
+        title: title,
+        author: author,
+        language: language,
+        description: description,
+        coverPath: coverPath,
+      );
+    } finally {
+      await input.close();
     }
-    final containerXml = _parseXml(_readArchiveText(container));
-    final rootfile = containerXml
-        .findAllElements('rootfile', namespace: '*')
-        .firstOrNull
-        ?.getAttribute('full-path');
-    if (rootfile == null || rootfile.isEmpty) {
-      return const BookMetadata();
-    }
-    final opfFile = _fileByName(archive, rootfile);
-    if (opfFile == null) {
-      return const BookMetadata();
-    }
-    final opf = _parseXml(_readArchiveText(opfFile));
-    final metadata = opf.findAllElements('metadata', namespace: '*').firstOrNull;
-    final title = _text(metadata, 'title');
-    final author = _text(metadata, 'creator');
-    final language = _text(metadata, 'language');
-    final description = _text(metadata, 'description');
-    cancelToken?.throwIfCancelled();
-    final coverPath = await _extractEpubCover(
-      archive: archive,
-      opf: opf,
-      opfPath: rootfile,
-      bookId: bookId,
-      cancelToken: cancelToken,
-    );
-    return BookMetadata(
-      title: title,
-      author: author,
-      language: language,
-      description: description,
-      coverPath: coverPath,
-    );
   }
 
   Future<String?> _extractEpubCover({
@@ -186,7 +195,8 @@ final class MetadataExtractor {
     for (final href in hrefCandidates) {
       cancelToken?.throwIfCancelled();
       final entryPath = _resolveOpfHref(opfDir, href);
-      final cover = _fileByName(archive, entryPath) ??
+      final cover =
+          _fileByName(archive, entryPath) ??
           _fileByBasename(archive, p.posix.basename(entryPath));
       if (cover == null || !cover.isFile) {
         continue;
@@ -213,9 +223,10 @@ final class MetadataExtractor {
     String bookId,
     TaskCancelToken? cancelToken,
   ) async {
-    final raw = await file.readAsBytes();
     cancelToken?.throwIfCancelled();
-    final bytes = Uint8List.fromList(raw);
+    // Single full read for PDF metadata+cover; avoid an extra list copy.
+    final bytes = await file.readAsBytes();
+    cancelToken?.throwIfCancelled();
 
     String? title;
     String? author;
@@ -233,11 +244,15 @@ final class MetadataExtractor {
       // Keep going — cover heuristic can still succeed on imperfect PDFs.
     }
 
-    final coverPath = await _extractPdfCover(
-      bytes: bytes,
-      bookId: bookId,
-      cancelToken: cancelToken,
-    );
+    // Cover heuristic scans embedded JPEG markers; cap work on huge files.
+    String? coverPath;
+    if (bytes.lengthInBytes <= 80 * 1024 * 1024) {
+      coverPath = await _extractPdfCover(
+        bytes: bytes,
+        bookId: bookId,
+        cancelToken: cancelToken,
+      );
+    }
     return BookMetadata(
       title: title,
       author: author,
@@ -260,14 +275,24 @@ final class MetadataExtractor {
     }
     jpegs.sort((a, b) => b.length.compareTo(a.length));
     // Prefer a "cover-sized" image: not tiny icons, not multi-MB scans first.
-    Uint8List chosen = jpegs.first;
+    Uint8List? chosen;
     for (final jpeg in jpegs) {
+      if (!_looksLikeValidJpeg(jpeg)) {
+        continue;
+      }
       if (jpeg.length >= 8 * 1024 && jpeg.length <= 2 * 1024 * 1024) {
         chosen = jpeg;
         break;
       }
+      chosen ??= jpeg;
     }
-    final targetPath = await _appPaths.coverPath(bookId: bookId, extension: 'jpg');
+    if (chosen == null) {
+      return null;
+    }
+    final targetPath = await _appPaths.coverPath(
+      bookId: bookId,
+      extension: 'jpg',
+    );
     cancelToken?.throwIfCancelled();
     await File(targetPath).writeAsBytes(chosen, flush: true);
     return targetPath;
@@ -277,13 +302,19 @@ final class MetadataExtractor {
     final out = <Uint8List>[];
     var i = 0;
     while (i < bytes.length - 3) {
-      if (bytes[i] == 0xFF && bytes[i + 1] == 0xD8) {
+      // Real JPEGs are SOI (FFD8) followed by another marker (FFxx), usually
+      // APP0/APP1 (FFE0/FFE1). Accepting bare FFD8…FFD9 slices produces
+      // corrupt covers that spam native decoders and can destabilize the UI.
+      if (bytes[i] == 0xFF &&
+          bytes[i + 1] == 0xD8 &&
+          i + 3 < bytes.length &&
+          bytes[i + 2] == 0xFF) {
         var j = i + 2;
         while (j < bytes.length - 1) {
           if (bytes[j] == 0xFF && bytes[j + 1] == 0xD9) {
             final slice = bytes.sublist(i, j + 2);
             // Skip tiny thumbnails / noise.
-            if (slice.length >= 4 * 1024) {
+            if (slice.length >= 4 * 1024 && _looksLikeValidJpeg(slice)) {
               out.add(slice);
             }
             i = j + 1;
@@ -297,6 +328,20 @@ final class MetadataExtractor {
     return out;
   }
 
+  /// Minimal structural check: SOI + marker + EOI.
+  bool _looksLikeValidJpeg(Uint8List bytes) {
+    if (bytes.length < 4) {
+      return false;
+    }
+    if (bytes[0] != 0xFF || bytes[1] != 0xD8 || bytes[2] != 0xFF) {
+      return false;
+    }
+    if (bytes[bytes.length - 2] != 0xFF || bytes[bytes.length - 1] != 0xD9) {
+      return false;
+    }
+    return true;
+  }
+
   String _resolveOpfHref(String opfDir, String href) {
     final decoded = Uri.decodeFull(href.replaceAll('\\', '/'));
     final joined = opfDir == '.' || opfDir.isEmpty
@@ -305,17 +350,15 @@ final class MetadataExtractor {
     return joined.replaceAll('\\', '/');
   }
 
-  String _extensionForCover(
-    String path,
-    String archiveName,
-    Uint8List bytes,
-  ) {
+  String _extensionForCover(String path, String archiveName, Uint8List bytes) {
     final fromPath = p.extension(path).replaceFirst('.', '').toLowerCase();
     if (fromPath.isNotEmpty && fromPath.length <= 5) {
       return fromPath;
     }
-    final fromName =
-        p.extension(archiveName).replaceFirst('.', '').toLowerCase();
+    final fromName = p
+        .extension(archiveName)
+        .replaceFirst('.', '')
+        .toLowerCase();
     if (fromName.isNotEmpty && fromName.length <= 5) {
       return fromName;
     }

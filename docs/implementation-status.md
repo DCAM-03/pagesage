@@ -69,17 +69,31 @@
 
 ### 明确不做
 
-MOBI/AZW、云同步、账号、DRM 绕过、扫描版 PDF OCR（**当前实现**）、在线书店、iOS/macOS/Linux 首发 → `[-]`
+MOBI/AZW、云同步、账号、DRM 绕过、在线书店、iOS/macOS/Linux 首发 → `[-]`
 
-OCR 后置规划见 `docs/tasks/pdf-ocr-optional.md`（TASK-26）：用户触发、本地优先、文本层优先；不进入 v1.0 阻塞范围。
+扫描版 PDF OCR：
+- Phase 0/1 已落地（无文本层文案、`no_text` 索引态、当前页本地 OCR、复制/问 AI）。见 `docs/tasks/pdf-ocr-optional.md`（TASK-26）。
+- Phase 2 部分推进：`ocr_pages` 本地落库 + 翻页自动恢复叠加已落地；选页任务队列 / OCR 进 FTS / ONNX 仍后置，不阻塞 v1.0。
+
+性能 / 稳定性（2026-07-17）：
+- PDF 全文提取改走 `Isolate.run`，避免索引时主 isolate 卡死。
+- 导入任务索引失败标记为 `failed` 并保留 `bookId`；任务中心重试只重建索引，不再 `allowDuplicate` 再导入一本。
+- `createImportedBook` 按 hash 兜底去重；取消导入时清理已插入的孤儿书籍记录。
+
+v1.0 体验冻结落地（`docs/v1-experience-freeze.md`，2026-07-17）：
+- **F-01** 单 chrome：PDF WebView HTML `#toolbar` 全端隐藏，操作走 Flutter。
+- **F-03/S-B** 扫描/OCR 页标注 SnackBar 与状态条标明「近似定位」。
+- **F-06** capability 区分 `nativeTextLayer` / `ocrTextLayer`；OCR 入口按 native 控制。
+- F-02 文本 PDF 精确标注仍需手测勾选；扫描印刷级贴字仍延后。
 
 ---
 
 ## 3. 收尾建议（仅人工）
 
-1. 按 `docs/m4-release-checklist.md` 做 Windows 备份恢复与阅读闭环手测。  
-2. 有 Android 设备时跑一遍导入→阅读。  
-3. 可选：商店签名、完整 Markdown 包、中文分词。
+1. 按 `docs/v1-experience-freeze.md` 冻结 v1.0 体验范围（单 chrome、标注契约、扫描 PDF 降级策略）。  
+2. 按 `docs/m4-release-checklist.md` 做 Windows 备份恢复与阅读闭环手测。  
+3. 有 Android 设备时跑一遍导入→阅读。  
+4. 可选：商店签名、完整 Markdown 包、中文分词。
 
 ---
 

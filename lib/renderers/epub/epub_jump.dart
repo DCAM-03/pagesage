@@ -95,7 +95,8 @@ int epubContinuousItemIndexForLocator({
   final excerpt = locator.excerpt?.trim();
   final end = locator.chapterEndOffset;
   if (start != null) {
-    final resolvedEnd = end ??
+    final resolvedEnd =
+        end ??
         (excerpt != null && excerpt.isNotEmpty
             ? start + excerpt.length
             : start + 1);
@@ -107,12 +108,7 @@ int epubContinuousItemIndexForLocator({
     );
   }
   if (excerpt != null && excerpt.isNotEmpty) {
-    return (
-      chapterIndex: chapterIndex,
-      start: 0,
-      end: 0,
-      excerpt: excerpt,
-    );
+    return (chapterIndex: chapterIndex, start: 0, end: 0, excerpt: excerpt);
   }
   return null;
 }
@@ -181,12 +177,14 @@ String jumpStatusLabelFor(
   final precision = jumpPrecisionFor(locator);
   return switch (locator.type) {
     ReadingLocatorType.epub => switch (precision) {
-      JumpPrecision.phrase => locator.chapterIndex == null
-          ? '已定位到原文'
-          : '已定位到章节 ${locator.chapterIndex! + 1}',
-      JumpPrecision.section => locator.chapterIndex == null
-          ? '已定位到附近位置'
-          : '已定位到章节 ${locator.chapterIndex! + 1}（粗定位）',
+      JumpPrecision.phrase =>
+        locator.chapterIndex == null
+            ? '已定位到原文'
+            : '已定位到章节 ${locator.chapterIndex! + 1}',
+      JumpPrecision.section =>
+        locator.chapterIndex == null
+            ? '已定位到附近位置'
+            : '已定位到章节 ${locator.chapterIndex! + 1}（粗定位）',
       JumpPrecision.coarse => '已尽量恢复阅读位置（定位信息较弱）',
     },
     ReadingLocatorType.pdf => () {
@@ -197,8 +195,7 @@ String jumpStatusLabelFor(
             : '已定位到第 $page 页（无文本层，无法高亮原文）';
       }
       return switch (precision) {
-        JumpPrecision.phrase =>
-          page == null ? '已定位到原文' : '已定位到第 $page 页',
+        JumpPrecision.phrase => page == null ? '已定位到原文' : '已定位到第 $page 页',
         JumpPrecision.section =>
           page == null ? '已定位到附近页' : '已定位到第 $page 页（粗定位）',
         JumpPrecision.coarse => '已尽量恢复阅读位置（定位信息较弱）',

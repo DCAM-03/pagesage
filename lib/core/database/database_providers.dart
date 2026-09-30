@@ -71,6 +71,10 @@ final taskDaoProvider = Provider<TaskDao>((ref) {
   return ref.watch(appDatabaseProvider).taskDao;
 });
 
+final ocrPageDaoProvider = Provider<OcrPageDao>((ref) {
+  return ref.watch(appDatabaseProvider).ocrPageDao;
+});
+
 final secureStoreProvider = Provider<SecureStore>((ref) {
   return SecureStore();
 });
@@ -84,6 +88,7 @@ final bookRepositoryProvider = Provider<BookRepository>((ref) {
     noteDao: ref.watch(noteDaoProvider),
     aiConversationDao: ref.watch(aiConversationDaoProvider),
     searchDao: ref.watch(searchDaoProvider),
+    ocrPageDao: ref.watch(ocrPageDaoProvider),
   );
 });
 

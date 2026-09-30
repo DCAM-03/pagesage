@@ -18,7 +18,7 @@ final class EpubPaginator {
     final pages = <EpubPage>[];
     var globalOffset = 0;
     for (final chapter in document.chapters) {
-      final chapterPages = _paginateChapter(
+      final chapterPages = paginateChapter(
         chapter: chapter,
         settings: settings,
         viewport: viewport,
@@ -53,7 +53,8 @@ final class EpubPaginator {
     ];
   }
 
-  List<EpubPage> _paginateChapter({
+  /// Paginate a single chapter. Used by paged mode to avoid measuring the whole book on open.
+  List<EpubPage> paginateChapter({
     required EpubChapter chapter,
     required ReaderSettings settings,
     required Size viewport,

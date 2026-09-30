@@ -150,6 +150,18 @@ class SettingsDaoManager {
       $$AppSettingsTableTableManager(_db.attachedDatabase, _db.appSettings);
 }
 
+mixin _$OcrPageDaoMixin on DatabaseAccessor<AppDatabase> {
+  $OcrPagesTable get ocrPages => attachedDatabase.ocrPages;
+  OcrPageDaoManager get managers => OcrPageDaoManager(this);
+}
+
+class OcrPageDaoManager {
+  final _$OcrPageDaoMixin _db;
+  OcrPageDaoManager(this._db);
+  $$OcrPagesTableTableManager get ocrPages =>
+      $$OcrPagesTableTableManager(_db.attachedDatabase, _db.ocrPages);
+}
+
 mixin _$TaskDaoMixin on DatabaseAccessor<AppDatabase> {
   $ImportTasksTable get importTasks => attachedDatabase.importTasks;
   TaskDaoManager get managers => TaskDaoManager(this);
@@ -6805,6 +6817,724 @@ class ImportTasksCompanion extends UpdateCompanion<ImportTaskRow> {
   }
 }
 
+class $OcrPagesTable extends OcrPages
+    with TableInfo<$OcrPagesTable, OcrPageRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $OcrPagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bookIdMeta = const VerificationMeta('bookId');
+  @override
+  late final GeneratedColumn<String> bookId = GeneratedColumn<String>(
+    'book_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _pageNumberMeta = const VerificationMeta(
+    'pageNumber',
+  );
+  @override
+  late final GeneratedColumn<int> pageNumber = GeneratedColumn<int>(
+    'page_number',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bodyMeta = const VerificationMeta('body');
+  @override
+  late final GeneratedColumn<String> body = GeneratedColumn<String>(
+    'text',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _languageMeta = const VerificationMeta(
+    'language',
+  );
+  @override
+  late final GeneratedColumn<String> language = GeneratedColumn<String>(
+    'language',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _engineMeta = const VerificationMeta('engine');
+  @override
+  late final GeneratedColumn<String> engine = GeneratedColumn<String>(
+    'engine',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _confidenceMeta = const VerificationMeta(
+    'confidence',
+  );
+  @override
+  late final GeneratedColumn<double> confidence = GeneratedColumn<double>(
+    'confidence',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _blocksJsonMeta = const VerificationMeta(
+    'blocksJson',
+  );
+  @override
+  late final GeneratedColumn<String> blocksJson = GeneratedColumn<String>(
+    'blocks_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _imageWidthMeta = const VerificationMeta(
+    'imageWidth',
+  );
+  @override
+  late final GeneratedColumn<int> imageWidth = GeneratedColumn<int>(
+    'image_width',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _imageHeightMeta = const VerificationMeta(
+    'imageHeight',
+  );
+  @override
+  late final GeneratedColumn<int> imageHeight = GeneratedColumn<int>(
+    'image_height',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    bookId,
+    pageNumber,
+    body,
+    language,
+    engine,
+    confidence,
+    blocksJson,
+    imageWidth,
+    imageHeight,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ocr_pages';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<OcrPageRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('book_id')) {
+      context.handle(
+        _bookIdMeta,
+        bookId.isAcceptableOrUnknown(data['book_id']!, _bookIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bookIdMeta);
+    }
+    if (data.containsKey('page_number')) {
+      context.handle(
+        _pageNumberMeta,
+        pageNumber.isAcceptableOrUnknown(data['page_number']!, _pageNumberMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pageNumberMeta);
+    }
+    if (data.containsKey('text')) {
+      context.handle(
+        _bodyMeta,
+        body.isAcceptableOrUnknown(data['text']!, _bodyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bodyMeta);
+    }
+    if (data.containsKey('language')) {
+      context.handle(
+        _languageMeta,
+        language.isAcceptableOrUnknown(data['language']!, _languageMeta),
+      );
+    }
+    if (data.containsKey('engine')) {
+      context.handle(
+        _engineMeta,
+        engine.isAcceptableOrUnknown(data['engine']!, _engineMeta),
+      );
+    }
+    if (data.containsKey('confidence')) {
+      context.handle(
+        _confidenceMeta,
+        confidence.isAcceptableOrUnknown(data['confidence']!, _confidenceMeta),
+      );
+    }
+    if (data.containsKey('blocks_json')) {
+      context.handle(
+        _blocksJsonMeta,
+        blocksJson.isAcceptableOrUnknown(data['blocks_json']!, _blocksJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_blocksJsonMeta);
+    }
+    if (data.containsKey('image_width')) {
+      context.handle(
+        _imageWidthMeta,
+        imageWidth.isAcceptableOrUnknown(data['image_width']!, _imageWidthMeta),
+      );
+    }
+    if (data.containsKey('image_height')) {
+      context.handle(
+        _imageHeightMeta,
+        imageHeight.isAcceptableOrUnknown(
+          data['image_height']!,
+          _imageHeightMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  OcrPageRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return OcrPageRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      bookId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}book_id'],
+      )!,
+      pageNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}page_number'],
+      )!,
+      body: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text'],
+      )!,
+      language: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}language'],
+      ),
+      engine: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}engine'],
+      ),
+      confidence: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}confidence'],
+      ),
+      blocksJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}blocks_json'],
+      )!,
+      imageWidth: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}image_width'],
+      ),
+      imageHeight: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}image_height'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $OcrPagesTable createAlias(String alias) {
+    return $OcrPagesTable(attachedDatabase, alias);
+  }
+}
+
+class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
+  final String id;
+  final String bookId;
+  final int pageNumber;
+  final String body;
+  final String? language;
+  final String? engine;
+  final double? confidence;
+
+  /// JSON list of {text,left,top,width,height} normalized boxes.
+  final String blocksJson;
+  final int? imageWidth;
+  final int? imageHeight;
+  final int createdAt;
+  final int updatedAt;
+  const OcrPageRow({
+    required this.id,
+    required this.bookId,
+    required this.pageNumber,
+    required this.body,
+    this.language,
+    this.engine,
+    this.confidence,
+    required this.blocksJson,
+    this.imageWidth,
+    this.imageHeight,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['book_id'] = Variable<String>(bookId);
+    map['page_number'] = Variable<int>(pageNumber);
+    map['text'] = Variable<String>(body);
+    if (!nullToAbsent || language != null) {
+      map['language'] = Variable<String>(language);
+    }
+    if (!nullToAbsent || engine != null) {
+      map['engine'] = Variable<String>(engine);
+    }
+    if (!nullToAbsent || confidence != null) {
+      map['confidence'] = Variable<double>(confidence);
+    }
+    map['blocks_json'] = Variable<String>(blocksJson);
+    if (!nullToAbsent || imageWidth != null) {
+      map['image_width'] = Variable<int>(imageWidth);
+    }
+    if (!nullToAbsent || imageHeight != null) {
+      map['image_height'] = Variable<int>(imageHeight);
+    }
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  OcrPagesCompanion toCompanion(bool nullToAbsent) {
+    return OcrPagesCompanion(
+      id: Value(id),
+      bookId: Value(bookId),
+      pageNumber: Value(pageNumber),
+      body: Value(body),
+      language: language == null && nullToAbsent
+          ? const Value.absent()
+          : Value(language),
+      engine: engine == null && nullToAbsent
+          ? const Value.absent()
+          : Value(engine),
+      confidence: confidence == null && nullToAbsent
+          ? const Value.absent()
+          : Value(confidence),
+      blocksJson: Value(blocksJson),
+      imageWidth: imageWidth == null && nullToAbsent
+          ? const Value.absent()
+          : Value(imageWidth),
+      imageHeight: imageHeight == null && nullToAbsent
+          ? const Value.absent()
+          : Value(imageHeight),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory OcrPageRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return OcrPageRow(
+      id: serializer.fromJson<String>(json['id']),
+      bookId: serializer.fromJson<String>(json['bookId']),
+      pageNumber: serializer.fromJson<int>(json['pageNumber']),
+      body: serializer.fromJson<String>(json['body']),
+      language: serializer.fromJson<String?>(json['language']),
+      engine: serializer.fromJson<String?>(json['engine']),
+      confidence: serializer.fromJson<double?>(json['confidence']),
+      blocksJson: serializer.fromJson<String>(json['blocksJson']),
+      imageWidth: serializer.fromJson<int?>(json['imageWidth']),
+      imageHeight: serializer.fromJson<int?>(json['imageHeight']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'bookId': serializer.toJson<String>(bookId),
+      'pageNumber': serializer.toJson<int>(pageNumber),
+      'body': serializer.toJson<String>(body),
+      'language': serializer.toJson<String?>(language),
+      'engine': serializer.toJson<String?>(engine),
+      'confidence': serializer.toJson<double?>(confidence),
+      'blocksJson': serializer.toJson<String>(blocksJson),
+      'imageWidth': serializer.toJson<int?>(imageWidth),
+      'imageHeight': serializer.toJson<int?>(imageHeight),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  OcrPageRow copyWith({
+    String? id,
+    String? bookId,
+    int? pageNumber,
+    String? body,
+    Value<String?> language = const Value.absent(),
+    Value<String?> engine = const Value.absent(),
+    Value<double?> confidence = const Value.absent(),
+    String? blocksJson,
+    Value<int?> imageWidth = const Value.absent(),
+    Value<int?> imageHeight = const Value.absent(),
+    int? createdAt,
+    int? updatedAt,
+  }) => OcrPageRow(
+    id: id ?? this.id,
+    bookId: bookId ?? this.bookId,
+    pageNumber: pageNumber ?? this.pageNumber,
+    body: body ?? this.body,
+    language: language.present ? language.value : this.language,
+    engine: engine.present ? engine.value : this.engine,
+    confidence: confidence.present ? confidence.value : this.confidence,
+    blocksJson: blocksJson ?? this.blocksJson,
+    imageWidth: imageWidth.present ? imageWidth.value : this.imageWidth,
+    imageHeight: imageHeight.present ? imageHeight.value : this.imageHeight,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  OcrPageRow copyWithCompanion(OcrPagesCompanion data) {
+    return OcrPageRow(
+      id: data.id.present ? data.id.value : this.id,
+      bookId: data.bookId.present ? data.bookId.value : this.bookId,
+      pageNumber: data.pageNumber.present
+          ? data.pageNumber.value
+          : this.pageNumber,
+      body: data.body.present ? data.body.value : this.body,
+      language: data.language.present ? data.language.value : this.language,
+      engine: data.engine.present ? data.engine.value : this.engine,
+      confidence: data.confidence.present
+          ? data.confidence.value
+          : this.confidence,
+      blocksJson: data.blocksJson.present
+          ? data.blocksJson.value
+          : this.blocksJson,
+      imageWidth: data.imageWidth.present
+          ? data.imageWidth.value
+          : this.imageWidth,
+      imageHeight: data.imageHeight.present
+          ? data.imageHeight.value
+          : this.imageHeight,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OcrPageRow(')
+          ..write('id: $id, ')
+          ..write('bookId: $bookId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('body: $body, ')
+          ..write('language: $language, ')
+          ..write('engine: $engine, ')
+          ..write('confidence: $confidence, ')
+          ..write('blocksJson: $blocksJson, ')
+          ..write('imageWidth: $imageWidth, ')
+          ..write('imageHeight: $imageHeight, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    bookId,
+    pageNumber,
+    body,
+    language,
+    engine,
+    confidence,
+    blocksJson,
+    imageWidth,
+    imageHeight,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is OcrPageRow &&
+          other.id == this.id &&
+          other.bookId == this.bookId &&
+          other.pageNumber == this.pageNumber &&
+          other.body == this.body &&
+          other.language == this.language &&
+          other.engine == this.engine &&
+          other.confidence == this.confidence &&
+          other.blocksJson == this.blocksJson &&
+          other.imageWidth == this.imageWidth &&
+          other.imageHeight == this.imageHeight &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
+  final Value<String> id;
+  final Value<String> bookId;
+  final Value<int> pageNumber;
+  final Value<String> body;
+  final Value<String?> language;
+  final Value<String?> engine;
+  final Value<double?> confidence;
+  final Value<String> blocksJson;
+  final Value<int?> imageWidth;
+  final Value<int?> imageHeight;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const OcrPagesCompanion({
+    this.id = const Value.absent(),
+    this.bookId = const Value.absent(),
+    this.pageNumber = const Value.absent(),
+    this.body = const Value.absent(),
+    this.language = const Value.absent(),
+    this.engine = const Value.absent(),
+    this.confidence = const Value.absent(),
+    this.blocksJson = const Value.absent(),
+    this.imageWidth = const Value.absent(),
+    this.imageHeight = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  OcrPagesCompanion.insert({
+    required String id,
+    required String bookId,
+    required int pageNumber,
+    required String body,
+    this.language = const Value.absent(),
+    this.engine = const Value.absent(),
+    this.confidence = const Value.absent(),
+    required String blocksJson,
+    this.imageWidth = const Value.absent(),
+    this.imageHeight = const Value.absent(),
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       bookId = Value(bookId),
+       pageNumber = Value(pageNumber),
+       body = Value(body),
+       blocksJson = Value(blocksJson),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<OcrPageRow> custom({
+    Expression<String>? id,
+    Expression<String>? bookId,
+    Expression<int>? pageNumber,
+    Expression<String>? body,
+    Expression<String>? language,
+    Expression<String>? engine,
+    Expression<double>? confidence,
+    Expression<String>? blocksJson,
+    Expression<int>? imageWidth,
+    Expression<int>? imageHeight,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (bookId != null) 'book_id': bookId,
+      if (pageNumber != null) 'page_number': pageNumber,
+      if (body != null) 'text': body,
+      if (language != null) 'language': language,
+      if (engine != null) 'engine': engine,
+      if (confidence != null) 'confidence': confidence,
+      if (blocksJson != null) 'blocks_json': blocksJson,
+      if (imageWidth != null) 'image_width': imageWidth,
+      if (imageHeight != null) 'image_height': imageHeight,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  OcrPagesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? bookId,
+    Value<int>? pageNumber,
+    Value<String>? body,
+    Value<String?>? language,
+    Value<String?>? engine,
+    Value<double?>? confidence,
+    Value<String>? blocksJson,
+    Value<int?>? imageWidth,
+    Value<int?>? imageHeight,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return OcrPagesCompanion(
+      id: id ?? this.id,
+      bookId: bookId ?? this.bookId,
+      pageNumber: pageNumber ?? this.pageNumber,
+      body: body ?? this.body,
+      language: language ?? this.language,
+      engine: engine ?? this.engine,
+      confidence: confidence ?? this.confidence,
+      blocksJson: blocksJson ?? this.blocksJson,
+      imageWidth: imageWidth ?? this.imageWidth,
+      imageHeight: imageHeight ?? this.imageHeight,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (bookId.present) {
+      map['book_id'] = Variable<String>(bookId.value);
+    }
+    if (pageNumber.present) {
+      map['page_number'] = Variable<int>(pageNumber.value);
+    }
+    if (body.present) {
+      map['text'] = Variable<String>(body.value);
+    }
+    if (language.present) {
+      map['language'] = Variable<String>(language.value);
+    }
+    if (engine.present) {
+      map['engine'] = Variable<String>(engine.value);
+    }
+    if (confidence.present) {
+      map['confidence'] = Variable<double>(confidence.value);
+    }
+    if (blocksJson.present) {
+      map['blocks_json'] = Variable<String>(blocksJson.value);
+    }
+    if (imageWidth.present) {
+      map['image_width'] = Variable<int>(imageWidth.value);
+    }
+    if (imageHeight.present) {
+      map['image_height'] = Variable<int>(imageHeight.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OcrPagesCompanion(')
+          ..write('id: $id, ')
+          ..write('bookId: $bookId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('body: $body, ')
+          ..write('language: $language, ')
+          ..write('engine: $engine, ')
+          ..write('confidence: $confidence, ')
+          ..write('blocksJson: $blocksJson, ')
+          ..write('imageWidth: $imageWidth, ')
+          ..write('imageHeight: $imageHeight, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -6825,6 +7555,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $SearchChunksTable searchChunks = $SearchChunksTable(this);
   late final $AppSettingsTable appSettings = $AppSettingsTable(this);
   late final $ImportTasksTable importTasks = $ImportTasksTable(this);
+  late final $OcrPagesTable ocrPages = $OcrPagesTable(this);
   late final BookDao bookDao = BookDao(this as AppDatabase);
   late final ProgressDao progressDao = ProgressDao(this as AppDatabase);
   late final CategoryDao categoryDao = CategoryDao(this as AppDatabase);
@@ -6838,6 +7569,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final SearchDao searchDao = SearchDao(this as AppDatabase);
   late final SettingsDao settingsDao = SettingsDao(this as AppDatabase);
   late final TaskDao taskDao = TaskDao(this as AppDatabase);
+  late final OcrPageDao ocrPageDao = OcrPageDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -6856,6 +7588,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     searchChunks,
     appSettings,
     importTasks,
+    ocrPages,
   ];
 }
 
@@ -10222,6 +10955,346 @@ typedef $$ImportTasksTableProcessedTableManager =
       ImportTaskRow,
       PrefetchHooks Function()
     >;
+typedef $$OcrPagesTableCreateCompanionBuilder =
+    OcrPagesCompanion Function({
+      required String id,
+      required String bookId,
+      required int pageNumber,
+      required String body,
+      Value<String?> language,
+      Value<String?> engine,
+      Value<double?> confidence,
+      required String blocksJson,
+      Value<int?> imageWidth,
+      Value<int?> imageHeight,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$OcrPagesTableUpdateCompanionBuilder =
+    OcrPagesCompanion Function({
+      Value<String> id,
+      Value<String> bookId,
+      Value<int> pageNumber,
+      Value<String> body,
+      Value<String?> language,
+      Value<String?> engine,
+      Value<double?> confidence,
+      Value<String> blocksJson,
+      Value<int?> imageWidth,
+      Value<int?> imageHeight,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$OcrPagesTableFilterComposer
+    extends Composer<_$AppDatabase, $OcrPagesTable> {
+  $$OcrPagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get language => $composableBuilder(
+    column: $table.language,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get engine => $composableBuilder(
+    column: $table.engine,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get confidence => $composableBuilder(
+    column: $table.confidence,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get blocksJson => $composableBuilder(
+    column: $table.blocksJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get imageWidth => $composableBuilder(
+    column: $table.imageWidth,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get imageHeight => $composableBuilder(
+    column: $table.imageHeight,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$OcrPagesTableOrderingComposer
+    extends Composer<_$AppDatabase, $OcrPagesTable> {
+  $$OcrPagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get language => $composableBuilder(
+    column: $table.language,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get engine => $composableBuilder(
+    column: $table.engine,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get confidence => $composableBuilder(
+    column: $table.confidence,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get blocksJson => $composableBuilder(
+    column: $table.blocksJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get imageWidth => $composableBuilder(
+    column: $table.imageWidth,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get imageHeight => $composableBuilder(
+    column: $table.imageHeight,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$OcrPagesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $OcrPagesTable> {
+  $$OcrPagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get bookId =>
+      $composableBuilder(column: $table.bookId, builder: (column) => column);
+
+  GeneratedColumn<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get body =>
+      $composableBuilder(column: $table.body, builder: (column) => column);
+
+  GeneratedColumn<String> get language =>
+      $composableBuilder(column: $table.language, builder: (column) => column);
+
+  GeneratedColumn<String> get engine =>
+      $composableBuilder(column: $table.engine, builder: (column) => column);
+
+  GeneratedColumn<double> get confidence => $composableBuilder(
+    column: $table.confidence,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get blocksJson => $composableBuilder(
+    column: $table.blocksJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get imageWidth => $composableBuilder(
+    column: $table.imageWidth,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get imageHeight => $composableBuilder(
+    column: $table.imageHeight,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$OcrPagesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $OcrPagesTable,
+          OcrPageRow,
+          $$OcrPagesTableFilterComposer,
+          $$OcrPagesTableOrderingComposer,
+          $$OcrPagesTableAnnotationComposer,
+          $$OcrPagesTableCreateCompanionBuilder,
+          $$OcrPagesTableUpdateCompanionBuilder,
+          (
+            OcrPageRow,
+            BaseReferences<_$AppDatabase, $OcrPagesTable, OcrPageRow>,
+          ),
+          OcrPageRow,
+          PrefetchHooks Function()
+        > {
+  $$OcrPagesTableTableManager(_$AppDatabase db, $OcrPagesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$OcrPagesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$OcrPagesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$OcrPagesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> bookId = const Value.absent(),
+                Value<int> pageNumber = const Value.absent(),
+                Value<String> body = const Value.absent(),
+                Value<String?> language = const Value.absent(),
+                Value<String?> engine = const Value.absent(),
+                Value<double?> confidence = const Value.absent(),
+                Value<String> blocksJson = const Value.absent(),
+                Value<int?> imageWidth = const Value.absent(),
+                Value<int?> imageHeight = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => OcrPagesCompanion(
+                id: id,
+                bookId: bookId,
+                pageNumber: pageNumber,
+                body: body,
+                language: language,
+                engine: engine,
+                confidence: confidence,
+                blocksJson: blocksJson,
+                imageWidth: imageWidth,
+                imageHeight: imageHeight,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String bookId,
+                required int pageNumber,
+                required String body,
+                Value<String?> language = const Value.absent(),
+                Value<String?> engine = const Value.absent(),
+                Value<double?> confidence = const Value.absent(),
+                required String blocksJson,
+                Value<int?> imageWidth = const Value.absent(),
+                Value<int?> imageHeight = const Value.absent(),
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => OcrPagesCompanion.insert(
+                id: id,
+                bookId: bookId,
+                pageNumber: pageNumber,
+                body: body,
+                language: language,
+                engine: engine,
+                confidence: confidence,
+                blocksJson: blocksJson,
+                imageWidth: imageWidth,
+                imageHeight: imageHeight,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$OcrPagesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $OcrPagesTable,
+      OcrPageRow,
+      $$OcrPagesTableFilterComposer,
+      $$OcrPagesTableOrderingComposer,
+      $$OcrPagesTableAnnotationComposer,
+      $$OcrPagesTableCreateCompanionBuilder,
+      $$OcrPagesTableUpdateCompanionBuilder,
+      (OcrPageRow, BaseReferences<_$AppDatabase, $OcrPagesTable, OcrPageRow>),
+      OcrPageRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -10251,4 +11324,6 @@ class $AppDatabaseManager {
       $$AppSettingsTableTableManager(_db, _db.appSettings);
   $$ImportTasksTableTableManager get importTasks =>
       $$ImportTasksTableTableManager(_db, _db.importTasks);
+  $$OcrPagesTableTableManager get ocrPages =>
+      $$OcrPagesTableTableManager(_db, _db.ocrPages);
 }

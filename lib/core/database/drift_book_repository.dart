@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:drift/drift.dart';
 
 import '../../domain/books/book.dart' as domain;
@@ -14,6 +15,7 @@ final class DriftBookRepository implements BookRepository {
     db.NoteDao? noteDao,
     db.AiConversationDao? aiConversationDao,
     db.SearchDao? searchDao,
+    db.OcrPageDao? ocrPageDao,
   }) : this._(
          bookDao,
          progressDao,
@@ -22,6 +24,7 @@ final class DriftBookRepository implements BookRepository {
          noteDao,
          aiConversationDao,
          searchDao,
+         ocrPageDao,
        );
 
   const DriftBookRepository._(
@@ -32,6 +35,7 @@ final class DriftBookRepository implements BookRepository {
     this._noteDao,
     this._aiConversationDao,
     this._searchDao,
+    this._ocrPageDao,
   );
 
   final db.BookDao _bookDao;
@@ -41,18 +45,104 @@ final class DriftBookRepository implements BookRepository {
   final db.NoteDao? _noteDao;
   final db.AiConversationDao? _aiConversationDao;
   final db.SearchDao? _searchDao;
+  final db.OcrPageDao? _ocrPageDao;
 
   @override
   Stream<List<LibraryBook>> watchLibrary() {
-    return _bookDao.watchLibrary().map(
-      (rows) => rows.map(_mapLibraryBook).toList(growable: false),
-    );
+    // Split books vs progress watches:
+    // - import / metadata / favorite / open → books stream
+    // - reading locator ticks → progress stream only
+    // Distinct fingerprint so sub-1% progress noise does not rebuild the shelf.
+    final controller = StreamController<List<LibraryBook>>();
+    var books = <db.BookRow>[];
+    var progressById = <String, db.ReadingProgressRow>{};
+    var booksReady = false;
+    var progressReady = false;
+    String? lastFingerprint;
+
+    void emit() {
+      if (controller.isClosed || !booksReady || !progressReady) {
+        return;
+      }
+      final merged = books
+          .map(
+            (row) => LibraryBook(
+              book: _mapBook(row),
+              progress: progressById[row.id] == null
+                  ? null
+                  : _mapProgress(progressById[row.id]!),
+            ),
+          )
+          .toList(growable: false);
+      final fingerprint = _libraryFingerprint(merged);
+      if (fingerprint == lastFingerprint) {
+        return;
+      }
+      lastFingerprint = fingerprint;
+      controller.add(merged);
+    }
+
+    final booksSub = _bookDao.watchBooks().listen((rows) {
+      books = rows;
+      booksReady = true;
+      emit();
+    }, onError: controller.addError);
+    final progressSub = _progressDao.watchAllProgress().listen((rows) {
+      progressById = {for (final row in rows) row.bookId: row};
+      progressReady = true;
+      emit();
+    }, onError: controller.addError);
+
+    controller.onCancel = () async {
+      await booksSub.cancel();
+      await progressSub.cancel();
+    };
+    return controller.stream;
   }
 
   @override
   Future<List<LibraryBook>> getLibrary() async {
-    final rows = await _bookDao.getLibrary();
-    return rows.map(_mapLibraryBook).toList(growable: false);
+    final bookRows = await _bookDao.getBooks();
+    final progressRows = await _progressDao.getAllProgress();
+    final progressById = {for (final row in progressRows) row.bookId: row};
+    return bookRows
+        .map(
+          (row) => LibraryBook(
+            book: _mapBook(row),
+            progress: progressById[row.id] == null
+                ? null
+                : _mapProgress(progressById[row.id]!),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  /// Visual identity for the shelf: ignore sub-percent progress jitter and
+  /// locator JSON churn while reading.
+  String _libraryFingerprint(List<LibraryBook> books) {
+    final buffer = StringBuffer();
+    for (final item in books) {
+      final book = item.book;
+      final progressPct = ((item.progress?.progress ?? 0) * 100).round();
+      buffer
+        ..write(book.id)
+        ..write(':')
+        ..write(book.updatedAt)
+        ..write(':')
+        ..write(book.lastOpenedAt ?? 0)
+        ..write(':')
+        ..write(book.readStatus.value)
+        ..write(':')
+        ..write(book.isFavorite ? 1 : 0)
+        ..write(':')
+        ..write(book.indexingStatus)
+        ..write(':')
+        ..write(book.categoryId ?? '')
+        ..write(':')
+        ..write(progressPct)
+        ..write('|');
+    }
+    return buffer.toString();
   }
 
   @override
@@ -69,6 +159,11 @@ final class DriftBookRepository implements BookRepository {
 
   @override
   Future<domain.Book> createImportedBook(domain.NewBookDraft draft) async {
+    // Last line of defense against double-import races / retry bugs.
+    final existing = await findByHash(draft.fileHash);
+    if (existing != null) {
+      return existing;
+    }
     final updatedAt = draft.createdAt;
     await _bookDao.insertBook(
       db.BooksCompanion.insert(
@@ -170,14 +265,8 @@ final class DriftBookRepository implements BookRepository {
     await _noteDao?.deleteByBook(bookId);
     await _aiConversationDao?.deleteByBook(bookId);
     await _searchDao?.deleteByBook(bookId);
+    await _ocrPageDao?.deleteByBook(bookId);
     await _bookDao.deleteBook(bookId);
-  }
-
-  LibraryBook _mapLibraryBook(db.BookWithProgressRow row) {
-    return LibraryBook(
-      book: _mapBook(row.book),
-      progress: row.progress == null ? null : _mapProgress(row.progress!),
-    );
   }
 
   domain.Book _mapBook(db.BookRow row) {

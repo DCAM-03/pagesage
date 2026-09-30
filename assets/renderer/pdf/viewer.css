@@ -6,6 +6,9 @@ body {
   color: var(--reader-fg, #24251f);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   overflow-x: hidden;
+  /* Contain rubber-band overscroll so fling doesn't thrash layout (Sumatra/Kindle feel). */
+  overscroll-behavior-y: none;
+  overscroll-behavior-x: none;
   color-scheme: light;
 }
 
@@ -15,10 +18,12 @@ html[data-theme="dark"] {
 }
 
 #toolbar {
+  /* v1 freeze F-01: Flutter owns all reader chrome. Keep the HTML toolbar in
+     the DOM for programmatic hooks, but never show it. */
+  display: none !important;
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
@@ -30,7 +35,6 @@ html[data-theme="dark"] {
   -webkit-overflow-scrolling: touch;
   background: color-mix(in srgb, var(--reader-bg, #fafaf7) 94%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--reader-fg, #24251f) 14%, transparent);
-  /* Hide scrollbar chrome on mobile WebView where possible. */
   scrollbar-width: none;
 }
 
@@ -85,6 +89,22 @@ select {
   overflow-x: hidden;
 }
 
+/* Virtual continuous: absolute page shells need a normal block stage.
+   Keeping CSS grid here collapses/ignores absolute children and shows blank. */
+#stage.virtual-continuous {
+  display: block;
+  position: relative;
+  justify-content: initial;
+  align-items: initial;
+  gap: 0;
+  /* Height is set from JS pageMetrics. */
+  min-height: 100vh;
+}
+
+#stage.virtual-continuous .pageContainer {
+  margin: 0;
+}
+
 .pageContainer {
   position: relative;
   display: block;
@@ -93,6 +113,8 @@ select {
   box-sizing: border-box;
   overflow: hidden;
   background: color-mix(in srgb, var(--reader-fg, #24251f) 6%, transparent);
+  /* Allow annotation mix-blend-mode to sample the page canvas below. */
+  isolation: auto;
 }
 
 .pageContainer[hidden] {
@@ -148,7 +170,11 @@ html[data-theme="amber"] .pageCanvas {
   html[data-theme="warm"] .pageCanvas,
   html[data-theme="amber"] .pageCanvas,
   html[data-theme="night"] .textLayer,
-  html[data-theme="dark"] .textLayer,
+  html[data-theme="dark"] .textLayer {
+    filter: none !important;
+  }
+
+  /* Annotation layers already force filter:none. */
   html[data-theme="night"] .annotationLayer,
   html[data-theme="dark"] .annotationLayer {
     filter: none !important;
@@ -195,10 +221,62 @@ html[data-theme="amber"] .pageCanvas {
   pointer-events: auto;
 }
 
-/* When the canvas is inverted, invert the transparent text layer back so
-   selection/highlight math stays aligned without recoloring glyphs twice. */
-html[data-theme="night"] .textLayer,
-html[data-theme="dark"] .textLayer {
+/* OCR text layer: transparent hit targets + native ::selection. */
+.textLayer.ocrLayer {
+  filter: none !important;
+  background: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.textLayer.ocrLayer .ocrSpan {
+  position: absolute;
+  display: block;
+  overflow: hidden;
+  white-space: pre;
+  color: transparent;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  cursor: text;
+  transform: none;
+  pointer-events: all;
+  -webkit-tap-highlight-color: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Brief attach flash after OCR, then fade to invisible. */
+.textLayer.ocrLayer.ocrLayerFresh .ocrSpan {
+  background: rgba(59, 130, 246, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16);
+  transition: background 0.55s ease, box-shadow 0.55s ease;
+}
+
+.textLayer.ocrLayer:not(.ocrLayerFresh) .ocrSpan {
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.35s ease, box-shadow 0.35s ease;
+}
+
+.textLayer.ocrLayer .ocrSpan::selection {
+  background: rgba(80, 125, 255, 0.35);
+  color: transparent;
+  text-shadow: none;
+}
+
+.textLayer.ocrLayer .ocrSpan::-moz-selection {
+  background: rgba(80, 125, 255, 0.35);
+  color: transparent;
+  text-shadow: none;
+}
+
+/* When the canvas is inverted, invert the *native* text layer back so
+   selection/highlight math stays aligned. OCR layers excluded above. */
+html[data-theme="night"] .textLayer:not(.ocrLayer),
+html[data-theme="dark"] .textLayer:not(.ocrLayer) {
   filter: invert(1) hue-rotate(180deg);
 }
 
@@ -206,6 +284,10 @@ html[data-theme="dark"] .textLayer {
   position: absolute;
   color: transparent;
   white-space: pre;
+  line-height: 1;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   transform-origin: 0% 0%;
   cursor: text;
   pointer-events: all;
@@ -213,6 +295,12 @@ html[data-theme="dark"] .textLayer {
 
 .textLayer span::selection {
   background: rgba(80, 125, 255, 0.35);
+  color: transparent;
+}
+
+.textLayer span::-moz-selection {
+  background: rgba(80, 125, 255, 0.35);
+  color: transparent;
 }
 
 .textLayer span.searchHit {
@@ -228,18 +316,15 @@ html[data-theme="dark"] .textLayer {
   box-shadow: 0 0 0 1px rgba(255, 170, 0, 0.35);
 }
 
+/* Permanent annotations: translucent rects above the page canvas. */
 .annotationLayer {
   position: absolute;
   inset: 0;
   z-index: 3;
   overflow: hidden;
   pointer-events: none;
-}
-
-/* Keep annotation marks readable under night invert. */
-html[data-theme="night"] .annotationLayer,
-html[data-theme="dark"] .annotationLayer {
-  filter: invert(1) hue-rotate(180deg);
+  filter: none !important;
+  background: transparent;
 }
 
 .annotationMark {
@@ -248,19 +333,37 @@ html[data-theme="dark"] .annotationLayer {
   display: block;
   padding: 0;
   border: 0;
-  border-radius: 2px;
-  background: var(--annotation-color, rgba(255, 229, 138, 0.62));
+  border-radius: 1px;
+  background: var(--annotation-color, rgba(255, 220, 90, 0.34));
+  mix-blend-mode: multiply;
+  opacity: 1;
   cursor: pointer;
   pointer-events: auto;
+  box-sizing: border-box;
+}
+
+html[data-theme="night"] .annotationMark,
+html[data-theme="dark"] .annotationMark {
+  opacity: 0.9;
+  mix-blend-mode: screen;
+}
+
+.annotationMark.highlight {
+  /* Soft marker fill; geometry from JS (% of page). */
+  border-radius: 1px;
 }
 
 .annotationMark.underline {
-  height: 3px !important;
-  min-height: 3px;
-  margin-top: calc(var(--annotation-underline-offset, 1em) - 3px);
-  background: transparent;
-  border-bottom: 2px solid var(--annotation-color, rgba(255, 229, 138, 0.72));
-  border-radius: 0;
+  /* Thin bottom stroke; height/position from JS. */
+  margin: 0 !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  border-radius: 1px !important;
+  box-sizing: border-box;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+  /* Avoid CSS min-height floors fighting thin underline bars. */
+  padding: 0 !important;
 }
 
 /* Paged modes: no document free-scroll; center the current page/spread. */
@@ -303,12 +406,7 @@ html[data-display-mode="double"] #stage {
 }
 
 @media (max-width: 899px) {
-  /* Flutter mobile reader chrome already provides page/zoom/TOC controls.
-     Keep the HTML toolbar for desktop only so pages get full height. */
-  #toolbar {
-    display: none !important;
-  }
-
+  /* Flutter owns chrome on all widths; HTML toolbar stays hidden via base rule. */
   #stage {
     gap: 10px;
     padding: 8px;

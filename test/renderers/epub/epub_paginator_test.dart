@@ -119,4 +119,34 @@ void main() {
       lessThan(metrics.contentWidth),
     );
   });
+
+  test('paginateChapter keeps progress monotonic within a chapter', () {
+    final chapter = EpubChapter(
+      index: 1,
+      href: 'two.xhtml',
+      title: 'Chapter Two',
+      text: '${'分页单章测试文本。' * 100}\n\n${'Another block. ' * 60}',
+    );
+    const settings = ReaderSettings(
+      fontSize: 18,
+      lineHeight: 1.7,
+      paragraphSpacing: 12,
+      pageMargin: 24,
+    );
+    final pages = const EpubPaginator().paginateChapter(
+      chapter: chapter,
+      settings: settings,
+      viewport: const Size(420, 520),
+      globalOffset: 500,
+      totalLength: 5000,
+    );
+    expect(pages, isNotEmpty);
+    expect(pages.first.chapter.index, 1);
+    expect(pages.first.progress, greaterThan(0));
+    for (var i = 1; i < pages.length; i += 1) {
+      expect(pages[i].progress, greaterThanOrEqualTo(pages[i - 1].progress));
+      expect(pages[i].pageNumberInChapter, i + 1);
+      expect(pages[i].totalPagesInChapter, pages.length);
+    }
+  });
 }

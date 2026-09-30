@@ -35,8 +35,10 @@ final class EpubRendererView extends StatefulWidget {
   final List<Annotation> annotations;
   final ValueChanged<RendererEvent> onEvent;
   final String? searchQuery;
+
   /// Temporary jump target used for flash-highlight after notes/search/bookmarks.
   final ReadingLocator? focusLocator;
+
   /// Bumped by the host when the reader should jump without remounting.
   final int jumpToken;
 
@@ -58,6 +60,9 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   List<EpubPage> _lastPages = const [];
   Set<int> _pagedChapterIndexes = const {};
   int _currentPagedPage = 0;
+
+  /// Active chapter for paged mode (only this chapter is measured/paginated).
+  int _pagedChapterIndex = 0;
   DateTime _lastWheelPageTurnAt = DateTime.fromMillisecondsSinceEpoch(0);
   double? _lastKnownProgress;
   String? _paginationCacheKey;
@@ -85,14 +90,35 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   @override
   void didUpdateWidget(covariant EpubRendererView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.settings.readerMode != widget.settings.readerMode ||
+    final modeChanged =
+        oldWidget.settings.readerMode != widget.settings.readerMode;
+    final typographyChanged =
         oldWidget.settings.fontSize != widget.settings.fontSize ||
         oldWidget.settings.lineHeight != widget.settings.lineHeight ||
         oldWidget.settings.pageMargin != widget.settings.pageMargin ||
         oldWidget.settings.paragraphSpacing !=
-            widget.settings.paragraphSpacing) {
+            widget.settings.paragraphSpacing ||
+        oldWidget.settings.fontFamily != widget.settings.fontFamily;
+    // Theme-only changes must not reset restore flags / re-jump.
+    if (modeChanged || typographyChanged) {
       _continuousRestored = false;
       _pagedRestored = false;
+      if (typographyChanged) {
+        // Force re-pagination / continuous item rebuild when metrics change.
+        _paginationCacheKey = null;
+        _continuousItemsCacheKey = null;
+      }
+      if (modeChanged && widget.settings.readerMode == ReaderMode.paged) {
+        final document = _document;
+        if (document != null && document.chapters.isNotEmpty) {
+          _pagedChapterIndex = document
+              .chapterForProgress(_restoreProgress(document))
+              .index
+              .clamp(0, document.chapters.length - 1);
+          _paginationCacheKey = null;
+          _currentPagedPage = 0;
+        }
+      }
     }
     if (oldWidget.jumpToken != widget.jumpToken) {
       // Host requested an in-place jump (TOC / search). Re-apply restore without
@@ -115,8 +141,20 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
       if (document != null) {
         if (widget.settings.readerMode == ReaderMode.continuous) {
           _restoreInitialOffset(document);
-        } else if (_lastPages.isNotEmpty) {
-          _restoreInitialPage(document, _lastPages);
+        } else {
+          final jumpChapter = locator?.chapterIndex;
+          if (jumpChapter != null &&
+              jumpChapter != _pagedChapterIndex &&
+              document.chapters.isNotEmpty) {
+            _pagedChapterIndex = jumpChapter.clamp(
+              0,
+              document.chapters.length - 1,
+            );
+            _paginationCacheKey = null;
+            _currentPagedPage = 0;
+          }
+          // Rebuild supplies chapter pages; restore lands on offset.
+          setState(() {});
         }
       }
     }
@@ -210,68 +248,61 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
                   _handleContinuousSelectionChanged(document, selection);
                 },
                 child: ListView.builder(
-                controller: _scrollController,
-                physics: const ClampingScrollPhysics(),
-                // Keep off-screen chapters cheap: rebuild on demand instead of
-                // retaining every SelectableText forever.
-                addAutomaticKeepAlives: false,
-                scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
-                padding: EdgeInsets.fromLTRB(
-                  horizontalPadding,
-                  settings.pageMargin + 8,
-                  horizontalPadding,
-                  settings.pageMargin + 88,
+                  controller: _scrollController,
+                  physics: const ClampingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  // Keep off-screen chapters cheap: rebuild on demand instead of
+                  // retaining every SelectableText forever.
+                  addAutomaticKeepAlives: false,
+                  // Prefetch more content so fling feels continuous (Moon+/Kindle).
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(1800),
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    settings.pageMargin + 8,
+                    horizontalPadding,
+                    settings.pageMargin + 88,
+                  ),
+                  itemCount: continuousItems.length,
+                  itemBuilder: (context, index) {
+                    final item = continuousItems[index];
+                    final isJumpTarget = _pendingJumpItemIndex == index;
+                    final itemKey = isJumpTarget
+                        ? (_jumpTargetKey ??= GlobalObjectKey(
+                            'jump-${widget.jumpToken}-$index',
+                          ))
+                        : ValueKey('item-$index');
+                    return Center(
+                      key: itemKey,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 760),
+                        child: switch (item) {
+                          _ContinuousChapterBody(:final chapter) => Padding(
+                            padding: EdgeInsets.only(
+                              top: chapter.index == 0 ? 0 : 20,
+                            ),
+                            child: _EpubChapterView(
+                              chapter: chapter,
+                              settings: settings,
+                              annotations: widget.annotations,
+                              searchQuery: widget.searchQuery,
+                              focusRange: focusRange,
+                              // Outer ListView already owns SelectionArea.
+                              enableSelection: false,
+                              bottomPadding: 20,
+                              onAnnotationSelected: (annotation) {
+                                widget.onEvent(
+                                  RendererAnnotationSelected(annotation.id),
+                                );
+                              },
+                              onTextSelected: _reportTextSelected,
+                            ),
+                          ),
+                        },
+                      ),
+                    );
+                  },
                 ),
-                itemCount: continuousItems.length,
-                itemBuilder: (context, index) {
-                  final item = continuousItems[index];
-                  final isJumpTarget = _pendingJumpItemIndex == index;
-                  final itemKey = isJumpTarget
-                      ? (_jumpTargetKey ??= GlobalObjectKey(
-                          'jump-${widget.jumpToken}-$index',
-                        ))
-                      : ValueKey('item-$index');
-                  return Center(
-                    key: itemKey,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 760),
-                      child: switch (item) {
-                        _ContinuousChapterHeader(:final chapter) => Padding(
-                          padding: EdgeInsets.only(
-                            top: chapter.index == 0 ? 0 : 28,
-                            bottom: 12,
-                          ),
-                          child: Text(
-                            chapter.title,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(
-                                  color: settings.themePreset.foreground,
-                                ),
-                          ),
-                        ),
-                        _ContinuousFragmentItem(
-                          :final chapter,
-                          :final fragment,
-                        ) =>
-                          _EpubFragmentView(
-                            chapter: chapter,
-                            fragment: fragment,
-                            settings: settings,
-                            annotations: widget.annotations,
-                            searchQuery: widget.searchQuery,
-                            focusRange: focusRange,
-                            onAnnotationSelected: (annotation) {
-                              widget.onEvent(
-                                RendererAnnotationSelected(annotation.id),
-                              );
-                            },
-                            onTextSelected: _reportTextSelected,
-                          ),
-                      },
-                    ),
-                  );
-                },
-              ),
               ),
             ),
             _PageTurnZone(
@@ -311,34 +342,16 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   }
 
   List<_ContinuousListItem> _continuousItemsFor(EpubDocument document) {
+    // One list item per chapter. Block splitting happens lazily inside the
+    // chapter widget when that row is built — open cost no longer O(all text).
     final key =
         '${widget.book.id}|${document.chapters.length}|${document.totalTextLength}';
     if (_continuousItemsCacheKey == key && _continuousItems.isNotEmpty) {
       return _continuousItems;
     }
-    final items = <_ContinuousListItem>[];
-    for (final chapter in document.chapters) {
-      items.add(_ContinuousChapterHeader(chapter));
-      final blocks = epubBlocks(chapter);
-      if (blocks.isEmpty) {
-        continue;
-      }
-      for (final block in blocks) {
-        items.add(
-          _ContinuousFragmentItem(
-            chapter: chapter,
-            fragment: EpubPageFragment(
-              chapterIndex: chapter.index,
-              href: chapter.href,
-              startOffset: block.startOffset,
-              endOffset: block.endOffset,
-              text: block.text,
-              blockType: block.type,
-            ),
-          ),
-        );
-      }
-    }
+    final items = <_ContinuousListItem>[
+      for (final chapter in document.chapters) _ContinuousChapterBody(chapter),
+    ];
     _continuousItemsCacheKey = key;
     _continuousItems = items;
     return items;
@@ -360,7 +373,10 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
             children: [
               PageView.builder(
                 controller: _pageController,
-                physics: const PageScrollPhysics(),
+                // Smooth page snaps with enough inertia for finger-follow turns.
+                physics: const BouncingScrollPhysics(
+                  parent: PageScrollPhysics(),
+                ),
                 allowImplicitScrolling: true,
                 itemCount: pages.length,
                 onPageChanged: (index) {
@@ -426,23 +442,10 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     final locator = widget.initialProgress?.locator;
     final items = _continuousItemsFor(document);
     if (locator != null && locator.chapterIndex != null && items.isNotEmpty) {
-      final jumpItems = <EpubJumpListItem>[
-        for (final item in items)
-          switch (item) {
-            _ContinuousChapterHeader(:final chapter) =>
-              EpubJumpListItem.header(chapterIndex: chapter.index),
-            _ContinuousFragmentItem(:final chapter, :final fragment) =>
-              EpubJumpListItem.fragment(
-                chapterIndex: chapter.index,
-                startOffset: fragment.startOffset,
-                endOffset: fragment.endOffset,
-              ),
-          },
-      ];
-      _pendingJumpItemIndex = epubContinuousItemIndexForLocator(
-        items: jumpItems,
-        locator: locator,
-      );
+      // Continuous list is 1:1 with chapters (lazy body), so the item index
+      // is the chapter index clamped into the list.
+      final chapterIndex = locator.chapterIndex!.clamp(0, items.length - 1);
+      _pendingJumpItemIndex = chapterIndex;
       _jumpTargetKey = GlobalObjectKey(
         'jump-${widget.jumpToken}-$_pendingJumpItemIndex',
       );
@@ -493,7 +496,8 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
 
       // Fallback: coarse progress estimate when the target item is not built yet.
       if (attempt < 12 && _pendingJumpItemIndex != null) {
-        final estimated = max *
+        final estimated =
+            max *
             (_pendingJumpItemIndex! /
                     (_continuousItemsFor(document).length.clamp(1, 1 << 30)))
                 .clamp(0.0, 1.0);
@@ -530,11 +534,32 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   }
 
   void _restoreInitialPage(EpubDocument document, List<EpubPage> pages) {
-    if (_pagedRestored || pages.isEmpty) {
+    if (_pagedRestored) {
+      return;
+    }
+    final locator = widget.initialProgress?.locator;
+    if (document.chapters.isNotEmpty) {
+      final desiredChapter =
+          locator?.chapterIndex ??
+          document.chapterForProgress(_restoreProgress(document)).index;
+      final clamped = desiredChapter.clamp(0, document.chapters.length - 1);
+      if (clamped != _pagedChapterIndex) {
+        _pagedChapterIndex = clamped;
+        _paginationCacheKey = null;
+        _currentPagedPage = 0;
+        // Rebuild with the restore chapter before locking restore.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+        return;
+      }
+    }
+    if (pages.isEmpty) {
       return;
     }
     _pagedRestored = true;
-    final locator = widget.initialProgress?.locator;
     final targetPage = _restorePageIndex(pages, locator);
     _currentPagedPage = targetPage;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -612,10 +637,22 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     ReaderSettings settings,
     BoxConstraints constraints,
   ) {
+    if (document.chapters.isEmpty) {
+      _paginationCacheKey = null;
+      _paginationCachePages = const [];
+      _pagedChapterIndexes = const {};
+      return const [];
+    }
+    final chapterIndex = _pagedChapterIndex.clamp(
+      0,
+      document.chapters.length - 1,
+    );
+    _pagedChapterIndex = chapterIndex;
     final key = [
       widget.book.id,
       document.chapters.length,
       document.totalTextLength,
+      chapterIndex,
       constraints.maxWidth.toStringAsFixed(1),
       constraints.maxHeight.toStringAsFixed(1),
       settings.fontSize.toStringAsFixed(2),
@@ -627,17 +664,84 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     if (_paginationCacheKey == key) {
       return _paginationCachePages;
     }
-    final pages = const EpubPaginator().paginate(
+    final pages = _paginateChapterAt(
       document: document,
+      chapterIndex: chapterIndex,
       settings: settings,
       viewport: Size(constraints.maxWidth, constraints.maxHeight),
     );
     _paginationCacheKey = key;
     _paginationCachePages = pages;
+    // Chapter nav uses document spine, not only currently measured pages.
     _pagedChapterIndexes = {
-      for (final page in pages) page.chapter.index,
+      for (final chapter in document.chapters) chapter.index,
     };
     return pages;
+  }
+
+  List<EpubPage> _paginateChapterAt({
+    required EpubDocument document,
+    required int chapterIndex,
+    required ReaderSettings settings,
+    required Size viewport,
+  }) {
+    if (document.chapters.isEmpty) {
+      return const [];
+    }
+    final index = chapterIndex.clamp(0, document.chapters.length - 1);
+    final chapter = document.chapters[index];
+    var globalOffset = 0;
+    for (final item in document.chapters) {
+      if (item.index == chapter.index) {
+        break;
+      }
+      globalOffset += item.text.length;
+    }
+    final totalLength = document.totalTextLength <= 0
+        ? 1
+        : document.totalTextLength;
+    return const EpubPaginator().paginateChapter(
+      chapter: chapter,
+      settings: settings,
+      viewport: viewport,
+      globalOffset: globalOffset,
+      totalLength: totalLength,
+    );
+  }
+
+  /// Switch paged mode to [chapterIndex] and land on first/last page.
+  void _loadPagedChapter(
+    EpubDocument document, {
+    required int chapterIndex,
+    required bool openAtEnd,
+  }) {
+    if (document.chapters.isEmpty) {
+      return;
+    }
+    final next = chapterIndex.clamp(0, document.chapters.length - 1);
+    if (next == _pagedChapterIndex && _lastPages.isNotEmpty) {
+      final target = openAtEnd ? _lastPages.length - 1 : 0;
+      _animateToPagedPage(target);
+      return;
+    }
+    _pagedChapterIndex = next;
+    _paginationCacheKey = null;
+    _currentPagedPage = 0;
+    _pagedRestored = true;
+    // Avoid PageController asserting when the new chapter has fewer pages.
+    if (_pageController.hasClients) {
+      _pageController.jumpToPage(0);
+    }
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pageController.hasClients || _lastPages.isEmpty) {
+        return;
+      }
+      final target = openAtEnd ? _lastPages.length - 1 : 0;
+      _pageController.jumpToPage(target);
+      _currentPagedPage = target;
+      _reportPagedLocation(document, _lastPages, target);
+    });
   }
 
   void _sendReady() {
@@ -776,47 +880,25 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     );
   }
 
-  /// Best-effort chapter offset for continuous mode using visible list items.
+  /// Best-effort chapter offset for continuous mode.
+  ///
+  /// With one list row per chapter, precise fragment offsets are only known
+  /// after a jump locator; otherwise report chapter start (progress still works).
   int _continuousChapterOffsetNearViewport(
     EpubDocument document,
     EpubChapter chapter,
   ) {
-    final items = _continuousItemsFor(document);
-    if (items.isEmpty || !_scrollController.hasClients) {
-      return 0;
+    final locator = widget.initialProgress?.locator;
+    if (locator != null &&
+        locator.chapterIndex == chapter.index &&
+        locator.chapterOffset != null) {
+      return locator.chapterOffset!.clamp(0, chapter.text.length);
     }
-    // Prefer the pending jump target when we just landed.
-    final pending = _pendingJumpItemIndex;
-    if (pending != null && pending >= 0 && pending < items.length) {
-      final item = items[pending];
-      if (item is _ContinuousFragmentItem &&
-          item.chapter.index == chapter.index) {
-        return item.fragment.startOffset;
-      }
-    }
-
-    // Estimate which item is near the top 18% of the viewport.
-    final position = _scrollController.position;
-    final max = position.maxScrollExtent;
-    if (max <= 0) {
-      return 0;
-    }
-    final ratio = (position.pixels / max).clamp(0.0, 1.0);
-    final estimatedIndex = (ratio * (items.length - 1))
-        .round()
-        .clamp(0, items.length - 1);
-    // Search nearby items in the current chapter for a fragment offset.
-    for (var delta = 0; delta < 24; delta += 1) {
-      for (final index in {estimatedIndex - delta, estimatedIndex + delta}) {
-        if (index < 0 || index >= items.length) {
-          continue;
-        }
-        final item = items[index];
-        if (item is _ContinuousFragmentItem &&
-            item.chapter.index == chapter.index) {
-          return item.fragment.startOffset;
-        }
-      }
+    final focus = widget.focusLocator;
+    if (focus != null &&
+        focus.chapterIndex == chapter.index &&
+        focus.chapterOffset != null) {
+      return focus.chapterOffset!.clamp(0, chapter.text.length);
     }
     return 0;
   }
@@ -961,21 +1043,30 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   }
 
   void _jumpToPagedPage(int direction) {
-    if (!_pageController.hasClients || _lastPages.isEmpty) {
-      return;
-    }
-    final target = (_currentPagedPage + direction)
-        .clamp(0, _lastPages.length - 1)
-        .toInt();
-    if (target == _currentPagedPage) {
-      return;
-    }
-    _pageController.jumpToPage(target);
-    _currentPagedPage = target;
     final document = _document;
-    if (document != null) {
-      _reportPagedLocation(document, _lastPages, target);
+    if (!_pageController.hasClients || _lastPages.isEmpty || document == null) {
+      return;
     }
+    final target = _currentPagedPage + direction;
+    if (target >= 0 && target < _lastPages.length) {
+      if (target == _currentPagedPage) {
+        return;
+      }
+      _pageController.jumpToPage(target);
+      _currentPagedPage = target;
+      _reportPagedLocation(document, _lastPages, target);
+      return;
+    }
+    // Cross chapter boundary: paginate neighbor chapter only.
+    final neighbor = _pagedChapterIndex + (direction > 0 ? 1 : -1);
+    if (neighbor < 0 || neighbor >= document.chapters.length) {
+      return;
+    }
+    _loadPagedChapter(
+      document,
+      chapterIndex: neighbor,
+      openAtEnd: direction < 0,
+    );
   }
 
   void _nextChapter() {
@@ -999,14 +1090,12 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     if (targetChapterIndex == currentChapterIndex) {
       return;
     }
-    if (widget.settings.readerMode == ReaderMode.paged &&
-        _lastPages.isNotEmpty) {
-      final targetPage = _lastPages.indexWhere(
-        (page) => page.chapter.index == targetChapterIndex,
+    if (widget.settings.readerMode == ReaderMode.paged) {
+      _loadPagedChapter(
+        document,
+        chapterIndex: targetChapterIndex,
+        openAtEnd: false,
       );
-      if (targetPage >= 0) {
-        _animateToPagedPage(targetPage);
-      }
       return;
     }
     _scrollToChapter(document, targetChapterIndex);
@@ -1061,13 +1150,7 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     final progress = document.progressForChapterIndex(chapterIndex);
     final items = _continuousItemsFor(document);
     if (items.isNotEmpty) {
-      final itemIndex = items.indexWhere((item) {
-        final chapter = switch (item) {
-          _ContinuousChapterHeader(:final chapter) => chapter,
-          _ContinuousFragmentItem(:final chapter) => chapter,
-        };
-        return chapter.index == chapterIndex;
-      });
+      final itemIndex = chapterIndex.clamp(0, items.length - 1);
       if (itemIndex >= 0) {
         _pendingJumpItemIndex = itemIndex;
         _jumpTargetKey = GlobalObjectKey(
@@ -1114,12 +1197,23 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   }
 
   void _turnPagedPage(int direction) {
-    if (!_pageController.hasClients || _lastPages.isEmpty) {
+    final document = _document;
+    if (!_pageController.hasClients || _lastPages.isEmpty || document == null) {
       return;
     }
-    final target = (_currentPagedPage + direction)
-        .clamp(0, _lastPages.length - 1)
-        .toInt();
+    final target = _currentPagedPage + direction;
+    if (target < 0 || target >= _lastPages.length) {
+      final neighbor = _pagedChapterIndex + (direction > 0 ? 1 : -1);
+      if (neighbor < 0 || neighbor >= document.chapters.length) {
+        return;
+      }
+      _loadPagedChapter(
+        document,
+        chapterIndex: neighbor,
+        openAtEnd: direction < 0,
+      );
+      return;
+    }
     if (target == _currentPagedPage) {
       return;
     }
@@ -1130,20 +1224,16 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     if (duration == Duration.zero) {
       _pageController.jumpToPage(target);
       _currentPagedPage = target;
-      final document = _document;
-      if (document != null) {
-        _reportPagedLocation(document, _lastPages, target);
-      }
+      _reportPagedLocation(document, _lastPages, target);
       return;
     }
     unawaited(
       _pageController
           .animateToPage(target, duration: duration, curve: Curves.easeOut)
           .then((_) {
-            final document = _document;
-            if (mounted && document != null) {
+            if (mounted && _document != null) {
               _currentPagedPage = target;
-              _reportPagedLocation(document, _lastPages, target);
+              _reportPagedLocation(_document!, _lastPages, target);
             }
           }),
     );
@@ -1476,7 +1566,8 @@ final class _EpubPagedPageView extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '$bookPageNumber / $totalBookPages',
+                        // Paged mode measures one chapter at a time.
+                        '本章 $bookPageNumber / $totalBookPages',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: textColor.withValues(alpha: 0.6),
                         ),
@@ -1521,6 +1612,7 @@ final class _EpubChapterView extends StatefulWidget {
     this.fragments,
     this.showTitle = true,
     this.bottomPadding = 32,
+    this.enableSelection = true,
   });
 
   final EpubChapter chapter;
@@ -1533,6 +1625,9 @@ final class _EpubChapterView extends StatefulWidget {
   final List<EpubPageFragment>? fragments;
   final bool showTitle;
   final double bottomPadding;
+
+  /// When false, parent owns SelectionArea (continuous mode).
+  final bool enableSelection;
 
   @override
   State<_EpubChapterView> createState() => _EpubChapterViewState();
@@ -1577,12 +1672,14 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
 
     // In paged mode the parent gives a tight height. Measurement deltas can
     // still leave content a few pixels taller; never assert-overflow the page.
-    final selectableBody = SelectionArea(
-      onSelectionChanged: (selection) {
-        _handleChapterSelectionChanged(selection);
-      },
-      child: body,
-    );
+    final selectableBody = widget.enableSelection
+        ? SelectionArea(
+            onSelectionChanged: (selection) {
+              _handleChapterSelectionChanged(selection);
+            },
+            child: body,
+          )
+        : body;
     return Padding(
       padding: EdgeInsets.only(bottom: widget.bottomPadding),
       child: LayoutBuilder(
@@ -1919,10 +2016,12 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       final focusStart = focusRange.start;
       final focusEnd = focusRange.end;
       if (focusEnd > focusStart) {
-        final overlapStart =
-            focusStart > fragment.startOffset ? focusStart : fragment.startOffset;
-        final overlapEnd =
-            focusEnd < fragment.endOffset ? focusEnd : fragment.endOffset;
+        final overlapStart = focusStart > fragment.startOffset
+            ? focusStart
+            : fragment.startOffset;
+        final overlapEnd = focusEnd < fragment.endOffset
+            ? focusEnd
+            : fragment.endOffset;
         if (overlapStart < overlapEnd) {
           matches.add(
             _AnnotationMatch(
@@ -2104,20 +2203,11 @@ sealed class _ContinuousListItem {
   const _ContinuousListItem();
 }
 
-final class _ContinuousChapterHeader extends _ContinuousListItem {
-  const _ContinuousChapterHeader(this.chapter);
+/// Continuous-mode row: whole chapter body, split lazily when painted.
+final class _ContinuousChapterBody extends _ContinuousListItem {
+  const _ContinuousChapterBody(this.chapter);
 
   final EpubChapter chapter;
-}
-
-final class _ContinuousFragmentItem extends _ContinuousListItem {
-  const _ContinuousFragmentItem({
-    required this.chapter,
-    required this.fragment,
-  });
-
-  final EpubChapter chapter;
-  final EpubPageFragment fragment;
 }
 
 final class _EpubCodeBlock extends StatelessWidget {

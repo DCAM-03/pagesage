@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 
@@ -51,8 +51,17 @@ final class EpubDocumentLoader {
   }
 
   Future<EpubDocument> _loadUncached(File file) async {
-    final bytes = await file.readAsBytes();
-    final archive = ZipDecoder().decodeBytes(bytes);
+    // Stream zip from disk so open does not allocate a second full-file buffer.
+    final input = InputFileStream(file.path);
+    try {
+      final archive = ZipDecoder().decodeStream(input);
+      return _documentFromArchive(archive);
+    } finally {
+      await input.close();
+    }
+  }
+
+  Future<EpubDocument> _documentFromArchive(Archive archive) async {
     final entries = {
       for (final entry in archive.files) _normalizePath(entry.name): entry,
     };

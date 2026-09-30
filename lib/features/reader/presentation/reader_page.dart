@@ -28,6 +28,9 @@ import '../../../renderers/epub/epub_renderer_view.dart';
 import '../../../renderers/pdf/pdf_renderer_view.dart';
 import '../../ai/presentation/ai_panel.dart';
 import '../../import/application/import_intent.dart';
+import '../../ocr/application/ocr_page_controller.dart';
+import '../../ocr/application/ocr_providers.dart';
+import '../../../domain/ocr/ocr_models.dart';
 import '../application/in_book_search_controller.dart';
 import '../application/reader_providers.dart';
 
@@ -48,21 +51,32 @@ final class ReaderRendererHostConfig {
     required this.focusLocator,
     required this.clearSearchHighlightsVersion,
     required this.onEvent,
+    this.ocrOverlayToken = 0,
+    this.ocrOverlayPage,
+    this.ocrOverlayBlocks = const [],
   });
 
   final Book book;
   final ReadingProgressSnapshot? progress;
   final ReaderSettings settings;
   final List<Annotation> annotations;
+
   /// Hard remount token (error retry, format re-open).
   final int version;
+
   /// Soft jump token (TOC / in-book search) without remounting the renderer.
   final int jumpToken;
   final String? searchQuery;
+
   /// Temporary source focus after note/bookmark/search jumps.
   final ReadingLocator? focusLocator;
   final int clearSearchHighlightsVersion;
   final ValueChanged<RendererEvent> onEvent;
+
+  /// Bumped when a new OCR overlay should be painted onto the PDF page.
+  final int ocrOverlayToken;
+  final int? ocrOverlayPage;
+  final List<Map<String, Object?>> ocrOverlayBlocks;
 }
 
 final class ReaderPage extends ConsumerStatefulWidget {
@@ -78,14 +92,31 @@ final class ReaderPage extends ConsumerStatefulWidget {
 final class _ReaderPageState extends ConsumerState<ReaderPage>
     with WidgetsBindingObserver {
   String? _statusText;
+  final ValueNotifier<String?> _statusNotifier = ValueNotifier<String?>(null);
   String? _renderError;
   bool? _rendererSearchAvailable;
   bool? _rendererTextSelectionAvailable;
+
+  /// Native PDF text layer (not OCR). OCR entry stays visible when this is false.
+  bool? _rendererNativeTextLayerAvailable;
+  bool _rendererOcrTextLayerAvailable = false;
   String? _rendererSearchUnavailableReason;
   String? _rendererSearchQuery;
   int _clearSearchHighlightsVersion = 0;
   List<RendererOutlineItem> _pdfOutline = const [];
   bool _markedOpened = false;
+  int _ocrOverlayToken = 0;
+  int? _ocrOverlayPage;
+  List<Map<String, Object?>> _ocrOverlayBlocks = const [];
+
+  /// Pending multi-page OCR overlays (double-page spread). Applied one-by-one
+  /// via successive [ocrOverlayToken] bumps after each page is recognized.
+  final List<({int page, List<Map<String, Object?>> blocks})>
+  _pendingOcrOverlays = [];
+
+  /// Pages whose OCR overlay is already painted in the current WebView session.
+  final Set<int> _restoredOcrPages = <int>{};
+  int _ocrRestoreGeneration = 0;
   RendererLocationChanged? _currentLocation;
   final ValueNotifier<RendererLocationChanged?> _locationNotifier =
       ValueNotifier<RendererLocationChanged?>(null);
@@ -139,10 +170,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         final textLayer =
             _rendererTextSelectionAvailable ?? _rendererSearchAvailable ?? true;
         _setTransientStatus(
-          jumpStatusLabelFor(
-            initialLocator,
-            pdfTextLayerAvailable: textLayer,
-          ),
+          jumpStatusLabelFor(initialLocator, pdfTextLayerAvailable: textLayer),
           clearAfter: canFlash
               ? const Duration(milliseconds: 1600)
               : const Duration(milliseconds: 2800),
@@ -197,6 +225,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     _locationChromeTimer?.cancel();
     _focusClearTimer?.cancel();
     _locationNotifier.dispose();
+    _statusNotifier.dispose();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_sessionController?.flush());
     super.dispose();
@@ -204,7 +233,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
 
   void _setTransientStatus(String? message, {Duration? clearAfter}) {
     _statusClearTimer?.cancel();
-    setState(() => _statusText = message);
+    _statusText = message;
+    _statusNotifier.value = message;
     if (message == null) {
       return;
     }
@@ -213,7 +243,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       if (!mounted || _statusText != message) {
         return;
       }
-      setState(() => _statusText = null);
+      _statusText = null;
+      _statusNotifier.value = null;
     });
   }
 
@@ -260,14 +291,32 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     }
   }
 
+  void _hideMobileChrome() {
+    if (!context.appBreakpoint.isCompact || !_mobileChromeVisible) {
+      return;
+    }
+    _mobileChromeTimer?.cancel();
+    setState(() => _mobileChromeVisible = false);
+  }
+
+  void _toggleMobileChrome({bool autoHide = true}) {
+    if (!context.appBreakpoint.isCompact) {
+      return;
+    }
+    if (_mobileChromeVisible) {
+      _hideMobileChrome();
+    } else {
+      _showMobileChrome(autoHide: autoHide);
+    }
+  }
+
   void _scheduleMobileChromeAutoHide() {
     _mobileChromeTimer?.cancel();
     if (!mounted || !context.appBreakpoint.isCompact) {
       return;
     }
-    // Slightly longer than before so users can reach bottom actions without
-    // the chrome vanishing mid-tap.
-    _mobileChromeTimer = Timer(const Duration(seconds: 5), () {
+    // Kindle-like: chrome stays long enough to hit actions, then recedes.
+    _mobileChromeTimer = Timer(const Duration(seconds: 4), () {
       if (mounted && !_selectionActionsOpen) {
         setState(() => _mobileChromeVisible = false);
       }
@@ -342,6 +391,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 Navigator.of(sheetContext).pop();
                 unawaited(_showAiPanel(context));
               },
+              onOcrPage: isPdf && _rendererNativeTextLayerAvailable == false
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_runOcrCurrentPage(context, book));
+                    }
+                  : null,
               onSettings: () {
                 Navigator.of(sheetContext).pop();
                 unawaited(_showReaderSettings(context, settings));
@@ -548,9 +603,6 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                   if (settings.hasValue && settings.value != null) {
                     _syncDesktopChromePrefs(settings.value!);
                   }
-                  final annotationList = ref
-                      .watch(annotationsByBookProvider(widget.bookId))
-                      .value;
                   return LayoutBuilder(
                     builder: (context, constraints) {
                       const desktopStatusBarHeight = 34.0;
@@ -628,20 +680,23 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                               decoration: BoxDecoration(
                                 color: readerSettings.themePreset.background,
                               ),
-                              child: ref.watch(readerRendererHostProvider)(
-                                ReaderRendererHostConfig(
-                                  book: book,
-                                  progress: _jumpProgress ?? snapshot,
-                                  settings: readerSettings,
-                                  annotations: annotationList ?? const [],
-                                  version: _rendererVersion,
-                                  jumpToken: _jumpToken,
-                                  searchQuery: _rendererSearchQuery,
-                                  focusLocator: _focusLocator,
-                                  clearSearchHighlightsVersion:
-                                      _clearSearchHighlightsVersion,
-                                  onEvent: _handleRendererEvent,
-                                ),
+                              // Annotations are watched in a leaf widget so
+                              // highlight updates do not rebuild the whole reader chrome.
+                              child: _ReaderAnnotationsHost(
+                                bookId: widget.bookId,
+                                book: book,
+                                progress: _jumpProgress ?? snapshot,
+                                settings: readerSettings,
+                                version: _rendererVersion,
+                                jumpToken: _jumpToken,
+                                searchQuery: _rendererSearchQuery,
+                                focusLocator: _focusLocator,
+                                clearSearchHighlightsVersion:
+                                    _clearSearchHighlightsVersion,
+                                onEvent: _handleRendererEvent,
+                                ocrOverlayToken: _ocrOverlayToken,
+                                ocrOverlayPage: _ocrOverlayPage,
+                                ocrOverlayBlocks: _ocrOverlayBlocks,
                               ),
                             ),
                           ),
@@ -658,9 +713,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                   constraints: const BoxConstraints(
                                     maxWidth: 760,
                                   ),
-                                  child: ValueListenableBuilder<
-                                    RendererLocationChanged?
-                                  >(
+                                  child: ValueListenableBuilder<RendererLocationChanged?>(
                                     valueListenable: _locationNotifier,
                                     builder: (context, location, _) {
                                       return _PdfQuickToolbar(
@@ -671,8 +724,13 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                         searchAvailable:
                                             _rendererSearchAvailable != false,
                                         textLayerAvailable:
-                                            _rendererTextSelectionAvailable !=
-                                            false,
+                                            // After OCR, selection works, but "native" may still be false.
+                                            // Treat either native or OCR overlay as selection-capable UI.
+                                            (_rendererNativeTextLayerAvailable ==
+                                                true) ||
+                                            _rendererOcrTextLayerAvailable ||
+                                            (_rendererTextSelectionAvailable !=
+                                                false),
                                         capabilityReason:
                                             _rendererSearchUnavailableReason,
                                         onPageJump: () =>
@@ -682,9 +740,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                         onZoomIn: () =>
                                             unawaited(_adjustReaderScale(1)),
                                         onFitWidth: () => unawaited(
-                                          _setPdfZoomMode(
-                                            PdfZoomMode.fitWidth,
-                                          ),
+                                          _setPdfZoomMode(PdfZoomMode.fitWidth),
                                         ),
                                         onFitPage: () => unawaited(
                                           _setPdfZoomMode(PdfZoomMode.fitPage),
@@ -696,6 +752,16 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                           context,
                                           currentBookmark,
                                         ),
+                                        onOcrPage:
+                                            _rendererNativeTextLayerAvailable ==
+                                                false
+                                            ? () => unawaited(
+                                                _runOcrCurrentPage(
+                                                  context,
+                                                  book,
+                                                ),
+                                              )
+                                            : null,
                                       );
                                     },
                                   ),
@@ -748,17 +814,25 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                 ),
                               ),
                             ),
-                          if (_statusText != null)
-                            Positioned(
-                              left: showDesktopToc ? tocWidth + 16 : 16,
-                              right: showDesktopContext
-                                  ? contextWidth + 16
-                                  : 16,
-                              bottom: showDesktopChrome
-                                  ? desktopStatusBarHeight + 10
-                                  : 16,
-                              child: _ReaderStatusBanner(message: _statusText!),
+                          // Status banner must keep Positioned as a *direct* Stack child.
+                          // Wrapping Positioned in ValueListenableBuilder breaks the
+                          // Stack and blanks the whole reader body.
+                          Positioned(
+                            left: showDesktopToc ? tocWidth + 16 : 16,
+                            right: showDesktopContext ? contextWidth + 16 : 16,
+                            bottom: showDesktopChrome
+                                ? desktopStatusBarHeight + 10
+                                : 16,
+                            child: ValueListenableBuilder<String?>(
+                              valueListenable: _statusNotifier,
+                              builder: (context, status, _) {
+                                if (status == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                return _ReaderStatusBanner(message: status);
+                              },
                             ),
+                          ),
                           if (_renderError != null)
                             Positioned.fill(
                               left: showDesktopToc ? tocWidth : 0,
@@ -778,77 +852,116 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                               right: 0,
                               bottom: 0,
                               height: desktopStatusBarHeight,
-                              child: ValueListenableBuilder<
-                                RendererLocationChanged?
-                              >(
-                                valueListenable: _locationNotifier,
-                                builder: (context, location, _) {
-                                  return _ReaderStatusBar(
-                                    book: book,
-                                    locator:
-                                        location?.locator ?? snapshot?.locator,
-                                    progress:
-                                        location?.progress ??
-                                        snapshot?.progress,
-                                    chapterTitle:
-                                        location?.chapterTitle ??
-                                        snapshot?.chapterTitle,
-                                    pageNumber: location?.pageNumber,
-                                    totalPages: location?.totalPages,
-                                    settings: readerSettings,
-                                    tocOpen: showDesktopToc,
-                                    contextOpen: showDesktopContext,
-                                    tocWidth: tocWidth,
-                                    contextWidth: contextWidth,
-                                  );
-                                },
+                              child:
+                                  ValueListenableBuilder<
+                                    RendererLocationChanged?
+                                  >(
+                                    valueListenable: _locationNotifier,
+                                    builder: (context, location, _) {
+                                      return _ReaderStatusBar(
+                                        book: book,
+                                        locator:
+                                            location?.locator ??
+                                            snapshot?.locator,
+                                        progress:
+                                            location?.progress ??
+                                            snapshot?.progress,
+                                        chapterTitle:
+                                            location?.chapterTitle ??
+                                            snapshot?.chapterTitle,
+                                        pageNumber: location?.pageNumber,
+                                        totalPages: location?.totalPages,
+                                        settings: readerSettings,
+                                        tocOpen: showDesktopToc,
+                                        contextOpen: showDesktopContext,
+                                        tocWidth: tocWidth,
+                                        contextWidth: contextWidth,
+                                      );
+                                    },
+                                  ),
+                            ),
+                          if (context.appBreakpoint.isCompact) ...[
+                            // Center-band toggle (Apple Books / Kindle style).
+                            // Kept as a short middle strip so vertical scroll and
+                            // edge page-turns still work.
+                            Positioned(
+                              left: 72,
+                              right: 72,
+                              top: 0,
+                              bottom: 0,
+                              child: Center(
+                                child: SizedBox(
+                                  height: 120,
+                                  width: double.infinity,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.translucent,
+                                    onTap: () =>
+                                        _toggleMobileChrome(autoHide: true),
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
                               ),
                             ),
-                          if (context.appBreakpoint.isCompact &&
-                              _mobileChromeVisible) ...[
+                            // Animated immersive chrome.
                             Positioned(
                               left: AppSpacing.x2,
                               right: AppSpacing.x2,
                               top: AppSpacing.x2,
-                              child: SafeArea(
-                                bottom: false,
-                                child: _MobileReaderTopBar(
-                                  title: book.title,
-                                  progress:
-                                      _currentLocation?.progress ??
-                                      snapshot?.progress,
-                                  locationLabel: _readerLocationText(
-                                    book: book,
-                                    locator:
-                                        _currentLocation?.locator ??
-                                        snapshot?.locator,
-                                    chapterTitle:
-                                        _currentLocation?.chapterTitle ??
-                                        snapshot?.chapterTitle,
-                                    pageNumber: _currentLocation?.pageNumber,
-                                    totalPages: _currentLocation?.totalPages,
-                                  ),
-                                  onBack: () async {
-                                    await ref
-                                        .read(
-                                          readerSessionControllerProvider(
-                                            widget.bookId,
+                              child: IgnorePointer(
+                                ignoring: !_mobileChromeVisible,
+                                child: AnimatedSlide(
+                                  duration: const Duration(milliseconds: 180),
+                                  curve: Curves.easeOutCubic,
+                                  offset: _mobileChromeVisible
+                                      ? Offset.zero
+                                      : const Offset(0, -0.35),
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 160),
+                                    opacity: _mobileChromeVisible ? 1 : 0,
+                                    child: SafeArea(
+                                      bottom: false,
+                                      child: _MobileReaderTopBar(
+                                        title: book.title,
+                                        progress:
+                                            _currentLocation?.progress ??
+                                            snapshot?.progress,
+                                        locationLabel: _readerLocationText(
+                                          book: book,
+                                          locator:
+                                              _currentLocation?.locator ??
+                                              snapshot?.locator,
+                                          chapterTitle:
+                                              _currentLocation?.chapterTitle ??
+                                              snapshot?.chapterTitle,
+                                          pageNumber:
+                                              _currentLocation?.pageNumber,
+                                          totalPages:
+                                              _currentLocation?.totalPages,
+                                        ),
+                                        onBack: () async {
+                                          await ref
+                                              .read(
+                                                readerSessionControllerProvider(
+                                                  widget.bookId,
+                                                ),
+                                              )
+                                              .flush();
+                                          if (context.mounted) {
+                                            context.go('/library');
+                                          }
+                                        },
+                                        onToc: () => unawaited(
+                                          _showTableOfContents(context, book),
+                                        ),
+                                        onMore: () => unawaited(
+                                          _showMobileMoreSheet(
+                                            context: context,
+                                            book: book,
+                                            settings: readerSettings,
+                                            currentBookmark: currentBookmark,
                                           ),
-                                        )
-                                        .flush();
-                                    if (context.mounted) {
-                                      context.go('/library');
-                                    }
-                                  },
-                                  onToc: () => unawaited(
-                                    _showTableOfContents(context, book),
-                                  ),
-                                  onMore: () => unawaited(
-                                    _showMobileMoreSheet(
-                                      context: context,
-                                      book: book,
-                                      settings: readerSettings,
-                                      currentBookmark: currentBookmark,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -858,93 +971,95 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                               left: AppSpacing.x2,
                               right: AppSpacing.x2,
                               bottom: AppSpacing.x2,
-                              child: SafeArea(
-                                top: false,
-                                child: ValueListenableBuilder<
-                                  RendererLocationChanged?
-                                >(
-                                  valueListenable: _locationNotifier,
-                                  builder: (context, location, _) {
-                                    return _MobileReaderBottomBar(
-                                      book: book,
-                                      locator:
-                                          location?.locator ??
-                                          snapshot?.locator,
-                                      progress:
-                                          location?.progress ??
-                                          snapshot?.progress,
-                                      chapterTitle:
-                                          location?.chapterTitle ??
-                                          snapshot?.chapterTitle,
-                                      pageNumber: location?.pageNumber,
-                                      totalPages: location?.totalPages,
-                                      bookmarked: currentBookmark != null,
-                                      searchAvailable:
-                                          _rendererSearchAvailable != false,
-                                      onToc: () => unawaited(
-                                        _showTableOfContents(context, book),
-                                      ),
-                                      onSearch: () => unawaited(
-                                        _showInBookSearch(context),
-                                      ),
-                                      onBookmark: () => _toggleBookmark(
-                                        context,
-                                        currentBookmark,
-                                      ),
-                                      onProgressTap: book.format == BookFormat.pdf
-                                          ? () => unawaited(
-                                              _showPageJump(context),
-                                            )
-                                          : null,
-                                      onMore: () => unawaited(
-                                        _showMobileMoreSheet(
-                                          context: context,
-                                          book: book,
-                                          settings: readerSettings,
-                                          currentBookmark: currentBookmark,
-                                        ),
-                                      ),
-                                    );
-                                  },
+                              child: IgnorePointer(
+                                ignoring: !_mobileChromeVisible,
+                                child: AnimatedSlide(
+                                  duration: const Duration(milliseconds: 180),
+                                  curve: Curves.easeOutCubic,
+                                  offset: _mobileChromeVisible
+                                      ? Offset.zero
+                                      : const Offset(0, 0.35),
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 160),
+                                    opacity: _mobileChromeVisible ? 1 : 0,
+                                    child: SafeArea(
+                                      top: false,
+                                      child:
+                                          ValueListenableBuilder<
+                                            RendererLocationChanged?
+                                          >(
+                                            valueListenable: _locationNotifier,
+                                            builder: (context, location, _) {
+                                              return _MobileReaderBottomBar(
+                                                book: book,
+                                                locator:
+                                                    location?.locator ??
+                                                    snapshot?.locator,
+                                                progress:
+                                                    location?.progress ??
+                                                    snapshot?.progress,
+                                                chapterTitle:
+                                                    location?.chapterTitle ??
+                                                    snapshot?.chapterTitle,
+                                                pageNumber:
+                                                    location?.pageNumber,
+                                                totalPages:
+                                                    location?.totalPages,
+                                                bookmarked:
+                                                    currentBookmark != null,
+                                                searchAvailable:
+                                                    _rendererSearchAvailable !=
+                                                    false,
+                                                onToc: () => unawaited(
+                                                  _showTableOfContents(
+                                                    context,
+                                                    book,
+                                                  ),
+                                                ),
+                                                onSearch: () => unawaited(
+                                                  _showInBookSearch(context),
+                                                ),
+                                                onBookmark: () =>
+                                                    _toggleBookmark(
+                                                      context,
+                                                      currentBookmark,
+                                                    ),
+                                                onProgressTap:
+                                                    book.format ==
+                                                        BookFormat.pdf
+                                                    ? () => unawaited(
+                                                        _showPageJump(context),
+                                                      )
+                                                    : null,
+                                                onMore: () => unawaited(
+                                                  _showMobileMoreSheet(
+                                                    context: context,
+                                                    book: book,
+                                                    settings: readerSettings,
+                                                    currentBookmark:
+                                                        currentBookmark,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ] else if (context.appBreakpoint.isCompact) ...[
-                            // Edge tap zones only — never cover the whole page or
-                            // reading gestures / WebView scrolling break.
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              top: 0,
-                              height: 56,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.translucent,
-                                onTap: () => _showMobileChrome(autoHide: true),
-                                child: const SizedBox.expand(),
-                              ),
-                            ),
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              height: 72,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.translucent,
-                                onTap: () => _showMobileChrome(autoHide: true),
-                                child: const SizedBox.expand(),
-                              ),
-                            ),
-                            Positioned(
-                              right: AppSpacing.x3,
-                              bottom: AppSpacing.x3,
-                              child: SafeArea(
-                                top: false,
-                                child: _ReaderChromeRevealButton(
-                                  onPressed: () =>
-                                      _showMobileChrome(autoHide: true),
+                            if (!_mobileChromeVisible)
+                              Positioned(
+                                right: AppSpacing.x3,
+                                bottom: AppSpacing.x3,
+                                child: SafeArea(
+                                  top: false,
+                                  child: _ReaderChromeRevealButton(
+                                    onPressed: () =>
+                                        _showMobileChrome(autoHide: true),
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ],
                       );
@@ -973,59 +1088,96 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     switch (event) {
       case RendererReady():
         _statusClearTimer?.cancel();
-        setState(() {
-          _statusText = null;
-          _renderError = null;
-        });
+        _statusText = null;
+        _statusNotifier.value = null;
+        if (_renderError != null) {
+          setState(() => _renderError = null);
+        }
       case RendererLocationChanged():
         _jumpProgress = null;
         _currentLocation = event;
         // Keep location chrome off the full-page rebuild path so scrolling /
         // page turns stay responsive.
         _scheduleLocationChromeUpdate(event);
+        // Restore saved OCR overlays for the pages now on screen.
+        unawaited(_restoreOcrOverlaysForVisiblePages());
+        // Immersive: hide chrome after the first deliberate navigation while
+        // reading (Kindle / Apple Books style), but keep it if the user just
+        // revealed tools.
+        if (context.appBreakpoint.isCompact &&
+            _mobileChromeVisible &&
+            !_selectionActionsOpen) {
+          _scheduleMobileChromeAutoHide();
+        }
         // Selection actions become stale after the reader moves.
         if (_selectionActionsOpen || _selectionOverlayEntry != null) {
           _closeSelectionOverlay();
           _selectionActionsOpen = false;
           _lastSelectionActionKey = null;
         }
-        if (_statusText != null || _renderError != null) {
+        if (_statusText != null) {
           _statusClearTimer?.cancel();
-          setState(() {
-            _statusText = null;
-            _renderError = null;
-          });
+          _statusText = null;
+          _statusNotifier.value = null;
         }
-      case RendererTextSelected(:final text):
-        setState(() {
-          _selectedText = event;
-          // If the desktop AI pane is already open, keep it focused so the
-          // "将发送文本" panel visibly tracks the new selection.
-          if (_desktopContextOpen) {
-            _desktopContextTab = _ReaderContextTab.ai;
+        if (_renderError != null) {
+          setState(() => _renderError = null);
+        }
+      case RendererTextSelected():
+        // Avoid setState on every selection event — rebuilding the whole reader
+        // (and WebView host) while the native ::selection is active makes the
+        // highlight jump. Only rebuild when the desktop AI pane needs the text.
+        final previousText = _selectedText?.text;
+        _selectedText = event;
+        if (_desktopContextOpen) {
+          final needAiTab = _desktopContextTab != _ReaderContextTab.ai;
+          final textChanged = previousText != event.text;
+          if (needAiTab || textChanged) {
+            setState(() {
+              _desktopContextTab = _ReaderContextTab.ai;
+            });
           }
-        });
-        _setTransientStatus('已选择 ${text.length} 个字符');
+        }
+        // Selection is already obvious via the action menu — no toast.
         _showSelectionActionsOnce(event);
       case RendererSearchResults(:final results):
-        _setTransientStatus('找到 ${results.length} 个结果');
+        if (results.isNotEmpty) {
+          _setTransientStatus(
+            '找到 ${results.length} 个结果',
+            clearAfter: const Duration(seconds: 2),
+          );
+        }
       case RendererOutlineChanged(:final items):
         setState(() => _pdfOutline = items);
       case RendererBookmarkRequested(:final locator):
         _saveBookmarkAt(locator);
-      case RendererCapabilityChanged(:final search, :final textSelection, :final reason):
+      case RendererCapabilityChanged(
+        :final search,
+        :final textSelection,
+        :final reason,
+        :final nativeTextLayer,
+        :final ocrTextLayer,
+      ):
         setState(() {
           _rendererSearchAvailable = search;
           _rendererTextSelectionAvailable = textSelection;
+          // Prefer explicit native flag; fall back to textSelection for legacy.
+          _rendererNativeTextLayerAvailable = nativeTextLayer ?? textSelection;
+          _rendererOcrTextLayerAvailable = ocrTextLayer ?? false;
           _rendererSearchUnavailableReason = reason;
         });
-        if ((!search || !textSelection) &&
-            reason != null &&
-            reason.isNotEmpty) {
-          _setTransientStatus(reason, clearAfter: const Duration(seconds: 5));
-        }
+      // No floating toast for missing text layer — it is a lasting property
+      // of the document, shown only in toolbars/menus when relevant.
       case RendererNotice(:final message):
-        _setTransientStatus(message, clearAfter: const Duration(seconds: 3));
+        // Soft notices only when actionable/transient; skip sticky capability copy.
+        final lower = message.toLowerCase();
+        final isCapabilityNoise =
+            message.contains('没有文本层') ||
+            message.contains('没有可搜索文本') ||
+            lower.contains('no text');
+        if (!isCapabilityNoise) {
+          _setTransientStatus(message, clearAfter: const Duration(seconds: 3));
+        }
       case RendererAnnotationSelected(:final annotationId, :final sourceRect):
         _showAnnotationActionsById(annotationId, sourceRect: sourceRect);
       case RendererFailed(:final message):
@@ -1367,11 +1519,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                   onPressed: () {
                                     dismiss();
                                     unawaited(
-                                      _editAnnotation(
-                                        context,
-                                        ref,
-                                        annotation,
-                                      ),
+                                      _editAnnotation(context, ref, annotation),
                                     );
                                   },
                                   child: const Text('样式'),
@@ -1437,13 +1585,19 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   void _showSelectionActionsOnce(RendererTextSelected event) {
-    final key = '${event.locator.toJsonText()}:${event.text}';
+    // Stable key: text + page/chapter only. Do NOT include selectionRects —
+    // they jitter a few pixels across events and used to thrash the menu.
+    final pageOrChapter =
+        event.locator.page?.toString() ??
+        event.locator.chapterIndex?.toString() ??
+        '';
+    final key = '${event.text.trim()}@$pageOrChapter';
     // Ignore duplicate events while the same selection menu is open.
     if (_selectionActionsOpen && _lastSelectionActionKey == key) {
       return;
     }
     if (_selectionActionsOpen && _lastSelectionActionKey != key) {
-      // Selection changed while menu open: replace it.
+      // Meaningful selection change while menu open: replace it.
       _closeSelectionOverlay();
       _selectionActionsOpen = false;
     }
@@ -1527,9 +1681,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 const SizedBox(height: AppSpacing.x4),
                 Text(
                   'EPUB 字体',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: AppSpacing.x2),
                 Wrap(
@@ -1797,6 +1951,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text('已添加书签'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
         action: SnackBarAction(
           label: '添加备注',
           onPressed: () => unawaited(_editBookmarkNote(context, ref, bookmark)),
@@ -1817,9 +1973,13 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已添加书签')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已添加书签'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _showNotebook(BuildContext context) async {
@@ -1892,7 +2052,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     required double availableWidth,
     double maxFraction = 0.42,
   }) {
-    final widthBudget = (availableWidth * maxFraction).clamp(min, max).toDouble();
+    final widthBudget = (availableWidth * maxFraction)
+        .clamp(min, max)
+        .toDouble();
     return value.clamp(min, widthBudget).toDouble();
   }
 
@@ -2070,9 +2232,13 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!context.mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已添加标注')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已添加标注'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _saveQuickAnnotation(
@@ -2093,9 +2259,23 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!context.mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已添加标注')));
+    // v1 freeze F-03: scan/OCR pages are approximate — be honest in UI.
+    final approximate =
+        _rendererNativeTextLayerAvailable == false ||
+        _rendererOcrTextLayerAvailable;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          approximate
+              ? (style == AnnotationStyle.underline
+                    ? '已添加下划线（扫描/OCR 页为近似定位）'
+                    : '已添加高亮（扫描/OCR 页为近似定位）')
+              : '已添加标注',
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: approximate ? 3 : 2),
+      ),
+    );
   }
 
   Future<void> _showTextSelectionActions(
@@ -2110,20 +2290,20 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         return;
       }
       await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: _SelectionActionSurface(
-          selection: selection,
-          compact: true,
-          onAction: (action) {
-            Navigator.of(sheetContext).pop();
-            unawaited(_handleSelectionAction(context, selection, action));
-          },
-          onDismiss: () => Navigator.of(sheetContext).pop(),
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: _SelectionActionSurface(
+            selection: selection,
+            compact: true,
+            onAction: (action) {
+              Navigator.of(sheetContext).pop();
+              unawaited(_handleSelectionAction(context, selection, action));
+            },
+            onDismiss: () => Navigator.of(sheetContext).pop(),
+          ),
         ),
-      ),
-    );
+      );
     } finally {
       _selectionActionsOpen = false;
       _lastSelectionActionKey = null;
@@ -2142,10 +2322,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     // Toolbar is icon-only; keep intrinsic width and avoid fixed-width overflow.
     const estimatedWidth = 520.0;
     const estimatedHeight = 56.0;
-    final localTarget = _toOverlayLocalRect(
-      selection.sourceRect,
-      overlayBox,
-    );
+    final localTarget = _toOverlayLocalRect(selection.sourceRect, overlayBox);
     final placement = _placeFloatingMenu(
       overlaySize: overlaySize,
       target: localTarget,
@@ -2487,9 +2664,13 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!context.mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已保存为笔记'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   void _jumpTo(
@@ -2503,9 +2684,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     );
     final textLayer =
         pdfTextLayerAvailable ??
-        (_rendererTextSelectionAvailable ??
-            _rendererSearchAvailable ??
-            true);
+        (_rendererTextSelectionAvailable ?? _rendererSearchAvailable ?? true);
     final canFlash =
         jumpPrecisionFor(enriched) == JumpPrecision.phrase &&
         (enriched.type != ReadingLocatorType.pdf || textLayer);
@@ -2547,6 +2726,401 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         _focusLocator = null;
       });
     });
+  }
+
+  Future<void> _runOcrCurrentPage(BuildContext context, Book book) async {
+    if (book.format != BookFormat.pdf) {
+      return;
+    }
+    final fallbackPage = _currentLocation?.pageNumber;
+    if (fallbackPage == null || fallbackPage < 1) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('当前页码未知，请稍后再试')));
+      return;
+    }
+
+    final pdfController = ref.read(activePdfRendererControllerProvider);
+    // Double-page: OCR both pages of the visible spread.
+    List<int> pages = [fallbackPage];
+    if (pdfController != null) {
+      try {
+        pages = await pdfController.getVisiblePages(fallbackPage: fallbackPage);
+      } on Object {
+        pages = [fallbackPage];
+      }
+    }
+    if (pages.isEmpty) {
+      pages = [fallbackPage];
+    }
+
+    final controller = ref.read(ocrPageControllerProvider(book.id).notifier);
+    final statusLabel = pages.length > 1
+        ? '正在识别第 ${pages.first}–${pages.last} 页…'
+        : '正在识别第 ${pages.first} 页…';
+    _setTransientStatus(statusLabel, clearAfter: const Duration(seconds: 12));
+
+    final completed = await controller.recognizePages(
+      book: book,
+      pageNumbers: pages,
+      // Reuse session + disk cache; only re-OCR when user force-refreshes later.
+      forceRefresh: false,
+      exportPage: pdfController == null
+          ? null
+          : (page) async {
+              try {
+                var exported = await pdfController.exportPageImage(
+                  pageNumber: page,
+                );
+                if (exported == null || exported.bytes.isEmpty) {
+                  await Future<void>.delayed(const Duration(milliseconds: 180));
+                  exported = await pdfController.exportPageImage(
+                    pageNumber: page,
+                  );
+                }
+                return exported?.bytes;
+              } on Object {
+                return null;
+              }
+            },
+    );
+    if (!mounted) {
+      return;
+    }
+    final state = ref.read(ocrPageControllerProvider(book.id));
+    final messenger = ScaffoldMessenger.of(this.context);
+    if (completed.isEmpty) {
+      final message = state.errorMessage;
+      if (message != null && message.isNotEmpty) {
+        messenger.showSnackBar(SnackBar(content: Text(message)));
+      } else if (!state.isRunning) {
+        messenger.showSnackBar(const SnackBar(content: Text('已取消识别')));
+      }
+      return;
+    }
+
+    final withGeometry = completed
+        .where((item) => item.result.hasGeometry)
+        .toList(growable: false);
+    final combinedText = completed
+        .map((item) => item.result.text.trim())
+        .where((text) => text.isNotEmpty)
+        .join('\n\n');
+
+    if (withGeometry.isNotEmpty) {
+      final overlays = withGeometry
+          .map(
+            (item) => (
+              page: item.page,
+              blocks: item.result.blocks
+                  .where((block) => block.hasGeometry)
+                  .map((block) => block.toJson())
+                  .toList(growable: false),
+            ),
+          )
+          .toList(growable: false);
+      _pendingOcrOverlays
+        ..clear()
+        ..addAll(overlays.skip(1));
+      setState(() {
+        _ocrOverlayPage = overlays.first.page;
+        _ocrOverlayBlocks = overlays.first.blocks;
+        _ocrOverlayToken += 1;
+      });
+      for (final item in withGeometry) {
+        _restoredOcrPages.add(item.page);
+      }
+      _flushPendingOcrOverlays();
+
+      // Overlay is the primary feedback; keep status brief and auto-clear.
+      // Avoid sticky SnackBars for successful OCR — they linger over the page.
+      final pageLabel = pages.length > 1
+          ? '第 ${pages.first}–${pages.last} 页'
+          : '第 ${pages.first} 页';
+      messenger.hideCurrentSnackBar();
+      _setTransientStatus(
+        '$pageLabel 可划词',
+        clearAfter: const Duration(milliseconds: 1600),
+      );
+      return;
+    }
+
+    final first = completed.first;
+    _setTransientStatus(
+      '第 ${first.page} 页识别完成',
+      clearAfter: const Duration(seconds: 2),
+    );
+    await _showOcrResultSheet(
+      this.context,
+      book: book,
+      pageNumber: first.page,
+      result: OcrPageResult(
+        text: combinedText.isEmpty ? first.result.text : combinedText,
+        language: first.result.language,
+        engine: first.result.engine,
+        confidence: first.result.confidence,
+        blocks: first.result.blocks,
+      ),
+    );
+  }
+
+  void _flushPendingOcrOverlays() {
+    if (_pendingOcrOverlays.isEmpty || !mounted) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _pendingOcrOverlays.isEmpty) {
+        return;
+      }
+      final next = _pendingOcrOverlays.removeAt(0);
+      setState(() {
+        _ocrOverlayPage = next.page;
+        _ocrOverlayBlocks = next.blocks;
+        _ocrOverlayToken += 1;
+      });
+      if (_pendingOcrOverlays.isNotEmpty) {
+        _flushPendingOcrOverlays();
+      }
+    });
+  }
+
+  /// Re-apply OCR overlays from session/disk cache when the user returns
+  /// to a previously recognized page — no re-OCR, no toast.
+  Future<void> _restoreOcrOverlaysForVisiblePages() async {
+    final bookAsync = ref.read(readerBookProvider(widget.bookId));
+    final book = bookAsync.asData?.value;
+    if (book == null || book.format != BookFormat.pdf) {
+      return;
+    }
+    if (_rendererTextSelectionAvailable == true) {
+      // Native text layer exists; OCR overlays are only for scan pages.
+      // Still allow restore if we already painted OCR this session.
+    }
+    final fallbackPage = _currentLocation?.pageNumber;
+    if (fallbackPage == null || fallbackPage < 1) {
+      return;
+    }
+    final generation = ++_ocrRestoreGeneration;
+    final pdfController = ref.read(activePdfRendererControllerProvider);
+    List<int> pages = [fallbackPage];
+    if (pdfController != null) {
+      try {
+        pages = await pdfController.getVisiblePages(fallbackPage: fallbackPage);
+      } on Object {
+        pages = [fallbackPage];
+      }
+    }
+    if (!mounted || generation != _ocrRestoreGeneration) {
+      return;
+    }
+    final controller = ref.read(ocrPageControllerProvider(book.id).notifier);
+    final toRestore = <({int page, List<Map<String, Object?>> blocks})>[];
+    for (final page in pages) {
+      if (_restoredOcrPages.contains(page)) {
+        continue;
+      }
+      final cached = await controller.peekCached(pageNumber: page);
+      if (!mounted || generation != _ocrRestoreGeneration) {
+        return;
+      }
+      if (cached == null || !cached.hasGeometry) {
+        continue;
+      }
+      final blocks = cached.blocks
+          .where((block) => block.hasGeometry)
+          .map((block) => block.toJson())
+          .toList(growable: false);
+      if (blocks.isEmpty) {
+        continue;
+      }
+      toRestore.add((page: page, blocks: blocks));
+    }
+    if (toRestore.isEmpty || !mounted || generation != _ocrRestoreGeneration) {
+      return;
+    }
+    _pendingOcrOverlays
+      ..clear()
+      ..addAll(toRestore.skip(1));
+    setState(() {
+      _ocrOverlayPage = toRestore.first.page;
+      _ocrOverlayBlocks = toRestore.first.blocks;
+      _ocrOverlayToken += 1;
+    });
+    for (final item in toRestore) {
+      _restoredOcrPages.add(item.page);
+    }
+    _flushPendingOcrOverlays();
+  }
+
+  Future<void> _showOcrResultSheet(
+    BuildContext context, {
+    required Book book,
+    required int pageNumber,
+    required OcrPageResult result,
+  }) async {
+    final locator = ReadingLocator.pdf(
+      page: pageNumber,
+      progress: _currentLocation?.progress ?? 0,
+      excerpt: result.text.length > 120
+          ? '${result.text.substring(0, 120)}…'
+          : result.text,
+    );
+
+    if (context.supportsSidePanel) {
+      // Desktop: inject into AI panel as the primary "ask" path, and also show
+      // a lightweight dialog for copy / review.
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Text('本页文本（OCR · 第 $pageNumber 页）'),
+            content: SizedBox(
+              width: 520,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '文本识别在本地完成，不会上传书籍页面。',
+                    style: Theme.of(dialogContext).textTheme.bodySmall
+                        ?.copyWith(
+                          color: Theme.of(
+                            dialogContext,
+                          ).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.x2),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 360),
+                    child: SingleChildScrollView(
+                      child: SelectableText(result.text),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('关闭'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: result.text));
+                  if (dialogContext.mounted) {
+                    ScaffoldMessenger.of(
+                      dialogContext,
+                    ).showSnackBar(const SnackBar(content: Text('已复制本页文本')));
+                  }
+                },
+                child: const Text('复制'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  unawaited(
+                    _showAiPanel(
+                      context,
+                      locatorOverride: locator,
+                      initialContextOverride: result.text,
+                    ),
+                  );
+                },
+                child: const Text('问 AI'),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return _ReaderBottomSheetFrame(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.x4,
+              AppSpacing.x2,
+              AppSpacing.x4,
+              AppSpacing.x4,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '本页文本（OCR · 第 $pageNumber 页）',
+                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.x1),
+                Text(
+                  '文本识别在本地完成，不会上传书籍页面。',
+                  style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.x3),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.45,
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(result.text),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.x3),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await Clipboard.setData(
+                            ClipboardData(text: result.text),
+                          );
+                          if (sheetContext.mounted) {
+                            ScaffoldMessenger.of(sheetContext).showSnackBar(
+                              const SnackBar(content: Text('已复制本页文本')),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.copy_outlined),
+                        label: const Text('复制'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.x2),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          unawaited(
+                            _showAiPanel(
+                              context,
+                              locatorOverride: locator,
+                              initialContextOverride: result.text,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.auto_awesome_outlined),
+                        label: const Text('问 AI'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _showAiPanel(
@@ -2887,9 +3461,13 @@ final class _InBookSearchSheetState extends ConsumerState<_InBookSearchSheet> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已保存为笔记'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 }
 
@@ -3103,10 +3681,11 @@ final class _MobileReaderBottomBar extends StatelessWidget {
                         location,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                            ),
                       ),
                     ),
                     Text(
@@ -3199,6 +3778,7 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
     this.onZoomIn,
     this.onFitWidth,
     this.onFitPage,
+    this.onOcrPage,
   });
 
   final Book book;
@@ -3219,6 +3799,7 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
   final VoidCallback? onZoomIn;
   final VoidCallback? onFitWidth;
   final VoidCallback? onFitPage;
+  final VoidCallback? onOcrPage;
 
   @override
   Widget build(BuildContext context) {
@@ -3237,9 +3818,9 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
         children: [
           Text(
             '阅读操作',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: AppSpacing.x1),
           Text(
@@ -3271,8 +3852,8 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
                       child: Text(
                         capabilityReason ??
                             (!textLayerAvailable
-                                ? '此 PDF 没有可选择文本，划词与高亮不可用'
-                                : '此 PDF 不支持书内搜索'),
+                                ? '无文本层 · 可用「识别可见页」；标注为近似定位'
+                                : '不支持书内搜索'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -3280,14 +3861,25 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
                 ),
               ),
             ),
+            if (onOcrPage != null) ...[
+              const SizedBox(height: AppSpacing.x2),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: onOcrPage,
+                  icon: const Icon(Icons.document_scanner_outlined),
+                  label: const Text('识别可见页'),
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: AppSpacing.x3),
           if (isPdf) ...[
             Text(
               'PDF',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: AppSpacing.x2),
             Wrap(
@@ -3326,15 +3918,21 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
                     selected: settings.pdfZoomMode == PdfZoomMode.fitPage,
                     onTap: onFitPage!,
                   ),
+                if (onOcrPage != null)
+                  _MobileMoreChip(
+                    icon: Icons.document_scanner_outlined,
+                    label: '识别可见页',
+                    onTap: onOcrPage!,
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.x4),
           ],
           Text(
             '常用',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: AppSpacing.x2),
           ListTile(
@@ -3434,6 +4032,7 @@ final class _PdfQuickToolbar extends StatelessWidget {
     this.searchAvailable = true,
     this.textLayerAvailable = true,
     this.capabilityReason,
+    this.onOcrPage,
   });
 
   final int? pageNumber;
@@ -3450,6 +4049,7 @@ final class _PdfQuickToolbar extends StatelessWidget {
   final bool searchAvailable;
   final bool textLayerAvailable;
   final String? capabilityReason;
+  final VoidCallback? onOcrPage;
 
   @override
   Widget build(BuildContext context) {
@@ -3469,14 +4069,14 @@ final class _PdfQuickToolbar extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                capabilityReason ??
-                    (!textLayerAvailable
-                        ? '此 PDF 没有可选择文本，划词与高亮不可用'
-                        : '此 PDF 不支持书内搜索'),
-                maxLines: 2,
+                // Compact status, not a sticky warning paragraph.
+                !textLayerAvailable
+                    ? (onOcrPage != null ? '无文本层 · 可识别（标注为近似）' : '无文本层')
+                    : '搜索不可用',
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colorScheme.statusWarning,
+                  color: colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -3528,6 +4128,15 @@ final class _PdfQuickToolbar extends StatelessWidget {
                 tooltip: searchAvailable ? '搜索 PDF' : '此 PDF 不可搜索',
                 onPressed: searchAvailable ? onSearch : null,
               ),
+              if (onOcrPage != null) ...[
+                const SizedBox(width: AppSpacing.x1),
+                _PdfToolbarChip(
+                  icon: Icons.document_scanner_outlined,
+                  label: '识别可见页',
+                  tooltip: '识别当前可见页（双页模式会识别对开两页）',
+                  onPressed: onOcrPage!,
+                ),
+              ],
               _PdfToolbarIconButton(
                 icon: bookmarked ? Icons.bookmark : Icons.bookmark_add_outlined,
                 tooltip: bookmarked ? '取消书签' : '添加书签',
@@ -4166,7 +4775,9 @@ final class _ContextTabChip extends StatelessWidget {
               Icon(
                 tab.icon,
                 size: 16,
-                color: selected ? colorScheme.primary : colorScheme.textSecondary,
+                color: selected
+                    ? colorScheme.primary
+                    : colorScheme.textSecondary,
               ),
               const SizedBox(width: 6),
               Text(
@@ -4250,10 +4861,11 @@ final class _DesktopContextPane extends StatelessWidget {
                           activeTab.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.2,
+                              ),
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -4264,9 +4876,8 @@ final class _DesktopContextPane extends StatelessWidget {
                           },
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colorScheme.textSecondary,
-                          ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.textSecondary),
                         ),
                       ],
                     ),
@@ -4935,9 +5546,7 @@ Future<void> _handleNotebookAction(
             conversation.sourceText ?? conversation.contextText,
           _ => entry.subtitle,
         };
-        onSelected(
-          enrichLocatorForJump(locator, fallbackExcerpt: fallback),
-        );
+        onSelected(enrichLocatorForJump(locator, fallbackExcerpt: fallback));
       }
     case _NotebookAction.edit:
       switch (entry.source) {
@@ -4996,9 +5605,13 @@ Future<void> _saveNotebookAiAsNote(
     ref.invalidate(notesByBookProvider(conversation.bookId!));
   }
   if (context.mounted) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已保存为笔记'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 }
 
@@ -5118,6 +5731,8 @@ Future<void> _deleteBookmarkWithUndo(
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       content: const Text('已删除书签'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 4),
       action: SnackBarAction(
         label: '撤销',
         onPressed: () => unawaited(
@@ -5680,7 +6295,10 @@ final class _DesktopTocPaneState extends State<_DesktopTocPane> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: colorScheme.primary, width: 1.2),
+                  borderSide: BorderSide(
+                    color: colorScheme.primary,
+                    width: 1.2,
+                  ),
                 ),
               ),
             ),
@@ -5944,6 +6562,63 @@ final class _DesktopTocPaneState extends State<_DesktopTocPane> {
   }
 }
 
+/// Leaf host: only this subtree rebuilds when annotations change.
+final class _ReaderAnnotationsHost extends ConsumerWidget {
+  const _ReaderAnnotationsHost({
+    required this.bookId,
+    required this.book,
+    required this.progress,
+    required this.settings,
+    required this.version,
+    required this.jumpToken,
+    required this.searchQuery,
+    required this.focusLocator,
+    required this.clearSearchHighlightsVersion,
+    required this.onEvent,
+    required this.ocrOverlayToken,
+    required this.ocrOverlayPage,
+    required this.ocrOverlayBlocks,
+  });
+
+  final String bookId;
+  final Book book;
+  final ReadingProgressSnapshot? progress;
+  final ReaderSettings settings;
+  final int version;
+  final int jumpToken;
+  final String? searchQuery;
+  final ReadingLocator? focusLocator;
+  final int clearSearchHighlightsVersion;
+  final ValueChanged<RendererEvent> onEvent;
+  final int ocrOverlayToken;
+  final int? ocrOverlayPage;
+  final List<Map<String, Object?>> ocrOverlayBlocks;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final annotations =
+        ref.watch(annotationsByBookProvider(bookId)).value ??
+        const <Annotation>[];
+    return ref.watch(readerRendererHostProvider)(
+      ReaderRendererHostConfig(
+        book: book,
+        progress: progress,
+        settings: settings,
+        annotations: annotations,
+        version: version,
+        jumpToken: jumpToken,
+        searchQuery: searchQuery,
+        focusLocator: focusLocator,
+        clearSearchHighlightsVersion: clearSearchHighlightsVersion,
+        onEvent: onEvent,
+        ocrOverlayToken: ocrOverlayToken,
+        ocrOverlayPage: ocrOverlayPage,
+        ocrOverlayBlocks: ocrOverlayBlocks,
+      ),
+    );
+  }
+}
+
 final annotationsByBookProvider =
     StreamProvider.family<List<Annotation>, String>((ref, bookId) {
       return ref.watch(annotationRepositoryProvider).watchByBook(bookId);
@@ -6054,11 +6729,7 @@ Future<void> _showAnnotationActions(
   );
 }
 
-
-Future<void> _openLinkedAnnotationNote(
-  BuildContext context,
-  Note note,
-) async {
+Future<void> _openLinkedAnnotationNote(BuildContext context, Note note) async {
   await showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
@@ -6071,18 +6742,12 @@ Future<void> _openLinkedAnnotationNote(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (note.sourceText?.trim().isNotEmpty == true) ...[
-                Text(
-                  '原文',
-                  style: Theme.of(dialogContext).textTheme.labelLarge,
-                ),
+                Text('原文', style: Theme.of(dialogContext).textTheme.labelLarge),
                 const SizedBox(height: 6),
                 Text(note.sourceText!),
                 const SizedBox(height: 12),
               ],
-              Text(
-                '笔记',
-                style: Theme.of(dialogContext).textTheme.labelLarge,
-              ),
+              Text('笔记', style: Theme.of(dialogContext).textTheme.labelLarge),
               const SizedBox(height: 6),
               Text(note.content),
             ],
@@ -6135,9 +6800,13 @@ Future<void> _saveAnnotationAsNote(
   if (!context.mounted) {
     return;
   }
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('已保存为笔记'),
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: 2),
+    ),
+  );
 }
 
 Future<void> _editAnnotation(
@@ -6227,6 +6896,9 @@ final class _DefaultRendererHost extends StatelessWidget {
         focusLocator: config.focusLocator,
         clearSearchHighlightsVersion: config.clearSearchHighlightsVersion,
         jumpToken: config.jumpToken,
+        ocrOverlayToken: config.ocrOverlayToken,
+        ocrOverlayPage: config.ocrOverlayPage,
+        ocrOverlayBlocks: config.ocrOverlayBlocks,
         onEvent: config.onEvent,
       ),
     };
@@ -6395,26 +7067,29 @@ final class _ReaderSettingsSheetState
                 const SizedBox(height: AppSpacing.x4),
                 Text(
                   'EPUB 字体',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: AppSpacing.x2),
                 Wrap(
                   spacing: AppSpacing.x2,
                   runSpacing: AppSpacing.x2,
-                  children: ReaderFonts.options.map((font) {
-                    final selected =
-                        ReaderFonts.resolve(_settings.fontFamily).id == font.id;
-                    return ChoiceChip(
-                      label: Text(font.label),
-                      selected: selected,
-                      onSelected: (_) {
-                        _fontController.text = font.id;
-                        _update(_settings.copyWith(fontFamily: font.id));
-                      },
-                    );
-                  }).toList(growable: false),
+                  children: ReaderFonts.options
+                      .map((font) {
+                        final selected =
+                            ReaderFonts.resolve(_settings.fontFamily).id ==
+                            font.id;
+                        return ChoiceChip(
+                          label: Text(font.label),
+                          selected: selected,
+                          onSelected: (_) {
+                            _fontController.text = font.id;
+                            _update(_settings.copyWith(fontFamily: font.id));
+                          },
+                        );
+                      })
+                      .toList(growable: false),
                 ),
                 const SizedBox(height: AppSpacing.x2),
                 Text(

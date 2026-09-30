@@ -647,21 +647,46 @@ final class DriftSearchRepository implements domain.SearchRepository {
     ReadingLocator? locator,
     int sortOrder = 0,
   }) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    return _dao.upsertChunk(
-      db.SearchChunksCompanion.insert(
-        id: '$sourceType:$sourceId',
-        bookId: Value(bookId),
+    return indexTexts([
+      domain.SearchIndexEntry(
         sourceType: sourceType,
-        sourceId: Value(sourceId),
-        locator: Value(locator?.toJsonText()),
-        title: Value(title),
-        body: text?.trim().isNotEmpty == true ? text!.trim() : title ?? '',
-        sortOrder: Value(sortOrder),
-        createdAt: now,
-        updatedAt: now,
+        sourceId: sourceId,
+        bookId: bookId,
+        title: title,
+        text: text,
+        locator: locator,
+        sortOrder: sortOrder,
       ),
-    );
+    ]);
+  }
+
+  @override
+  Future<void> indexTexts(List<domain.SearchIndexEntry> entries) {
+    if (entries.isEmpty) {
+      return Future<void>.value();
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final chunks = <db.SearchChunksCompanion>[];
+    for (final entry in entries) {
+      final body = entry.text?.trim().isNotEmpty == true
+          ? entry.text!.trim()
+          : entry.title ?? '';
+      chunks.add(
+        db.SearchChunksCompanion.insert(
+          id: '${entry.sourceType}:${entry.sourceId}',
+          bookId: Value(entry.bookId),
+          sourceType: entry.sourceType,
+          sourceId: Value(entry.sourceId),
+          locator: Value(entry.locator?.toJsonText()),
+          title: Value(entry.title),
+          body: body,
+          sortOrder: Value(entry.sortOrder),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
+    return _dao.upsertChunks(chunks);
   }
 
   @override

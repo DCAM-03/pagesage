@@ -60,6 +60,27 @@ final class SearchResult {
   final ReadingLocator? locator;
 }
 
+/// One chunk of content prepared for FTS indexing.
+final class SearchIndexEntry {
+  const SearchIndexEntry({
+    required this.sourceType,
+    required this.sourceId,
+    this.bookId,
+    this.title,
+    this.text,
+    this.locator,
+    this.sortOrder = 0,
+  });
+
+  final String sourceType;
+  final String sourceId;
+  final String? bookId;
+  final String? title;
+  final String? text;
+  final ReadingLocator? locator;
+  final int sortOrder;
+}
+
 abstract interface class SearchRepository {
   Future<List<SearchResult>> search(SearchQuery query);
 
@@ -79,6 +100,9 @@ abstract interface class SearchRepository {
     ReadingLocator? locator,
     int sortOrder = 0,
   });
+
+  /// Batch-index many chunks in one repository call (preferred for books).
+  Future<void> indexTexts(List<SearchIndexEntry> entries);
 
   Future<void> deleteBySource(String sourceType, String? sourceId);
 

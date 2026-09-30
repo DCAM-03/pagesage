@@ -7,10 +7,11 @@
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
     <title>PageSage PDF Renderer</title>
-    <link rel="stylesheet" href="viewer.css" />
+    <link rel="stylesheet" href="viewer.css?v=freeze21-split" />
   </head>
   <body>
-    <header id="toolbar" aria-label="PDF 工具栏">
+    <!-- Hidden by CSS (v1 freeze F-01). Elements remain for bridge hooks. -->
+    <header id="toolbar" aria-label="PDF 工具栏" hidden>
       <button id="prev" type="button" aria-label="上一页">&lt;</button>
       <span id="pageLabel">-</span>
       <button id="next" type="button" aria-label="下一页">&gt;</button>
@@ -33,10 +34,8 @@
     </header>
     <main id="stage">
     </main>
-    <div id="textLayerStatus" role="status" hidden>
-      此 PDF 没有可选择文本
-    </div>
+    <div id="textLayerStatus" role="status" hidden aria-hidden="true"></div>
     <script src="pdf.min.js"></script>
-    <script src="bridge.js"></script>
+    <script src="bridge.js?v=freeze21-split"></script>
   </body>
 </html>

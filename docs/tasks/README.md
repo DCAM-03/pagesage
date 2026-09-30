@@ -49,7 +49,7 @@
 - 账号系统。
 - 在线书城。
 - DRM 绕过。
-- 扫描版 PDF OCR（实现仍不进入当前完整产品任务集；规划见 TASK-26，仅 post-v1.0 可选）。
+- 扫描版 PDF OCR Phase 2+（选页/FTS/bbox/ONNX；Phase 0/1 当前页 OCR 已落地，见 TASK-26）。
 - 多人协作批注。
 - 浏览器 Web 版完整阅读器。
 

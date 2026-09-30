@@ -66,6 +66,27 @@ String rendererApplyAnnotationsScript(List<Annotation> annotations) {
   return 'window.PageSageRenderer.applyAnnotations(${jsonEncode(payload)});';
 }
 
+String rendererApplyOcrLayerScript({
+  required int pageNumber,
+  required List<Map<String, Object?>> blocks,
+  bool replace = true,
+}) {
+  final payload = {'page': pageNumber, 'replace': replace, 'blocks': blocks};
+  return 'window.PageSageRenderer.applyOcrLayer(${jsonEncode(payload)});';
+}
+
+String rendererExportPageImageScript({
+  required int pageNumber,
+  double quality = 0.86,
+}) {
+  final payload = {'page': pageNumber, 'quality': quality};
+  return 'window.PageSageRenderer.exportPageImage(${jsonEncode(payload)});';
+}
+
+String rendererGetVisiblePagesScript() {
+  return 'window.PageSageRenderer.getVisiblePages();';
+}
+
 String rendererSetTextOptionsScript({
   required double fontSize,
   required double lineHeight,
@@ -159,6 +180,12 @@ RendererEvent parseRendererEvent(Object? raw) {
       textSelection: map['textSelection'] == true,
       search: map['search'] == true,
       reason: map['reason'] as String?,
+      nativeTextLayer: map.containsKey('nativeTextLayer')
+          ? map['nativeTextLayer'] == true
+          : null,
+      ocrTextLayer: map.containsKey('ocrTextLayer')
+          ? map['ocrTextLayer'] == true
+          : null,
     );
   }
 

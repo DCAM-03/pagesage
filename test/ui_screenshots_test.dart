@@ -1314,6 +1314,22 @@ final class _FakeSearchRepository implements SearchRepository {
       ),
     ];
   }
+
+  @override
+  Future<void> indexTexts(List<SearchIndexEntry> entries) async {
+    for (final entry in entries) {
+      await indexText(
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId,
+        bookId: entry.bookId,
+        title: entry.title,
+        text: entry.text,
+        locator: entry.locator,
+        sortOrder: entry.sortOrder,
+      );
+    }
+  }
+
 }
 
 final class _FakeAiConversationRepository implements AiConversationRepository {

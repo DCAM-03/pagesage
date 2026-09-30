@@ -67,3 +67,32 @@ final class RendererApplyAnnotationsCommand extends RendererCommand {
 
   final List<Annotation> annotations;
 }
+
+/// Overlay OCR text with normalized geometry onto a PDF page (scan PDFs).
+final class RendererApplyOcrLayerCommand extends RendererCommand {
+  const RendererApplyOcrLayerCommand({
+    required this.pageNumber,
+    required this.blocks,
+    this.replace = true,
+  });
+
+  /// 1-based PDF page number.
+  final int pageNumber;
+
+  /// Blocks with optional normalized 0..1 geometry.
+  final List<Map<String, Object?>> blocks;
+
+  /// When true, replace any previous OCR layer for this page.
+  final bool replace;
+}
+
+/// Export a rendered page canvas as JPEG bytes for OCR (display-space aligned).
+final class RendererExportPageImageCommand extends RendererCommand {
+  const RendererExportPageImageCommand({
+    required this.pageNumber,
+    this.quality = 0.86,
+  });
+
+  final int pageNumber;
+  final double quality;
+}

@@ -211,7 +211,9 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
   Future<void> _pickAndImportFolder(BuildContext context) async {
     setState(() => _isImporting = true);
     try {
-      final result = await ref.read(importUseCaseProvider).pickAndImportFolder();
+      final result = await ref
+          .read(importUseCaseProvider)
+          .pickAndImportFolder();
       if (!context.mounted) {
         return;
       }
@@ -696,7 +698,6 @@ final class _FilteredLibraryContentState
     _future = _applyAsyncFilters(ref, widget.books);
   }
 
-
   @override
   Widget build(BuildContext context) {
     if (widget.selectedTagId == null &&
@@ -750,9 +751,7 @@ final class _FilteredLibraryContentState
         ? await ref.read(noteRepositoryProvider).getBookIdsWithNotes()
         : null;
     final Set<String>? booksWithBookmarks = widget.hasBookmarksOnly
-        ? await ref
-              .read(bookmarkRepositoryProvider)
-              .getBookIdsWithBookmarks()
+        ? await ref.read(bookmarkRepositoryProvider).getBookIdsWithBookmarks()
         : null;
 
     return books
@@ -878,10 +877,7 @@ final class _LibraryWithFilters extends ConsumerWidget {
   }
 }
 
-String? _resolveFolderTitle(
-  String? categoryId,
-  List<BookCategory> categories,
-) {
+String? _resolveFolderTitle(String? categoryId, List<BookCategory> categories) {
   if (categoryId == null) {
     return null;
   }
@@ -1489,9 +1485,9 @@ final class _DesktopCategoryTreeState
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
               child: Text(
                 '浏览',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
               ),
             ),
             _CategoryTreeRow(
@@ -1540,7 +1536,10 @@ final class _DesktopCategoryTreeState
                     tooltip: '新建书架文件夹',
                     visualDensity: VisualDensity.compact,
                     onPressed: _createCategory,
-                    icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+                    icon: const Icon(
+                      Icons.create_new_folder_outlined,
+                      size: 20,
+                    ),
                   ),
                 ],
               ),
@@ -1626,8 +1625,9 @@ final class _DesktopCategoryTreeState
     final childrenByParent = <String?, List<BookCategory>>{};
     final ids = categories.map((category) => category.id).toSet();
     for (final category in categories) {
-      final parentId =
-          ids.contains(category.parentId) ? category.parentId : null;
+      final parentId = ids.contains(category.parentId)
+          ? category.parentId
+          : null;
       childrenByParent.putIfAbsent(parentId, () => []).add(category);
     }
     for (final children in childrenByParent.values) {
@@ -1998,23 +1998,24 @@ final class _LibraryContent extends StatelessWidget {
         onOpenFolder != null &&
         viewMode == LibraryViewMode.grid;
     final body = switch (viewMode) {
-      LibraryViewMode.grid => isRootShelf
-          ? _BookshelfRootGrid(
-              books: books,
-              selectedBookId: expanded ? selectedBookId : null,
-              onBookSelected: expanded ? onBookSelected : null,
-              onOpenFolder: onOpenFolder!,
-              onCreateFolder: onCreateFolder,
-              padding: padding,
-              minTileWidth: gridSize.minTileWidth,
-            )
-          : _BookGrid(
-              books: books,
-              selectedBookId: expanded ? selectedBookId : null,
-              onBookSelected: expanded ? onBookSelected : null,
-              padding: padding,
-              minTileWidth: gridSize.minTileWidth,
-            ),
+      LibraryViewMode.grid =>
+        isRootShelf
+            ? _BookshelfRootGrid(
+                books: books,
+                selectedBookId: expanded ? selectedBookId : null,
+                onBookSelected: expanded ? onBookSelected : null,
+                onOpenFolder: onOpenFolder!,
+                onCreateFolder: onCreateFolder,
+                padding: padding,
+                minTileWidth: gridSize.minTileWidth,
+              )
+            : _BookGrid(
+                books: books,
+                selectedBookId: expanded ? selectedBookId : null,
+                onBookSelected: expanded ? onBookSelected : null,
+                padding: padding,
+                minTileWidth: gridSize.minTileWidth,
+              ),
       LibraryViewMode.list => _DesktopLibraryList(
         books: books,
         selectedBookId: expanded ? selectedBookId : null,
@@ -2175,11 +2176,7 @@ final class _BookshelfRootGrid extends ConsumerWidget {
             }
             final tile = tiles[index];
             return switch (tile) {
-              _ShelfFolderTile(
-                :final id,
-                :final title,
-                :final books,
-              ) =>
+              _ShelfFolderTile(:final id, :final title, :final books) =>
                 _FolderShelfCard(
                   folderId: id,
                   title: title,
@@ -2232,9 +2229,7 @@ Future<void> _moveBookToFolder(
   if (!context.mounted) {
     return;
   }
-  final message = categoryId == null
-      ? '已移出到书架'
-      : '已移入「${folderName ?? '文件夹'}」';
+  final message = categoryId == null ? '已移出到书架' : '已移入「${folderName ?? '文件夹'}」';
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message)));
@@ -2260,11 +2255,7 @@ final class _DraggableBookCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final card = _BookCard(
-      item: item,
-      selected: selected,
-      onSelect: onSelect,
-    );
+    final card = _BookCard(item: item, selected: selected, onSelect: onSelect);
     return LongPressDraggable<_BookDragData>(
       data: _BookDragData(item),
       delay: const Duration(milliseconds: 180),
@@ -2274,10 +2265,7 @@ final class _DraggableBookCard extends StatelessWidget {
         child: SizedBox(
           width: 110,
           height: 160,
-          child: Opacity(
-            opacity: 0.92,
-            child: _BookCard(item: item),
-          ),
+          child: Opacity(opacity: 0.92, child: _BookCard(item: item)),
         ),
       ),
       childWhenDragging: Opacity(opacity: 0.35, child: card),
@@ -2441,7 +2429,9 @@ final class _FolderShelfCard extends ConsumerWidget {
                         if (hovering) {
                           return DecoratedBox(
                             decoration: BoxDecoration(
-                              color: colorScheme.primary.withValues(alpha: 0.08),
+                              color: colorScheme.primary.withValues(
+                                alpha: 0.08,
+                              ),
                               borderRadius: BorderRadius.circular(AppRadius.md),
                             ),
                             child: Center(
@@ -2487,9 +2477,7 @@ final class _FolderShelfCard extends ConsumerWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    hovering
-                        ? '松手移入'
-                        : (count == 0 ? '空文件夹' : '$count 本'),
+                    hovering ? '松手移入' : (count == 0 ? '空文件夹' : '$count 本'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -2626,9 +2614,9 @@ final class _NewFolderTile extends StatelessWidget {
             const SizedBox(height: AppSpacing.x2),
             Text(
               '新建文件夹',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
           ],
         ),
@@ -3042,10 +3030,7 @@ final class _BookCard extends ConsumerWidget {
                       ),
                     ],
                     const SizedBox(height: AppSpacing.x1),
-                    _ProgressIndicator(
-                      progress: progress,
-                      compact: h < 200,
-                    ),
+                    _ProgressIndicator(progress: progress, compact: h < 200),
                   ],
                 ),
               );
@@ -3759,6 +3744,7 @@ final class _IndexingStatusChip extends StatelessWidget {
       'pending' => '待索引',
       'running' => '索引中',
       'failed' => '索引失败',
+      'no_text' => '无可索引正文',
       _ => null,
     };
     if (label == null) {
@@ -3771,7 +3757,11 @@ final class _IndexingStatusChip extends StatelessWidget {
     return Chip(
       visualDensity: VisualDensity.compact,
       avatar: Icon(
-        status == 'failed' ? Icons.error_outline : Icons.hourglass_top,
+        switch (status) {
+          'failed' => Icons.error_outline,
+          'no_text' => Icons.document_scanner_outlined,
+          _ => Icons.hourglass_top,
+        },
         size: 16,
         color: tone,
       ),
@@ -4157,16 +4147,75 @@ final class _BookCover extends StatelessWidget {
     }
 
     if (path != null && path.isNotEmpty && File(path).existsSync()) {
+      // Guard against truncated/corrupt covers extracted from PDFs. Native
+      // JPEG warnings are noisy and some engines are less forgiving than
+      // Flutter's errorBuilder path.
+      if (!_looksLikeCoverImage(path)) {
+        return frame(_placeholder(context));
+      }
+      // Decode near display size to avoid multi-MB cover bitmaps in grid/list.
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      final box = size;
+      final cacheWidth = box != null
+          ? (box.width * dpr).round().clamp(48, 720)
+          : (140 * dpr).round().clamp(48, 720);
+      final cacheHeight = box != null
+          ? (box.height * dpr).round().clamp(48, 960)
+          : (200 * dpr).round().clamp(48, 960);
       return frame(
         Image.file(
           File(path),
           fit: BoxFit.cover,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+          cacheWidth: cacheWidth,
+          cacheHeight: cacheHeight,
           semanticLabel: semanticLabel,
           errorBuilder: (context, error, stackTrace) => _placeholder(context),
         ),
       );
     }
     return frame(_placeholder(context));
+  }
+
+  bool _looksLikeCoverImage(String path) {
+    try {
+      final file = File(path);
+      final length = file.lengthSync();
+      if (length < 128) {
+        return false;
+      }
+      final raf = file.openSync();
+      try {
+        final header = raf.readSync(3);
+        final footer = length >= 2
+            ? () {
+                raf.setPositionSync(length - 2);
+                return raf.readSync(2);
+              }()
+            : const <int>[];
+        // JPEG: FFD8FF … FFD9
+        if (header.length >= 3 &&
+            header[0] == 0xFF &&
+            header[1] == 0xD8 &&
+            header[2] == 0xFF) {
+          return footer.length == 2 && footer[0] == 0xFF && footer[1] == 0xD9;
+        }
+        // PNG: 89 50 4E 47
+        if (header.length >= 3 &&
+            header[0] == 0x89 &&
+            header[1] == 0x50 &&
+            header[2] == 0x4E) {
+          return true;
+        }
+        // WebP / GIF / others: let Image.file try; errorBuilder handles failure.
+        return true;
+      } finally {
+        raf.closeSync();
+      }
+    } on Object {
+      return false;
+    }
   }
 
   Widget _placeholder(BuildContext context) {

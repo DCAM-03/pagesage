@@ -4,14 +4,19 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 final class PdfRendererServer {
-  PdfRendererServer._(this._server, this._bookPath);
+  PdfRendererServer._(this._server, this._bookPath)
+    // Cache-bust per launch: WebView2 may serve a stale viewer.html otherwise,
+    // which pins old ?v= asset URLs and silently runs outdated bridge code.
+    : viewerUrl =
+          'http://127.0.0.1:${_server.port}/viewer.html'
+          '?t=${DateTime.now().millisecondsSinceEpoch}';
 
   final HttpServer _server;
   final String _bookPath;
   StreamSubscription<HttpRequest>? _subscription;
 
   String get origin => 'http://127.0.0.1:${_server.port}';
-  String get viewerUrl => '$origin/viewer.html';
+  final String viewerUrl;
   String get bookUrl => '$origin/book.pdf';
 
   static Future<PdfRendererServer> start({required String bookPath}) async {

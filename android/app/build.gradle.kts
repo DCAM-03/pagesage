@@ -42,3 +42,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Local OCR for scan PDFs (Phase 1). Latin + Chinese script packs are offline.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.android.gms:play-services-tasks:18.2.0")
+}

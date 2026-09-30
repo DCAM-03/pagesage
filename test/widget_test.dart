@@ -870,7 +870,7 @@ void main() {
               event: const RendererCapabilityChanged(
                 textSelection: false,
                 search: false,
-                reason: '此 PDF 没有可选择文本',
+                reason: '此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别本页」提取文字。',
               ),
             ),
           ),
@@ -882,7 +882,8 @@ void main() {
     await tester.pump();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('此 PDF 没有可选择文本'), findsWidgets);
+    // Quiet status in the PDF toolbar (not a floating toast).
+    expect(find.textContaining('无文本层'), findsWidgets);
   });
 
   testWidgets('reader shows renderer error panel and retry action', (
@@ -1837,8 +1838,10 @@ final class _FakeTagRepository implements TagRepository {
   }
 
   @override
-  Future<Set<String>> getBookIdsWithTag(String tagId) async =>
-      {'book-long', 'book-1'};
+  Future<Set<String>> getBookIdsWithTag(String tagId) async => {
+    'book-long',
+    'book-1',
+  };
 
   @override
   Future<List<BookTag>> getTagsForNote(String noteId) async => const [];
@@ -2175,6 +2178,22 @@ final class _FakeSearchRepository implements SearchRepository {
       ),
     ];
   }
+
+  @override
+  Future<void> indexTexts(List<SearchIndexEntry> entries) async {
+    for (final entry in entries) {
+      await indexText(
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId,
+        bookId: entry.bookId,
+        title: entry.title,
+        text: entry.text,
+        locator: entry.locator,
+        sortOrder: entry.sortOrder,
+      );
+    }
+  }
+
 }
 
 LibraryBook _libraryBook({

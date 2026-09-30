@@ -38,7 +38,6 @@ void main() {
     await tempDir.delete(recursive: true);
   });
 
-
   test('discoverBookPaths finds nested epub and pdf files', () async {
     final nested = Directory(p.join(tempDir.path, 'lib', 'sub'));
     await nested.create(recursive: true);
@@ -438,6 +437,21 @@ final class _NoopSearchRepository implements SearchRepository {
     ReadingLocator? locator,
     int sortOrder = 0,
   }) async {}
+
+  @override
+  Future<void> indexTexts(List<SearchIndexEntry> entries) async {
+    for (final entry in entries) {
+      await indexText(
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId,
+        bookId: entry.bookId,
+        title: entry.title,
+        text: entry.text,
+        locator: entry.locator,
+        sortOrder: entry.sortOrder,
+      );
+    }
+  }
 
   @override
   Future<List<SearchResult>> search(SearchQuery query) async => const [];

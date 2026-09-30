@@ -190,6 +190,7 @@ final class ImportUseCase {
     File? copiedFile;
     PageSageTask? task;
     TaskCancelToken? cancelToken;
+    String? createdBookId;
 
     try {
       task = await _taskRepository.saveTask(
@@ -290,6 +291,7 @@ final class ImportUseCase {
       );
 
       final book = await _bookRepository.createImportedBook(draft);
+      createdBookId = book.id;
       cancelToken.throwIfCancelled();
       await _taskRepository.updateStatus(
         id: task.id,
@@ -308,6 +310,10 @@ final class ImportUseCase {
       );
       return ImportBookSuccess(book);
     } on TaskCancelledException {
+      if (createdBookId != null) {
+        // Book row was inserted but import was cancelled before indexing started.
+        await _bookRepository.deleteBook(createdBookId);
+      }
       if (copiedFile != null && await copiedFile.exists()) {
         await copiedFile.delete();
       }
@@ -392,10 +398,25 @@ final class ImportUseCase {
     required Book book,
     required TaskCancelToken cancelToken,
   }) async {
-    var doneMessage = '导入完成';
-    String? errorMessage;
     try {
-      await _searchIndexer.indexBook(book, cancelToken: cancelToken);
+      await _searchIndexer.indexBook(
+        book,
+        cancelToken: cancelToken,
+        onProgress: (progress, {message}) {
+          // Import copy finishes around 0.82; map index work into 0.82..0.99.
+          final mapped = (0.82 + progress.clamp(0, 1) * 0.17).clamp(0.82, 0.99);
+          unawaited(
+            _taskRepository.updateStatus(
+              id: taskId,
+              status: PageSageTaskStatus.indexing,
+              progress: mapped,
+              bookId: book.id,
+              targetPath: book.libraryFilePath,
+              message: message ?? '正在建立索引',
+            ),
+          );
+        },
+      );
     } on TaskCancelledException {
       await _taskRepository.updateStatus(
         id: taskId,
@@ -408,8 +429,19 @@ final class ImportUseCase {
       _taskCancellationRegistry.complete(taskId);
       return;
     } on Object catch (error) {
-      doneMessage = '导入完成，索引失败，可稍后重建';
-      errorMessage = error.toString();
+      // Keep bookId on the task so "重试" re-indexes instead of re-importing
+      // a second copy onto the shelf.
+      await _taskRepository.updateStatus(
+        id: taskId,
+        status: PageSageTaskStatus.failed,
+        progress: 1,
+        bookId: book.id,
+        targetPath: book.libraryFilePath,
+        message: '导入完成，索引失败，可重试索引',
+        error: error.toString(),
+      );
+      _taskCancellationRegistry.complete(taskId);
+      return;
     }
     if (cancelToken.isCancelled) {
       await _taskRepository.updateStatus(
@@ -429,8 +461,7 @@ final class ImportUseCase {
       progress: 1,
       bookId: book.id,
       targetPath: book.libraryFilePath,
-      message: doneMessage,
-      error: errorMessage,
+      message: '导入完成',
     );
     _taskCancellationRegistry.complete(taskId);
   }
