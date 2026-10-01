@@ -27,7 +27,7 @@ PageSage 的技术架构需要满足：
 | ORM | Drift |
 | 全文搜索 | SQLite FTS5 |
 | EPUB 渲染 | Flutter-native renderer |
-| PDF 渲染 | PDF.js + WebView |
+| PDF 渲染 | PDF.js + WebView（迁移中，见 `10-pdf-renderer-migration.md`） |
 | MOBI/AZW 转换 | 暂缓 |
 | 本地文件 | path_provider + file_picker |
 | 安全存储 | flutter_secure_storage |
@@ -407,6 +407,12 @@ lib/renderers/epub/epub_renderer_view.dart
 - annotations。
 
 ### 11.4 PDF Renderer
+
+> **迁移中。** 当前实现为 PDF.js + WebView，其上游 `flutter_inappwebview` 无 Linux
+> 平台实现，且 Linux 版依赖 WPE WebKit（Fedora 不提供），现有方案在 Linux 上
+> 不可运行。已决定迁移到 `pdf_graphics` 5.1.1 + Flutter Canvas，验证结论与
+> 实现约束见 `10-pdf-renderer-migration.md`。下文描述的是**当前**实现，迁移
+> 完成后需同步更新本节与第 1 节技术选型表。
 
 资源：
 
