@@ -50,3 +50,11 @@ flutter:
     - family: Atkinson Hyperlegible
       fonts:
         - asset: assets/fonts/AtkinsonHyperlegible-Regular.ttf
+
+# Resolve SQLite from the system library instead of downloading a prebuilt
+# copy at build time, so clean builds work without network access.
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+      name_linux: /usr/lib64/libsqlite3.so.0
