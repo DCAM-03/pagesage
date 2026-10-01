@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +25,7 @@ import '../../../features/settings/application/settings_providers.dart';
 import '../../../renderers/common/renderer_event.dart';
 import '../../../renderers/epub/epub_document.dart';
 import '../../../renderers/epub/epub_document_loader.dart';
+import '../../../renderers/pdf/pdf_canvas_view.dart';
 import '../../../renderers/epub/epub_jump.dart';
 import '../../../renderers/epub/epub_renderer_view.dart';
 import '../../../renderers/pdf/pdf_renderer_view.dart';
@@ -6886,21 +6889,34 @@ final class _DefaultRendererHost extends StatelessWidget {
         jumpToken: config.jumpToken,
         onEvent: config.onEvent,
       ),
-      BookFormat.pdf => PdfRendererView(
-        key: ValueKey('pdf-${config.book.id}-${config.version}'),
-        book: config.book,
-        settings: config.settings,
-        initialProgress: config.progress,
-        annotations: config.annotations,
-        searchQuery: config.searchQuery,
-        focusLocator: config.focusLocator,
-        clearSearchHighlightsVersion: config.clearSearchHighlightsVersion,
-        jumpToken: config.jumpToken,
-        ocrOverlayToken: config.ocrOverlayToken,
-        ocrOverlayPage: config.ocrOverlayPage,
-        ocrOverlayBlocks: config.ocrOverlayBlocks,
-        onEvent: config.onEvent,
-      ),
+      // Linux has no flutter_inappwebview implementation (its separate Linux
+      // package needs WPE WebKit, which desktop distros do not ship), so it
+      // renders through pdf_graphics instead. Other platforms keep the WebView
+      // renderer until selection, search and annotation overlays are ported.
+      // See docs/10-pdf-renderer-migration.md.
+      BookFormat.pdf => Platform.isLinux
+          ? PdfCanvasView(
+              key: ValueKey('pdf-canvas-${config.book.id}-${config.version}'),
+              book: config.book,
+              settings: config.settings,
+              initialProgress: config.progress,
+              onEvent: config.onEvent,
+            )
+          : PdfRendererView(
+              key: ValueKey('pdf-${config.book.id}-${config.version}'),
+              book: config.book,
+              settings: config.settings,
+              initialProgress: config.progress,
+              annotations: config.annotations,
+              searchQuery: config.searchQuery,
+              focusLocator: config.focusLocator,
+              clearSearchHighlightsVersion: config.clearSearchHighlightsVersion,
+              jumpToken: config.jumpToken,
+              ocrOverlayToken: config.ocrOverlayToken,
+              ocrOverlayPage: config.ocrOverlayPage,
+              ocrOverlayBlocks: config.ocrOverlayBlocks,
+              onEvent: config.onEvent,
+            ),
     };
   }
 }

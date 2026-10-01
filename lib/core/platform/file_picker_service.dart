@@ -89,11 +89,9 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
     );
     if (uri == null) return null;
 
-    // toFilePath() is non-null on native platforms and null on web, where the
-    // picker returns a blob URI with no local path to report.
+    // On native platforms toFilePath() is non-null; web returns a blob URI
+    // with no local path, which Web-only builds handle separately.
     final path = uri.toFilePath();
-    if (path == null) return null;
-
     await File(path).writeAsBytes(request.bytes, flush: true);
     return path;
   }

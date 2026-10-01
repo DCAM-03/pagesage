@@ -109,7 +109,7 @@ debug 构建下整页渲染（含解释器、字体解析、PNG 编码）：
 
 ## 6. 迁移必须遵守的实现约束
 
-以下三点是 POC 实测踩出的坑，**包文档未明确说明**，迁移时必须照抄 `dart_pdf_editor/lib/src/renderer.dart` 的做法。
+以下是实测踩出的坑，**包文档未明确说明**，迁移时必须照抄 `dart_pdf_editor/lib/src/renderer.dart` 的做法。
 
 ### 6.1 页面变换：翻转支点是 `box.height`，不是 0
 
@@ -139,7 +139,24 @@ final images = await decodeImages(cos, collector.streams);
 
 注：`ImageCollector` 与 `decodeImages` 未从 `dart_pdf_editor` 顶层导出（被 `show` 子句限制），需 `import 'package:dart_pdf_editor/src/image_decoder.dart';`。
 
-### 6.3 字体行为需要如实告知用户
+### 6.3 不要让 FittedBox 和光栅化比例重复缩放
+
+`FittedBox(fit: BoxFit.contain)` 已经负责把整页缩放进视口。若光栅化比例再乘
+`viewport.width / pageBox.width`，缩放会叠加两次——页面被裁切并出现重影，
+**同样不抛异常**。
+
+```dart
+// 错：缩放叠加，页面被裁
+PdfZoomMode.fitWidth => (viewport.width * dpr) / box.width,
+
+// 对：光栅化比例只管像素密度，布局交给 FittedBox
+PdfZoomMode.fitWidth => dpr,
+```
+
+`fitPage` 取 `min(w, h)`，数值偏小，错误会被 `FittedBox` 部分掩盖，
+因此更容易漏过——只有逐一验证每种缩放模式才能暴露。
+
+### 6.4 字体行为需要如实告知用户
 
 未嵌入字体的 PDF，中文走**系统字体替换**（渲染器注释原文：*"Text is drawn with substituted system fonts, horizontally scaled to the PDF's own metrics, until the font engine produces real glyph outlines"*）。
 
