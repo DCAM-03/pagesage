@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "dev.pagesage.app"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_secure_storage 11.x requires compileSdk 37; Flutter 3.44.2
+    // still defaults to 36, so pin it explicitly.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 
 final class PickedPlatformFile {
@@ -31,11 +34,17 @@ final class FileSaveRequest {
     required this.dialogTitle,
     required this.fileName,
     required this.allowedExtensions,
+    this.bytes = const <int>[],
   });
 
   final String dialogTitle;
   final String fileName;
   final List<String> allowedExtensions;
+
+  /// file_picker 12 no longer writes the file for us: the caller supplies the
+  /// bytes up front and we write them once the destination is chosen. Defaults
+  /// to empty so callers that only need a destination path keep working.
+  final List<int> bytes;
 }
 
 abstract interface class FilePickerAdapter {
@@ -51,7 +60,8 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
 
   @override
   Future<List<PickedPlatformFile>> pickFiles(FilePickerRequest request) async {
-    final result = await FilePicker.pickFiles(
+    // file_picker 12 returns the list directly instead of a FilePickerResult.
+    final files = await FilePicker.pickFiles(
       allowMultiple: request.allowMultiple,
       type: FileType.custom,
       allowedExtensions: request.allowedExtensions,
@@ -59,7 +69,6 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
       lockParentWindow: true,
     );
 
-    final files = result?.files ?? const <PlatformFile>[];
     return files
         .where((file) => file.path != null)
         .map((file) => PickedPlatformFile(path: file.path!, name: file.name))
@@ -67,14 +76,26 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
   }
 
   @override
-  Future<String?> saveFile(FileSaveRequest request) {
-    return FilePicker.saveFile(
+  Future<String?> saveFile(FileSaveRequest request) async {
+    // file_picker 12 returns a Uri and requires the bytes up front, so the
+    // caller writes the file itself after the destination is chosen.
+    final uri = await FilePicker.saveFile(
       dialogTitle: request.dialogTitle,
       fileName: request.fileName,
+      bytes: Uint8List.fromList(request.bytes),
       type: FileType.custom,
       allowedExtensions: request.allowedExtensions,
       lockParentWindow: true,
     );
+    if (uri == null) return null;
+
+    // toFilePath() is non-null on native platforms and null on web, where the
+    // picker returns a blob URI with no local path to report.
+    final path = uri.toFilePath();
+    if (path == null) return null;
+
+    await File(path).writeAsBytes(request.bytes, flush: true);
+    return path;
   }
 
   @override
