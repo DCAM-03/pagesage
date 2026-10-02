@@ -156,7 +156,24 @@ PdfZoomMode.fitWidth => dpr,
 `fitPage` 取 `min(w, h)`，数值偏小，错误会被 `FittedBox` 部分掩盖，
 因此更容易漏过——只有逐一验证每种缩放模式才能暴露。
 
-### 6.4 字体行为需要如实告知用户
+### 6.4 中文选词：单字成词，不要把汉字当分隔符
+
+`positionNear` 返回的是**光标边界**（字符之间），不是字符索引，据此扩展选区时若把
+CJK 表意文字判为分隔符，「嵌」字两侧都是边界 → 区间为空 → 点击选词永远返回 null。
+
+正确做法：**CJK 表意文字本身即词**（双击选中该字），只有 CJK 标点（、。，；：等）
+算分隔符；英文仍按空格与标点展开。这与原生中文输入法的双击行为一致。
+
+实测（`poc_pdf_canvas/samples/chinese-embedded.pdf`，嵌入 Sarasa Mono SC）：
+
+| 点击位置 | 选中结果 |
+| --- | --- |
+| 标题第 1 字 | `嵌` |
+| 标题第 3 字 | `体` |
+| 英文 `pdf_graphics` | `graphics`（`_` 为分隔符） |
+| 拖选标题带 | `嵌入字体渲染测试` |
+
+### 6.5 字体行为需要如实告知用户
 
 未嵌入字体的 PDF，中文走**系统字体替换**（渲染器注释原文：*"Text is drawn with substituted system fonts, horizontally scaled to the PDF's own metrics, until the font engine produces real glyph outlines"*）。
 

@@ -1,0 +1,226 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_graphics/pdf_graphics.dart';
+
+import '../../domain/books/reading_position.dart';
+import '../common/renderer_event.dart';
+import 'pdf_canvas_renderer.dart';
+
+/// A point in PDF page space (points, y-up), as opposed to widget space.
+typedef PagePoint = ({double x, double y});
+
+/// Maps pointer gestures on a painted PDF page onto text selection.
+///
+/// Two coordinate spaces are in play: widget space (y-down, device pixels) and
+/// PDF page space (y-up, points). Everything here converts widget -> page before
+/// calling `pdf_graphics`, and page -> widget when reporting rects, because the
+/// renderer contract (`ReaderRect`) is expressed in the reader's own space.
+final class PdfSelectionController {
+  PdfSelectionController({
+    required this.renderer,
+    required this.pageIndex,
+    required this.box,
+    required this.rasterScale,
+    required this.paintOrigin,
+    required this.paintSize,
+  });
+
+  final PdfCanvasRenderer renderer;
+  final int pageIndex;
+  final PdfRect box;
+
+  /// Device pixels per PDF point used when rasterising the page.
+  final double rasterScale;
+
+  /// Where the page was painted, in the page widget's local coordinates.
+  final Offset paintOrigin;
+  final Size paintSize;
+
+  PdfPageText? _cached;
+
+  PdfPageText get _text {
+    final existing = _cached;
+    if (existing != null) return existing;
+    final computed = renderer.textOf(pageIndex);
+    _cached = computed;
+    return computed;
+  }
+
+  bool get hasText => _text.runs.isNotEmpty;
+
+  /// Widget-local point -> PDF page coordinates, or null when outside the page.
+  PagePoint? toPagePoint(Offset local) {
+    if (paintSize.width <= 0 || paintSize.height <= 0) return null;
+    final dx = local.dx - paintOrigin.dx;
+    final dy = local.dy - paintOrigin.dy;
+    if (dx < 0 || dy < 0 || dx > paintSize.width || dy > paintSize.height) {
+      return null;
+    }
+    // Normalise against the painted box, then flip into the PDF's y-up space.
+    final u = dx / paintSize.width;
+    final v = dy / paintSize.height;
+    return (x: box.left + u * box.width, y: box.top - v * box.height);
+  }
+
+  /// PDF page coordinates -> widget-local offset.
+  Offset toWidgetPoint(double x, double y) => Offset(
+    paintOrigin.dx + (x - box.left) / box.width * paintSize.width,
+    paintOrigin.dy + (box.top - y) / box.height * paintSize.height,
+  );
+
+  /// Selection covering the drag from [anchorWidget] to [currentWidget].
+  ///
+  /// Returns null when the drag never crossed text, so the caller can treat it
+  /// as a plain tap rather than opening an empty selection menu.
+  RendererTextSelected? selectionBetween(
+    Offset anchorWidget,
+    Offset currentWidget,
+  ) {
+    final a = toPagePoint(anchorWidget);
+    final b = toPagePoint(currentWidget);
+    if (a == null || b == null) return null;
+
+    final rect = PdfRect(
+      math.min(a.x, b.x),
+      math.min(a.y, b.y),
+      math.max(a.x, b.x),
+      math.max(a.y, b.y),
+    );
+    final text = _text.textIn(rect).trim();
+    if (text.isEmpty) return null;
+
+    // textIn returns the runs inside the rect; locate that substring so the
+    // highlight geometry lines up with what was selected.
+    final start = _text.text.indexOf(text);
+    if (start < 0) return null;
+
+    return _buildEvent(start, start + text.length, text);
+  }
+
+  /// Word-sized selection at a tap, matching desktop reader behaviour.
+  ///
+  /// CJK characters count as single-character words so tapping one selects just
+  /// that character, matching native CJK input behaviour.
+  RendererTextSelected? selectionAtWord(Offset widgetPoint) {
+    final page = toPagePoint(widgetPoint);
+    if (page == null) return null;
+    final index = _text.positionNear(page.x, page.y);
+    if (index < 0) return null;
+
+    final range = _wordRangeAt(index);
+    if (range == null) return null;
+    return _buildEvent(range.$1, range.$2, _text.text.substring(range.$1, range.$2));
+  }
+
+  /// (start, end) of the word containing [index].
+  ///
+  /// CJK characters are words in themselves: Chinese has no spaces, so
+  /// expanding over non-separator characters would swallow a whole sentence.
+  /// A double-click selects the single character instead, matching native CJK
+  /// input behaviour.
+  (int, int)? _wordRangeAt(int index) {
+    final text = _text.text;
+    if (text.isEmpty) return null;
+    final i = index.clamp(0, text.length - 1);
+
+    if (_isCjk(text.codeUnitAt(i))) return (i, i + 1);
+
+    var start = i;
+    while (start > 0 && !_isSeparator(text.codeUnitAt(start - 1))) {
+      start--;
+    }
+    var end = i;
+    while (end < text.length && !_isSeparator(text.codeUnitAt(end))) {
+      end++;
+    }
+    return end <= start ? null : (start, end);
+  }
+
+  static const _asciiSeparators = ' \t\n\r,.!?;:\'"()[]{}<>/\\|@#\$%^&*-_=+';
+  static const _cjkPunctuation = '、。，．；：？！…—～·「」『』《》【】（）〔〕｛｝'
+      '“”‘’　';
+
+  /// CJK punctuation counts as a separator, but CJK ideographs do not: they are
+  /// handled by [_wordRangeAt] as single-character words.
+  bool _isSeparator(int codeUnit) {
+    if (_cjkPunctuation.contains(String.fromCharCode(codeUnit))) return true;
+    return _asciiSeparators.contains(String.fromCharCode(codeUnit));
+  }
+
+  static bool _isCjk(int codeUnit) =>
+      (codeUnit >= 0x4E00 && codeUnit <= 0x9FFF) || // unified ideographs
+      (codeUnit >= 0x3400 && codeUnit <= 0x4DBF) || // extension A
+      (codeUnit >= 0xF900 && codeUnit <= 0xFAFF) || // compatibility
+      (codeUnit >= 0x3040 && codeUnit <= 0x30FF) || // kana
+      (codeUnit >= 0xAC00 && codeUnit <= 0xD7AF); // hangul
+
+  RendererTextSelected _buildEvent(int start, int end, String text) {
+    final rects = _readerRectsFor(start, end);
+    final anchor = rects.isEmpty
+        ? ReaderRect(page: pageIndex + 1, x: 0, y: 0, width: 0, height: 0)
+        : rects.first;
+
+    return RendererTextSelected(
+      text: text,
+      locator: ReadingLocator.pdf(
+        page: pageIndex + 1,
+        zoom: rasterScale,
+        excerpt: text,
+        selectionRects: rects,
+      ),
+      sourceRect: anchor,
+      selectionRects: rects,
+    );
+  }
+
+  List<ReaderRect> _readerRectsFor(int start, int end) {
+    final out = <ReaderRect>[];
+    for (final quad in _text.quadsFor(start, end)) {
+      final corners = quad.corners
+          .map((c) => toWidgetPoint(c.$1, c.$2))
+          .toList(growable: false);
+      if (corners.length < 4) continue;
+      var minX = corners.first.dx, maxX = corners.first.dx;
+      var minY = corners.first.dy, maxY = corners.first.dy;
+      for (final c in corners.skip(1)) {
+        minX = math.min(minX, c.dx);
+        maxX = math.max(maxX, c.dx);
+        minY = math.min(minY, c.dy);
+        maxY = math.max(maxY, c.dy);
+      }
+      out.add(
+        ReaderRect(
+          page: pageIndex + 1,
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY,
+        ),
+      );
+    }
+    return out;
+  }
+
+  /// Highlight rectangles for a text range, in widget coordinates.
+  List<Rect> highlightsFor(int start, int end) => [
+    for (final quad in _text.quadsFor(start, end))
+      _boundsOf(quad.corners.map((c) => toWidgetPoint(c.$1, c.$2)).toList()),
+  ];
+
+  Rect _boundsOf(List<Offset> points) {
+    if (points.isEmpty) return Rect.zero;
+    var minX = points.first.dx, maxX = points.first.dx;
+    var minY = points.first.dy, maxY = points.first.dy;
+    for (final p in points.skip(1)) {
+      minX = math.min(minX, p.dx);
+      maxX = math.max(maxX, p.dx);
+      minY = math.min(minY, p.dy);
+      maxY = math.max(maxY, p.dy);
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  void invalidate() => _cached = null;
+}

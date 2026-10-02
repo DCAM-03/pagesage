@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
 import '../common/renderer_event.dart';
 import 'pdf_canvas_renderer.dart';
+import 'pdf_selection_controller.dart';
 
 /// PDF renderer built on `pdf_graphics` painting straight to a Flutter Canvas.
 ///
@@ -84,9 +86,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       // silent selection path would leave the reader offering dead buttons.
       widget.onEvent(
         const RendererCapabilityChanged(
-          textSelection: false,
+          textSelection: true,
           search: false,
-          reason: 'Canvas 渲染器尚未接入选区与搜索',
+          reason: 'Canvas 渲染器已接入选区，搜索待接入',
         ),
       );
       widget.onEvent(RendererReady());
@@ -154,6 +156,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               renderer: renderer,
               pageIndex: index,
               settings: widget.settings,
+              onSelection: widget.onEvent,
             ),
           ),
         ),
@@ -184,11 +187,13 @@ final class _CanvasPage extends StatefulWidget {
     required this.renderer,
     required this.pageIndex,
     required this.settings,
+    required this.onSelection,
   });
 
   final PdfCanvasRenderer renderer;
   final int pageIndex;
   final ReaderSettings settings;
+  final ValueChanged<RendererTextSelected> onSelection;
 
   @override
   State<_CanvasPage> createState() => _CanvasPageState();
@@ -198,6 +203,9 @@ final class _CanvasPageState extends State<_CanvasPage> {
   Future<PdfRenderedPage>? _future;
 
   Size _lastBox = Size.zero;
+  Offset? _dragAnchor;
+  bool _dragSelecting = false;
+  List<Rect> _selectionHighlights = const [];
 
   // Rendering waits for LayoutBuilder: the fit-width and fit-page zoom modes
   // resolve against the real paint box, which is not known until layout. A
@@ -245,9 +253,13 @@ final class _CanvasPageState extends State<_CanvasPage> {
                 height: box.height,
                 child: FittedBox(
                   fit: BoxFit.contain,
-                  child: CustomPaint(
-                    size: Size(box.width, box.height),
-                    painter: _PicturePainter(page),
+                  child: _SelectablePage(
+                    page: page,
+                    box: box,
+                    highlights: _selectionHighlights,
+                    onStart: _onDragStart,
+                    onUpdate: _onDragUpdate,
+                    onEnd: _onDragEnd,
                   ),
                 ),
               );
@@ -258,6 +270,83 @@ final class _CanvasPageState extends State<_CanvasPage> {
     );
   }
 
+  PdfSelectionController? _selectionFor(Size viewport, BoxConstraints c) {
+    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
+    // FittedBox scales the page box down to fit the viewport; that fitted
+    // rectangle is where the page actually lands inside the page widget.
+    final scale = math.min(c.maxWidth / box.width, c.maxHeight / box.height);
+    final painted = Size(box.width * scale, box.height * scale);
+    final origin = Offset(
+      (c.maxWidth - painted.width) / 2,
+      (c.maxHeight - painted.height) / 2,
+    );
+    return PdfSelectionController(
+      renderer: widget.renderer,
+      pageIndex: widget.pageIndex,
+      box: box,
+      rasterScale: 1,
+      paintOrigin: origin,
+      paintSize: painted,
+    );
+  }
+
+  void _onDragStart(Offset local, BoxConstraints constraints) {
+    final controller = _selectionFor(_lastBox, constraints);
+    if (controller == null || !controller.hasText) return;
+    setState(() {
+      _dragAnchor = local;
+      _dragSelecting = true;
+      _selectionHighlights = const [];
+    });
+  }
+
+  void _onDragUpdate(Offset local, BoxConstraints constraints) {
+    if (!_dragSelecting) return;
+    final controller = _selectionFor(_lastBox, constraints);
+    final anchor = _dragAnchor;
+    if (controller == null || anchor == null) {
+        return;
+    }
+
+    // Live highlight feedback; the selection is only committed on drag end.
+    final rect = controller.selectionBetween(anchor, local);
+    setState(() {
+      _selectionHighlights = rect == null
+          ? const []
+          : [
+              for (final r in rect.selectionRects)
+                Rect.fromLTWH(r.x, r.y, r.width, r.height),
+            ];
+    });
+  }
+
+  void _onDragEnd(Offset local, BoxConstraints constraints) {
+    if (!_dragSelecting) return;
+    setState(() => _dragSelecting = false);
+
+    final controller = _selectionFor(_lastBox, constraints);
+    final anchor = _dragAnchor;
+    if (controller == null || anchor == null) return;
+
+    final drag = (local - anchor).distance;
+    final selection = drag < 6
+        // A tap selects the word under it.
+        ? controller.selectionAtWord(local)
+        : controller.selectionBetween(anchor, local);
+
+    if (selection == null || selection.selectionRects.isEmpty) {
+      setState(() => _selectionHighlights = const []);
+      return;
+    }
+    setState(() {
+      _selectionHighlights = [
+        for (final r in selection.selectionRects)
+          Rect.fromLTWH(r.x, r.y, r.width, r.height),
+      ];
+    });
+    widget.onSelection(selection);
+  }
+
   @override
   void dispose() {
     _future?.then((page) => page.dispose());
@@ -266,19 +355,31 @@ final class _CanvasPageState extends State<_CanvasPage> {
 }
 
 final class _PicturePainter extends CustomPainter {
-  _PicturePainter(this.page);
+  _PicturePainter(this.page, {this.highlights = const []});
 
   final PdfRenderedPage page;
+  final List<Rect> highlights;
 
   @override
   void paint(Canvas canvas, Size size) {
     // Paper white: PDF pages assume an opaque background.
     canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFFFFFFFF));
+
+    // Selection highlight sits under the page content, matching how the
+    // WebView renderer layered highlights beneath the text.
+    if (highlights.isNotEmpty) {
+      final fill = Paint()..color = const Color(0x553F8CFF);
+      for (final rect in highlights) {
+        canvas.drawRect(rect, fill);
+      }
+    }
+
     canvas.drawPicture(page.picture);
   }
 
   @override
-  bool shouldRepaint(_PicturePainter old) => old.page != page;
+  bool shouldRepaint(_PicturePainter old) =>
+      old.page != page || old.highlights != highlights;
 }
 
 final class _PdfCanvasPager extends StatelessWidget {
@@ -314,6 +415,73 @@ final class _PdfCanvasPager extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Paints the rasterised page and turns pointer gestures into selection events.
+///
+/// Gesture positions arrive in the window's coordinate space; this converts
+/// them into the page box's own space so [PdfSelectionController] can map them
+/// onto PDF page coordinates.
+final class _SelectablePage extends StatefulWidget {
+  const _SelectablePage({
+    required this.page,
+    required this.box,
+    required this.highlights,
+    required this.onStart,
+    required this.onUpdate,
+    required this.onEnd,
+  });
+
+  final PdfRenderedPage page;
+  final PdfRect box;
+  final List<Rect> highlights;
+  final void Function(Offset local, BoxConstraints constraints) onStart;
+  final void Function(Offset local, BoxConstraints constraints) onUpdate;
+  final void Function(Offset local, BoxConstraints constraints) onEnd;
+
+  @override
+  State<_SelectablePage> createState() => _SelectablePageState();
+}
+
+final class _SelectablePageState extends State<_SelectablePage> {
+  final _key = GlobalKey();
+  Offset? _lastLocal;
+
+  /// Converts a global pointer position into the page box's local space,
+  /// accounting for the FittedBox centring the page inside its slot.
+  Offset _toLocal(Offset global, BoxConstraints constraints) {
+    final renderBox = _key.currentContext?.findRenderObject() as RenderBox?;
+    final local = renderBox == null ? global : renderBox.globalToLocal(global);
+    _lastLocal = local;
+    return local;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = Size(widget.box.width, widget.box.height);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (d) =>
+              widget.onStart(_toLocal(d.globalPosition, constraints), constraints),
+          onPanUpdate: (d) =>
+              widget.onUpdate(_toLocal(d.globalPosition, constraints), constraints),
+          onPanEnd: (_) {
+            final last = _lastLocal;
+            if (last != null) widget.onEnd(last, constraints);
+          },
+          onTapUp: (d) =>
+              widget.onEnd(_toLocal(d.globalPosition, constraints), constraints),
+          child: CustomPaint(
+            key: _key,
+            size: size,
+            painter: _PicturePainter(widget.page, highlights: widget.highlights),
+          ),
+        );
+      },
     );
   }
 }
