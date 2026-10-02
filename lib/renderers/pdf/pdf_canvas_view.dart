@@ -4,9 +4,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
+import '../../domain/annotations/annotation.dart';
 import '../../domain/books/book.dart';
 import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
@@ -30,6 +32,9 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
     required this.settings,
     required this.initialProgress,
     required this.onEvent,
+    required this.annotations,
+    this.ocrOverlayPage,
+    this.ocrOverlayBlocks = const [],
     this.searchQuery,
     this.focusLocator,
     this.jumpToken = 0,
@@ -41,6 +46,13 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
   final ReaderSettings settings;
   final ReadingProgressSnapshot? initialProgress;
   final ValueChanged<RendererEvent> onEvent;
+
+  /// Stored highlights and notes to paint over the page.
+  final List<Annotation> annotations;
+
+  /// 1-based page carrying a recognised text layer (scanned PDFs).
+  final int? ocrOverlayPage;
+  final List<Map<String, Object?>> ocrOverlayBlocks;
   final String? searchQuery;
   final ReadingLocator? focusLocator;
 
@@ -281,6 +293,10 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               pageIndex: index,
               settings: widget.settings,
               searchQuads: _searchHighlights[index] ?? const [],
+              annotations: widget.annotations,
+              ocrBlocks: widget.ocrOverlayPage == index + 1
+                  ? widget.ocrOverlayBlocks
+                  : const [],
               onSelection: widget.onEvent,
             ),
           ),
@@ -313,6 +329,8 @@ final class _CanvasPage extends StatefulWidget {
     required this.pageIndex,
     required this.settings,
     required this.searchQuads,
+    required this.annotations,
+    required this.ocrBlocks,
     required this.onSelection,
   });
 
@@ -322,6 +340,8 @@ final class _CanvasPage extends StatefulWidget {
 
   /// Page-space quads to paint as search highlights.
   final List<PdfTextQuad> searchQuads;
+  final List<Annotation> annotations;
+  final List<Map<String, Object?>> ocrBlocks;
   final ValueChanged<RendererTextSelected> onSelection;
 
   @override
@@ -369,11 +389,12 @@ final class _CanvasPageState extends State<_CanvasPage> {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         if (viewport != _lastBox) _render(viewport);
 
-        // FittedBox centres the page inside the slot; search quads arrive in
-        // page points, so they need the same origin the selection controller
-        // uses. Recomputed here rather than stored by the parent because only
-        // this widget knows its own constraints.
-        _paintOrigin = _computePaintOrigin(constraints);
+        // FittedBox centres the page inside the slot. Everything downstream —
+        // selection, search quads, annotations, OCR — is expressed in the
+        // painted page's own pixel space, so resolve that origin once here,
+        // in the same scope that has the constraints.
+        final paint = _computePaintOrigin(constraints);
+        _paintOrigin = paint;
 
         return Center(
           child: FutureBuilder<PdfRenderedPage>(
@@ -392,10 +413,13 @@ final class _CanvasPageState extends State<_CanvasPage> {
                   child: _SelectablePage(
                     page: page,
                     box: box,
+                    paintSize: paint.size,
                     highlights: [
                       for (final q in widget.searchQuads) _quadToRect(q),
                       ..._selectionHighlights,
                     ],
+                    annotations: _annotationBoxes(_geometryFor(paint.size)),
+                    ocrBoxes: _ocrBoxes(_geometryFor(paint.size)),
                     onStart: _onDragStart,
                     onUpdate: _onDragUpdate,
                     onEnd: _onDragEnd,
@@ -409,16 +433,101 @@ final class _CanvasPageState extends State<_CanvasPage> {
     );
   }
 
-  /// Where FittedBox lands the page inside [constraints], in the page widget's
-  /// own coordinate space. Selection and search highlights both need it, so it
-  /// is derived once per layout rather than in two places.
-  Rect _computePaintOrigin(BoxConstraints constraints) {
-    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
-    final scale = math.min(
-      constraints.maxWidth / box.width,
-      constraints.maxHeight / box.height,
+  /// Geometry for this page in its own painted box.
+  ///
+  /// [PdfPageGeometry] is the same helper dart_pdf_editor hands to
+  /// `PdfViewer.pageOverlayBuilder`; it already accounts for the crop box
+  /// origin, /Rotate and the painted size. Doing this by hand is what put
+  /// annotations hundreds of pixels off the page.
+  PdfPageGeometry _geometryFor(Size painted) {
+    final page = widget.renderer.pageAt(widget.pageIndex);
+    return PdfPageGeometry(
+      cropBox: page.cropBox,
+      rotation: page.rotation,
+      viewSize: painted,
     );
-    final painted = Size(box.width * scale, box.height * scale);
+  }
+
+  /// The size the page is painted at inside [constraints].
+  Size _paintedSize(BoxConstraints constraints) {
+    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
+    return Size(
+      box.width * math.min(constraints.maxWidth / box.width, constraints.maxHeight / box.height),
+      box.height * math.min(constraints.maxWidth / box.width, constraints.maxHeight / box.height),
+    );
+  }
+
+  /// Stored annotations for this page, in view coordinates.
+  List<_AnnotationBox> _annotationBoxes(PdfPageGeometry geometry) {
+    final out = <_AnnotationBox>[];
+    for (final annotation in widget.annotations) {
+      if (annotation.locator.page != widget.pageIndex + 1) continue;
+      for (final rect in annotation.locator.selectionRects) {
+        if (rect.width <= 0 || rect.height <= 0) continue;
+
+        // A multi-line selection can persist as one tall box; collapse it to a
+        // single readable band, matching the WebView renderer.
+        final height = rect.height > 0.055 ? 0.022 : rect.height;
+        final pageRect = PdfRect(
+          rect.x,
+          1 - rect.y - height,
+          rect.x + rect.width,
+          1 - rect.y,
+        );
+        out.add(
+          _AnnotationBox(
+            rect: geometry.toViewRect(
+              PdfRect(
+                pageRect.left * _pageWidth,
+                pageRect.bottom * _pageHeight,
+                pageRect.right * _pageWidth,
+                pageRect.top * _pageHeight,
+              ),
+            ),
+            color: annotation.color,
+            underline: annotation.style == AnnotationStyle.underline,
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
+  /// OCR text-layer boxes for a scanned page, in view coordinates.
+  List<_OcrBox> _ocrBoxes(PdfPageGeometry geometry) {
+    final out = <_OcrBox>[];
+    for (final block in widget.ocrBlocks) {
+      final text = block['text'];
+      final left = block['left'];
+      final top = block['top'];
+      final width = block['width'];
+      final height = block['height'];
+      if (text is! String || text.trim().isEmpty) continue;
+      if (left is! num || top is! num || width is! num || height is! num) {
+        continue;
+      }
+      if (width <= 0 || height <= 0) continue;
+
+      final h = height.toDouble().clamp(0.0, 1.0);
+      out.add(
+        _OcrBox(
+          rect: geometry.toViewRect(
+            PdfRect(
+              left.toDouble() * _pageWidth,
+              (1 - top.toDouble() - h) * _pageHeight,
+              (left.toDouble() + width.toDouble()) * _pageWidth,
+              (1 - top.toDouble()) * _pageHeight,
+            ),
+          ),
+          text: text,
+        ),
+      );
+    }
+    return out;
+  }
+
+  Rect _computePaintOrigin(BoxConstraints constraints) {
+    final painted = _paintedSize(constraints);
     return Rect.fromLTWH(
       (constraints.maxWidth - painted.width) / 2,
       (constraints.maxHeight - painted.height) / 2,
@@ -426,6 +535,9 @@ final class _CanvasPageState extends State<_CanvasPage> {
       painted.height,
     );
   }
+
+  double get _pageWidth => widget.renderer.pageAt(widget.pageIndex).cropBox.width;
+  double get _pageHeight => widget.renderer.pageAt(widget.pageIndex).cropBox.height;
 
   PdfSelectionController? _selectionFor(BoxConstraints constraints) {
     final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
@@ -525,31 +637,86 @@ final class _CanvasPageState extends State<_CanvasPage> {
 }
 
 final class _PicturePainter extends CustomPainter {
-  _PicturePainter(this.page, {this.highlights = const []});
+  _PicturePainter(
+    this.page, {
+    this.highlights = const [],
+    this.annotations = const [],
+    this.ocrBoxes = const [],
+    this.pxPerPoint = 1,
+  });
 
   final PdfRenderedPage page;
   final List<Rect> highlights;
+  final List<_AnnotationBox> annotations;
+  final List<_OcrBox> ocrBoxes;
+
+  /// Painted pixels per PDF point. The canvas is sized in painted pixels, so
+  /// overlays land directly; only the rasterised page needs scaling.
+  final double pxPerPoint;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Paper white: PDF pages assume an opaque background.
     canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFFFFFFFF));
 
-    // Selection highlight sits under the page content, matching how the
-    // WebView renderer layered highlights beneath the text.
-    if (highlights.isNotEmpty) {
-      final fill = Paint()..color = const Color(0x553F8CFF);
-      for (final rect in highlights) {
-        canvas.drawRect(rect, fill);
+    // Under the page: search hits and stored highlights.
+    final searchFill = Paint()..color = const Color(0x553F8CFF);
+    for (final rect in highlights) {
+      canvas.drawRect(rect, searchFill);
+    }
+    for (final box in annotations) {
+      final fill = Paint()..color = _annotationColor(box.color);
+      if (box.underline) {
+        canvas.drawRect(
+          Rect.fromLTRB(
+            box.rect.left,
+            box.rect.bottom - box.rect.height * 0.15,
+            box.rect.right,
+            box.rect.bottom,
+          ),
+          fill,
+        );
+      } else {
+        canvas.drawRect(box.rect, fill);
       }
     }
 
+    // The rasterised page is in PDF point space; scale it into the painted box.
+    canvas.save();
+    canvas.scale(pxPerPoint);
     canvas.drawPicture(page.picture);
+    canvas.restore();
+
+    // Over the page: recognised text on scanned pages.
+    for (final box in ocrBoxes) {
+      if (!box.rect.isEmpty) _paintOcrText(canvas, box);
+    }
+  }
+
+  void _paintOcrText(Canvas canvas, _OcrBox box) {
+    final fontSize = math.max(4.0, box.rect.height * 0.8);
+    final painter = TextPainter(
+      text: TextSpan(
+        text: box.text,
+        style: TextStyle(
+          fontSize: fontSize,
+          color: const Color(0xFF1A1A1A),
+          height: 1.0,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+      ellipsis: '…',
+    )..layout(maxWidth: box.rect.width);
+    painter.paint(canvas, box.rect.topLeft);
+    painter.dispose();
   }
 
   @override
   bool shouldRepaint(_PicturePainter old) =>
-      old.page != page || old.highlights != highlights;
+      old.page != page ||
+      old.highlights != highlights ||
+      old.annotations != annotations ||
+      old.ocrBoxes != ocrBoxes;
 }
 
 final class _PdfCanvasPager extends StatelessWidget {
@@ -599,6 +766,9 @@ final class _SelectablePage extends StatefulWidget {
     required this.page,
     required this.box,
     required this.highlights,
+    required this.annotations,
+    required this.ocrBoxes,
+    required this.paintSize,
     required this.onStart,
     required this.onUpdate,
     required this.onEnd,
@@ -607,6 +777,12 @@ final class _SelectablePage extends StatefulWidget {
   final PdfRenderedPage page;
   final PdfRect box;
   final List<Rect> highlights;
+  final List<_AnnotationBox> annotations;
+  final List<_OcrBox> ocrBoxes;
+
+  /// Size the page is painted at, in logical pixels. The canvas uses it as its
+  /// coordinate space, so overlay rects need no further conversion.
+  final Size paintSize;
   final void Function(Offset local, BoxConstraints constraints) onStart;
   final void Function(Offset local, BoxConstraints constraints) onUpdate;
   final void Function(Offset local, BoxConstraints constraints) onEnd;
@@ -647,11 +823,46 @@ final class _SelectablePageState extends State<_SelectablePage> {
               widget.onEnd(_toLocal(d.globalPosition, constraints), constraints),
           child: CustomPaint(
             key: _key,
-            size: size,
-            painter: _PicturePainter(widget.page, highlights: widget.highlights),
+            size: widget.paintSize,
+            painter: _PicturePainter(
+              widget.page,
+              highlights: widget.highlights,
+              annotations: widget.annotations,
+              ocrBoxes: widget.ocrBoxes,
+              pxPerPoint: widget.paintSize.width / size.width,
+            ),
           ),
         );
       },
     );
   }
 }
+
+/// A stored annotation projected into view coordinates.
+final class _AnnotationBox {
+  const _AnnotationBox({
+    required this.rect,
+    required this.color,
+    required this.underline,
+  });
+
+  final Rect rect;
+  final AnnotationColor color;
+  final bool underline;
+}
+
+/// One OCR text block projected into view coordinates.
+final class _OcrBox {
+  const _OcrBox({required this.rect, required this.text});
+
+  final Rect rect;
+  final String text;
+}
+
+Color _annotationColor(AnnotationColor color) => switch (color) {
+  AnnotationColor.yellow => const Color(0x66FFD54F),
+  AnnotationColor.blue => const Color(0x664FC3F7),
+  AnnotationColor.green => const Color(0x6681C784),
+  AnnotationColor.red => const Color(0x66E57373),
+  AnnotationColor.purple => const Color(0x66BA68C8),
+};

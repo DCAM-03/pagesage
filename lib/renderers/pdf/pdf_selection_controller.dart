@@ -158,9 +158,11 @@ final class PdfSelectionController {
 
   RendererTextSelected _buildEvent(int start, int end, String text) {
     final rects = _readerRectsFor(start, end);
+    // Anchor on the largest run so the flash effect lands on real text rather
+    // than a sliver.
     final anchor = rects.isEmpty
         ? ReaderRect(page: pageIndex + 1, x: 0, y: 0, width: 0, height: 0)
-        : rects.first;
+        : rects.reduce((a, b) => b.width * b.height > a.width * a.height ? b : a);
 
     return RendererTextSelected(
       text: text,
@@ -175,13 +177,21 @@ final class PdfSelectionController {
     );
   }
 
+  /// Selection rects in the renderer contract's units.
+  ///
+  /// [ReaderRect] holds fractions of the page (0..1), not pixels: the WebView
+  /// renderer normalised browser client rects against the page box before
+  /// emitting them, and annotations persist these values and re-render from
+  /// them at whatever size the reader happens to be at. Emitting pixels here
+  /// would make every stored annotation scale wrongly.
   List<ReaderRect> _readerRectsFor(int start, int end) {
     final out = <ReaderRect>[];
     for (final quad in _text.quadsFor(start, end)) {
       final corners = quad.corners
-          .map((c) => toWidgetPoint(c.$1, c.$2))
+          .map((c) => _normalisePagePoint(c.$1, c.$2))
           .toList(growable: false);
       if (corners.length < 4) continue;
+
       var minX = corners.first.dx, maxX = corners.first.dx;
       var minY = corners.first.dy, maxY = corners.first.dy;
       for (final c in corners.skip(1)) {
@@ -190,18 +200,31 @@ final class PdfSelectionController {
         minY = math.min(minY, c.dy);
         maxY = math.max(maxY, c.dy);
       }
+
+      final x = minX.clamp(0.0, 1.0);
+      final y = minY.clamp(0.0, 1.0);
+      final width = (maxX - minX).clamp(0.0, 1.0 - x);
+      final height = (maxY - minY).clamp(0.0, 1.0 - y);
+      if (width <= 0 || height <= 0) continue;
+
       out.add(
         ReaderRect(
           page: pageIndex + 1,
-          x: minX,
-          y: minY,
-          width: maxX - minX,
-          height: maxY - minY,
+          x: x,
+          y: y,
+          width: width,
+          height: height,
         ),
       );
     }
     return out;
   }
+
+  /// PDF page point -> 0..1 fraction of the page box.
+  Offset _normalisePagePoint(double x, double y) => Offset(
+    ((x - box.left) / box.width).clamp(0.0, 1.0),
+    ((box.top - y) / box.height).clamp(0.0, 1.0),
+  );
 
   /// Highlight rectangles for a text range, in widget coordinates.
   List<Rect> highlightsFor(int start, int end) => [
