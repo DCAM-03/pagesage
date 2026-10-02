@@ -5,11 +5,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_graphics/pdf_graphics.dart';
 
 import '../../domain/books/book.dart';
 import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
 import '../common/renderer_event.dart';
+import '../epub/epub_jump.dart';
 import 'pdf_canvas_renderer.dart';
 import 'pdf_selection_controller.dart';
 
@@ -28,6 +30,10 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
     required this.settings,
     required this.initialProgress,
     required this.onEvent,
+    this.searchQuery,
+    this.focusLocator,
+    this.jumpToken = 0,
+    this.clearSearchHighlightsVersion = 0,
     super.key,
   });
 
@@ -35,6 +41,14 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
   final ReaderSettings settings;
   final ReadingProgressSnapshot? initialProgress;
   final ValueChanged<RendererEvent> onEvent;
+  final String? searchQuery;
+  final ReadingLocator? focusLocator;
+
+  /// Bumped by the host to jump to [focusLocator] without remounting.
+  final int jumpToken;
+
+  /// Bumped by the host to drop search highlights.
+  final int clearSearchHighlightsVersion;
 
   @override
   ConsumerState<PdfCanvasView> createState() => _PdfCanvasViewState();
@@ -48,11 +62,31 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   Object? _error;
   int _currentPage = 0;
   bool _readySent = false;
+  String _lastReportedSearchQuery = '';
+  /// Page index -> quads in page space; each page widget converts these
+  /// to widget coordinates using its own painted box.
+  final Map<int, List<PdfTextQuad>> _searchHighlights = {};
 
   @override
   void initState() {
     super.initState();
     unawaited(_open());
+  }
+
+  @override
+  void didUpdateWidget(covariant PdfCanvasView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchQuery != widget.searchQuery) {
+      unawaited(_runSearch());
+    }
+    if (oldWidget.clearSearchHighlightsVersion !=
+        widget.clearSearchHighlightsVersion) {
+      setState(() => _searchHighlights.clear());
+    }
+    if (oldWidget.jumpToken != widget.jumpToken ||
+        oldWidget.focusLocator != widget.focusLocator) {
+      unawaited(_jumpToFocus());
+    }
   }
 
   @override
@@ -72,8 +106,11 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       if (!mounted) return;
 
       final renderer = PdfCanvasRenderer(doc);
+      // Assign before setState: _runSearch reads _renderer synchronously, and
+      // setState does not run its body synchronously, so assigning inside it
+      // would make the first search see a null renderer and bail out.
+      _renderer = renderer;
       setState(() {
-        _renderer = renderer;
         _currentPage = _initialPage(doc.pageCount);
         _error = null;
       });
@@ -87,13 +124,13 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       widget.onEvent(
         const RendererCapabilityChanged(
           textSelection: true,
-          search: false,
-          reason: 'Canvas 渲染器已接入选区，搜索待接入',
+          search: true,
         ),
       );
       widget.onEvent(RendererReady());
       _readySent = true;
       _reportLocation(doc.pageCount);
+      unawaited(_runSearch());
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
     }
@@ -129,6 +166,93 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     });
   }
 
+  /// Upper bound on reported hits, matching the EPUB renderer. Without it a
+  /// query common to a large document would walk every page synchronously.
+  static const _maxSearchResults = 100;
+
+  Future<void> _runSearch() async {
+    final renderer = _renderer;
+    final query = widget.searchQuery?.trim() ?? '';
+    if (renderer == null || query == _lastReportedSearchQuery) return;
+    _lastReportedSearchQuery = query;
+
+    if (query.isEmpty) {
+      setState(() => _searchHighlights.clear());
+      widget.onEvent(const RendererSearchResults([]));
+      return;
+    }
+
+    final results = <RendererSearchResult>[];
+    final highlights = <int, List<PdfTextQuad>>{};
+
+    // Text extraction is synchronous per page, so yield between pages to keep
+    // the UI responsive on long documents.
+    for (var page = 0; page < renderer.pageCount; page++) {
+      if (results.length >= _maxSearchResults) break;
+      if (page % 4 == 0) await Future<void>.delayed(Duration.zero);
+
+      final PdfPageText pageText;
+      try {
+        pageText = renderer.textOf(page);
+      } on Object {
+        continue; // A page that cannot be parsed should not abort the search.
+      }
+      if (pageText.text.isEmpty) continue;
+
+      for (final match in pageText.findAll(query)) {
+        if (results.length >= _maxSearchResults) break;
+        final start = match.start.clamp(0, pageText.text.length);
+        final end = match.end.clamp(start, pageText.text.length);
+        final snippet = compactLocatorExcerpt(
+          pageText.text.substring(start, end),
+          maxChars: 120,
+        );
+        results.add(
+          RendererSearchResult(
+            title: '第 ${page + 1} 页',
+            snippet: snippet ?? query,
+            locator: ReadingLocator.pdf(
+              page: page + 1,
+              zoom: widget.settings.pdfScale,
+              progress: renderer.pageCount <= 1
+                  ? 0
+                  : page / (renderer.pageCount - 1),
+              excerpt: snippet,
+            ),
+          ),
+        );
+        highlights.putIfAbsent(page, () => <PdfTextQuad>[]).addAll(match.quads);
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _searchHighlights
+        ..clear()
+        ..addAll(highlights);
+    });
+    widget.onEvent(RendererSearchResults(results));
+  }
+
+  Future<void> _jumpToFocus() async {
+    final renderer = _renderer;
+    final focus = widget.focusLocator;
+    if (renderer == null || focus == null) return;
+    final page = focus.page;
+    if (page == null || page < 1 || page > renderer.pageCount) return;
+
+    final target = page - 1;
+    if (_pageController.hasClients) {
+      await _pageController.animateToPage(
+        target,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    }
+    if (mounted && target != _currentPage) setState(() => _currentPage = target);
+    _reportLocation(renderer.pageCount);
+  }
+
   @override
   Widget build(BuildContext context) {
     final renderer = _renderer;
@@ -156,6 +280,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               renderer: renderer,
               pageIndex: index,
               settings: widget.settings,
+              searchQuads: _searchHighlights[index] ?? const [],
               onSelection: widget.onEvent,
             ),
           ),
@@ -187,12 +312,16 @@ final class _CanvasPage extends StatefulWidget {
     required this.renderer,
     required this.pageIndex,
     required this.settings,
+    required this.searchQuads,
     required this.onSelection,
   });
 
   final PdfCanvasRenderer renderer;
   final int pageIndex;
   final ReaderSettings settings;
+
+  /// Page-space quads to paint as search highlights.
+  final List<PdfTextQuad> searchQuads;
   final ValueChanged<RendererTextSelected> onSelection;
 
   @override
@@ -206,6 +335,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
   Offset? _dragAnchor;
   bool _dragSelecting = false;
   List<Rect> _selectionHighlights = const [];
+  Rect _paintOrigin = Rect.zero;
 
   // Rendering waits for LayoutBuilder: the fit-width and fit-page zoom modes
   // resolve against the real paint box, which is not known until layout. A
@@ -239,6 +369,12 @@ final class _CanvasPageState extends State<_CanvasPage> {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         if (viewport != _lastBox) _render(viewport);
 
+        // FittedBox centres the page inside the slot; search quads arrive in
+        // page points, so they need the same origin the selection controller
+        // uses. Recomputed here rather than stored by the parent because only
+        // this widget knows its own constraints.
+        _paintOrigin = _computePaintOrigin(constraints);
+
         return Center(
           child: FutureBuilder<PdfRenderedPage>(
             future: _future,
@@ -256,7 +392,10 @@ final class _CanvasPageState extends State<_CanvasPage> {
                   child: _SelectablePage(
                     page: page,
                     box: box,
-                    highlights: _selectionHighlights,
+                    highlights: [
+                      for (final q in widget.searchQuads) _quadToRect(q),
+                      ..._selectionHighlights,
+                    ],
                     onStart: _onDragStart,
                     onUpdate: _onDragUpdate,
                     onEnd: _onDragEnd,
@@ -270,28 +409,59 @@ final class _CanvasPageState extends State<_CanvasPage> {
     );
   }
 
-  PdfSelectionController? _selectionFor(Size viewport, BoxConstraints c) {
+  /// Where FittedBox lands the page inside [constraints], in the page widget's
+  /// own coordinate space. Selection and search highlights both need it, so it
+  /// is derived once per layout rather than in two places.
+  Rect _computePaintOrigin(BoxConstraints constraints) {
     final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
-    // FittedBox scales the page box down to fit the viewport; that fitted
-    // rectangle is where the page actually lands inside the page widget.
-    final scale = math.min(c.maxWidth / box.width, c.maxHeight / box.height);
-    final painted = Size(box.width * scale, box.height * scale);
-    final origin = Offset(
-      (c.maxWidth - painted.width) / 2,
-      (c.maxHeight - painted.height) / 2,
+    final scale = math.min(
+      constraints.maxWidth / box.width,
+      constraints.maxHeight / box.height,
     );
+    final painted = Size(box.width * scale, box.height * scale);
+    return Rect.fromLTWH(
+      (constraints.maxWidth - painted.width) / 2,
+      (constraints.maxHeight - painted.height) / 2,
+      painted.width,
+      painted.height,
+    );
+  }
+
+  PdfSelectionController? _selectionFor(BoxConstraints constraints) {
+    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
+    final paint = _computePaintOrigin(constraints);
     return PdfSelectionController(
       renderer: widget.renderer,
       pageIndex: widget.pageIndex,
       box: box,
       rasterScale: 1,
-      paintOrigin: origin,
-      paintSize: painted,
+      paintOrigin: paint.topLeft,
+      paintSize: paint.size,
     );
   }
 
+  /// Page-space quad -> widget rectangle, using the same origin as selection.
+  Rect _quadToRect(PdfTextQuad quad) {
+    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
+    final paint = _paintOrigin;
+    if (paint.width <= 0 || paint.height <= 0) return Rect.zero;
+
+    var minX = double.infinity, maxX = -double.infinity;
+    var minY = double.infinity, maxY = -double.infinity;
+    for (final corner in quad.corners) {
+      final x = paint.left + (corner.$1 - box.left) / box.width * paint.width;
+      final y = paint.top + (box.top - corner.$2) / box.height * paint.height;
+      minX = math.min(minX, x);
+      maxX = math.max(maxX, x);
+      minY = math.min(minY, y);
+      maxY = math.max(maxY, y);
+    }
+    if (!minX.isFinite || !minY.isFinite) return Rect.zero;
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
   void _onDragStart(Offset local, BoxConstraints constraints) {
-    final controller = _selectionFor(_lastBox, constraints);
+    final controller = _selectionFor(constraints);
     if (controller == null || !controller.hasText) return;
     setState(() {
       _dragAnchor = local;
@@ -302,7 +472,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
 
   void _onDragUpdate(Offset local, BoxConstraints constraints) {
     if (!_dragSelecting) return;
-    final controller = _selectionFor(_lastBox, constraints);
+    final controller = _selectionFor(constraints);
     final anchor = _dragAnchor;
     if (controller == null || anchor == null) {
         return;
@@ -324,7 +494,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
     if (!_dragSelecting) return;
     setState(() => _dragSelecting = false);
 
-    final controller = _selectionFor(_lastBox, constraints);
+    final controller = _selectionFor(constraints);
     final anchor = _dragAnchor;
     if (controller == null || anchor == null) return;
 

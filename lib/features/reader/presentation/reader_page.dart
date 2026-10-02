@@ -6900,6 +6900,11 @@ final class _DefaultRendererHost extends StatelessWidget {
               book: config.book,
               settings: config.settings,
               initialProgress: config.progress,
+              searchQuery: config.searchQuery,
+              focusLocator: config.focusLocator,
+              jumpToken: config.jumpToken,
+              clearSearchHighlightsVersion:
+                  config.clearSearchHighlightsVersion,
               onEvent: config.onEvent,
             )
           : PdfRendererView(
