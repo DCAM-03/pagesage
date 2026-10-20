@@ -39,6 +39,8 @@ dev_dependencies:
   # tool/refresh_covers.dart opens the library database directly. Declaring it
   # here (dev only) keeps the tool out of the app's dependency graph.
   sqlite3: ^3.5.2
+  integration_test:
+    sdk: flutter
 
 flutter:
   uses-material-design: true

@@ -110,6 +110,7 @@
 | `plugin_platform_interface` | `2.1.8` | `transitive` | `hosted` | `LICENSE` |
 | `pool` | `1.5.3` | `transitive` | `hosted` | `LICENSE` |
 | `posix` | `6.5.2` | `transitive` | `hosted` | `LICENSE` |
+| `process` | `5.0.5` | `transitive` | `hosted` | `LICENSE` |
 | `pub_semver` | `2.2.1` | `transitive` | `hosted` | `LICENSE` |
 | `pubspec_parse` | `1.6.0` | `transitive` | `hosted` | `LICENSE` |
 | `recase` | `4.1.0` | `transitive` | `hosted` | `LICENSE` |
@@ -126,7 +127,7 @@
 | `shelf_web_socket` | `3.0.0` | `transitive` | `hosted` | `LICENSE` |
 | `source_gen` | `4.2.4` | `transitive` | `hosted` | `LICENSE` |
 | `source_span` | `1.10.2` | `transitive` | `hosted` | `LICENSE` |
-| `sqlite3` | `3.5.2` | `transitive` | `hosted` | `LICENSE` |
+| `sqlite3` | `3.5.2` | `direct dev` | `hosted` | `LICENSE` |
 | `sqlite3_flutter_libs` | `0.6.0+eol` | `direct main` | `hosted` | `LICENSE` |
 | `sqlparser` | `0.45.0` | `transitive` | `hosted` | `LICENSE` |
 | `stack_trace` | `1.12.1` | `transitive` | `hosted` | `LICENSE` |
@@ -134,6 +135,7 @@
 | `stream_channel` | `2.1.4` | `transitive` | `hosted` | `LICENSE` |
 | `stream_transform` | `2.1.2` | `transitive` | `hosted` | `LICENSE` |
 | `string_scanner` | `1.4.1` | `transitive` | `hosted` | `LICENSE` |
+| `sync_http` | `0.3.1` | `transitive` | `hosted` | `LICENSE` |
 | `term_glyph` | `1.2.2` | `transitive` | `hosted` | `LICENSE` |
 | `test_api` | `0.7.11` | `transitive` | `hosted` | `LICENSE` |
 | `typed_data` | `1.4.0` | `transitive` | `hosted` | `LICENSE` |
@@ -152,6 +154,7 @@
 | `web` | `1.1.1` | `transitive` | `hosted` | `LICENSE` |
 | `web_socket` | `1.0.1` | `transitive` | `hosted` | `LICENSE` |
 | `web_socket_channel` | `3.0.3` | `transitive` | `hosted` | `LICENSE` |
+| `webdriver` | `3.1.0` | `transitive` | `hosted` | `LICENSE` |
 | `win32` | `6.4.0` | `transitive` | `hosted` | `LICENSE` |
 | `windows_file_picker` | `1.3.0` | `transitive` | `hosted` | `LICENSE` |
 | `xdg_directories` | `1.1.0` | `transitive` | `hosted` | `LICENSE` |

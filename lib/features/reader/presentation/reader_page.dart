@@ -36,6 +36,7 @@ import '../../ocr/application/ocr_providers.dart';
 import '../../../domain/ocr/ocr_models.dart';
 import '../application/in_book_search_controller.dart';
 import '../application/reader_providers.dart';
+import 'floating_menu_placement.dart';
 
 final readerRendererHostProvider =
     Provider<Widget Function(ReaderRendererHostConfig)>((ref) {
@@ -1408,7 +1409,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     final overlaySize = overlayBox?.size ?? MediaQuery.sizeOf(context);
     const overlayWidth = 300.0;
     const estimatedHeight = 168.0;
-    final placement = _placeFloatingMenu(
+    final placement = placeFloatingMenu(
       overlaySize: overlaySize,
       target: _toOverlayLocalRect(sourceRect, overlayBox),
       menuWidth: overlayWidth,
@@ -2162,36 +2163,11 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     final currentLocator =
         _currentLocation?.locator ??
         ref.read(readerProgressProvider(widget.bookId)).value?.locator;
-    final controller = TextEditingController(
-      text: (currentLocator?.page ?? 1).toString(),
-    );
     final value = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('跳转页码'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: '页码',
-            hintText: '输入 PDF 页码',
-          ),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('跳转'),
-          ),
-        ],
-      ),
+      builder: (context) =>
+          _PageJumpDialog(initialPage: currentLocator?.page ?? 1),
     );
-    controller.dispose();
     final page = int.tryParse(value?.trim() ?? '');
     if (page == null || page <= 0) {
       return;
@@ -2326,7 +2302,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     const estimatedWidth = 520.0;
     const estimatedHeight = 56.0;
     final localTarget = _toOverlayLocalRect(selection.sourceRect, overlayBox);
-    final placement = _placeFloatingMenu(
+    final placement = placeFloatingMenu(
       overlaySize: overlaySize,
       target: localTarget,
       menuWidth: estimatedWidth,
@@ -2400,124 +2376,6 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       y: rect.y - origin.dy,
       width: rect.width,
       height: rect.height,
-    );
-  }
-
-  /// Places a floating menu near [target] without covering it when possible.
-  ///
-  /// Preference: above → below → right → left → least-overlap fallback.
-  _FloatingMenuPlacement _placeFloatingMenu({
-    required Size overlaySize,
-    required ReaderRect? target,
-    required double menuWidth,
-    required double menuHeight,
-    double gap = 10,
-    double margin = 12,
-  }) {
-    final maxLeft = (overlaySize.width - menuWidth - margin).clamp(
-      margin,
-      overlaySize.width,
-    );
-    final maxTop = (overlaySize.height - menuHeight - margin).clamp(
-      margin,
-      overlaySize.height,
-    );
-
-    if (target == null || target.width <= 0 || target.height <= 0) {
-      // No geometry: park near the top of the reading area, not over mid-page.
-      return _FloatingMenuPlacement(
-        left: (overlaySize.width * 0.5 - menuWidth / 2).clamp(margin, maxLeft),
-        top: margin + 56,
-        side: _FloatingMenuSide.fallback,
-      );
-    }
-
-    final selection = Rect.fromLTWH(
-      target.x,
-      target.y,
-      target.width,
-      target.height,
-    );
-    final centerX = selection.center.dx;
-
-    double clampLeft(double raw) => raw.clamp(margin, maxLeft).toDouble();
-    double clampTop(double raw) => raw.clamp(margin, maxTop).toDouble();
-
-    Rect menuRect(double left, double top) =>
-        Rect.fromLTWH(left, top, menuWidth, menuHeight);
-
-    bool fits(Rect menu) {
-      if (menu.left < margin - 0.5 ||
-          menu.top < margin - 0.5 ||
-          menu.right > overlaySize.width - margin + 0.5 ||
-          menu.bottom > overlaySize.height - margin + 0.5) {
-        return false;
-      }
-      // Keep a small gap so the bar never sits on the highlight.
-      final padded = selection.inflate(gap * 0.35);
-      return !menu.overlaps(padded);
-    }
-
-    final candidates = <({double left, double top, _FloatingMenuSide side})>[
-      (
-        left: clampLeft(centerX - menuWidth / 2),
-        top: clampTop(selection.top - gap - menuHeight),
-        side: _FloatingMenuSide.above,
-      ),
-      (
-        left: clampLeft(centerX - menuWidth / 2),
-        top: clampTop(selection.bottom + gap),
-        side: _FloatingMenuSide.below,
-      ),
-      (
-        left: clampLeft(selection.right + gap),
-        top: clampTop(selection.center.dy - menuHeight / 2),
-        side: _FloatingMenuSide.right,
-      ),
-      (
-        left: clampLeft(selection.left - gap - menuWidth),
-        top: clampTop(selection.center.dy - menuHeight / 2),
-        side: _FloatingMenuSide.left,
-      ),
-    ];
-
-    for (final candidate in candidates) {
-      final rect = menuRect(candidate.left, candidate.top);
-      if (fits(rect)) {
-        return _FloatingMenuPlacement(
-          left: candidate.left,
-          top: candidate.top,
-          side: candidate.side,
-        );
-      }
-    }
-
-    // Last resort: pick the candidate with minimal overlap area.
-    var best = candidates.first;
-    var bestOverlap = double.infinity;
-    for (final candidate in candidates) {
-      final rect = menuRect(candidate.left, candidate.top);
-      final overlap = rect.intersect(selection);
-      final area = overlap.isEmpty ? 0.0 : overlap.width * overlap.height;
-      final offscreen =
-          (rect.left < margin ? margin - rect.left : 0) +
-          (rect.top < margin ? margin - rect.top : 0) +
-          (rect.right > overlaySize.width - margin
-              ? rect.right - (overlaySize.width - margin)
-              : 0) +
-          (rect.bottom > overlaySize.height - margin
-              ? rect.bottom - (overlaySize.height - margin)
-              : 0);
-      final score = area + offscreen * 40;
-      if (score < bestOverlap) {
-        bestOverlap = score;
-        best = candidate;
-      }
-    }
-    return _FloatingMenuPlacement(
-      left: best.left,
-      top: best.top,
-      side: best.side,
     );
   }
 
@@ -4019,6 +3877,61 @@ final class _MobileMoreChip extends StatelessWidget {
   }
 }
 
+/// Page-number prompt for the PDF toolbar.
+///
+/// The controller lives here rather than in `_showPageJump` because
+/// `showDialog`'s future completes when the dialog starts dismissing, while
+/// the route (and its `TextField`) is still animating out. Disposing the
+/// controller at that point throws "used after being disposed" on the next
+/// frame.
+final class _PageJumpDialog extends StatefulWidget {
+  const _PageJumpDialog({required this.initialPage});
+
+  final int initialPage;
+
+  @override
+  State<_PageJumpDialog> createState() => _PageJumpDialogState();
+}
+
+final class _PageJumpDialogState extends State<_PageJumpDialog> {
+  late final _controller = TextEditingController(
+    text: widget.initialPage.toString(),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('跳转页码'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          labelText: '页码',
+          hintText: '输入 PDF 页码',
+        ),
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('跳转'),
+        ),
+      ],
+    );
+  }
+}
+
 final class _PdfQuickToolbar extends StatelessWidget {
   const _PdfQuickToolbar({
     required this.pageNumber,
@@ -4413,20 +4326,6 @@ final class _ReaderBottomSheetFrame extends StatelessWidget {
 }
 
 enum _SelectionAction { highlight, underline, note, search, copy, ai }
-
-enum _FloatingMenuSide { above, below, left, right, fallback }
-
-final class _FloatingMenuPlacement {
-  const _FloatingMenuPlacement({
-    required this.left,
-    required this.top,
-    required this.side,
-  });
-
-  final double left;
-  final double top;
-  final _FloatingMenuSide side;
-}
 
 final class _DesktopSelectionOverlay extends StatelessWidget {
   const _DesktopSelectionOverlay({
