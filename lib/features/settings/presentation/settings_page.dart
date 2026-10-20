@@ -1177,7 +1177,8 @@ final class _ReaderDefaultsCardState
                   max: 32,
                   divisions: 18,
                   displayValue: _settings.fontSize.round().toString(),
-                  onChanged: (value) => _save(_settings.copyWith(fontSize: value)),
+                  onChanged: (value) =>
+                      _save(_settings.copyWith(fontSize: value)),
                 ),
                 _SettingsSlider(
                   label: '默认行高',
@@ -1212,11 +1213,12 @@ final class _ReaderDefaultsCardState
                 _SettingsSlider(
                   label: 'PDF 默认缩放',
                   value: _settings.pdfScale,
-                  min: 0.7,
-                  max: 2.4,
-                  divisions: 17,
+                  min: ReaderSettings.pdfScaleMin,
+                  max: ReaderSettings.pdfScaleMax,
+                  divisions: 25,
                   displayValue: '${(_settings.pdfScale * 100).round()}%',
-                  onChanged: (value) => _save(_settings.copyWith(pdfScale: value)),
+                  onChanged: (value) =>
+                      _save(_settings.copyWith(pdfScale: value)),
                 ),
                 const _SettingsFieldGap(),
                 _SettingsLabeledField(
@@ -1230,7 +1232,9 @@ final class _ReaderDefaultsCardState
                     onSubmitted: (value) =>
                         _save(_settings.copyWith(fontFamily: value.trim())),
                     onEditingComplete: () => _save(
-                      _settings.copyWith(fontFamily: _fontController.text.trim()),
+                      _settings.copyWith(
+                        fontFamily: _fontController.text.trim(),
+                      ),
                     ),
                   ),
                 ),
@@ -1246,9 +1250,9 @@ final class _ReaderDefaultsCardState
               children: [
                 Text(
                   '阅读主题',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: AppSpacing.x2),
                 Wrap(
@@ -1271,9 +1275,9 @@ final class _ReaderDefaultsCardState
                 const _SettingsFieldGap(),
                 Text(
                   '阅读模式',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: AppSpacing.x2),
                 SegmentedButton<ReaderMode>(
@@ -1290,9 +1294,9 @@ final class _ReaderDefaultsCardState
                 const _SettingsFieldGap(),
                 Text(
                   '应用外观',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: AppSpacing.x2),
                 SegmentedButton<ThemeMode>(
@@ -1889,7 +1893,6 @@ String _shortError(Object error) {
   return text.length <= 120 ? text : '${text.substring(0, 120)}...';
 }
 
-
 final class _SettingsPanel extends StatelessWidget {
   const _SettingsPanel({
     required this.child,
@@ -1902,10 +1905,7 @@ final class _SettingsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: padding,
-        child: child,
-      ),
+      child: Padding(padding: padding, child: child),
     );
   }
 }
@@ -1958,10 +1958,11 @@ final class _SettingsGroup extends StatelessWidget {
                         const SizedBox(height: AppSpacing.x1),
                         Text(
                           subtitle!,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colorScheme.textSecondary,
-                            height: 1.4,
-                          ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colorScheme.textSecondary,
+                                height: 1.4,
+                              ),
                         ),
                       ],
                     ],
@@ -2155,7 +2156,8 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
                           suffixIcon: IconButton(
                             tooltip: _showApiKey ? '隐藏 API Key' : '显示 API Key',
                             onPressed: enabled
-                                ? () => setState(() => _showApiKey = !_showApiKey)
+                                ? () =>
+                                      setState(() => _showApiKey = !_showApiKey)
                                 : null,
                             icon: Icon(
                               _showApiKey
@@ -2259,7 +2261,8 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
                   value: _settings.streaming,
                   onChanged: enabled
                       ? (value) => setState(
-                          () => _settings = _settings.copyWith(streaming: value),
+                          () =>
+                              _settings = _settings.copyWith(streaming: value),
                         )
                       : null,
                 ),
@@ -2373,9 +2376,9 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('AI 设置已保存')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('AI 设置已保存')));
   }
 
   Future<void> _confirmClearApiKey() async {

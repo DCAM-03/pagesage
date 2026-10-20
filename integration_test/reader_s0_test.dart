@@ -1,8 +1,10 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
+import 'package:pagesage/domain/books/reader_settings.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/renderers/pdf/pdf_canvas_view.dart';
 
@@ -57,6 +59,38 @@ void main() {
     return start;
   }
 
+  /// The painted page box as the reader laid it out, by page aspect.
+  Rect? pageOfAspect(WidgetTester tester, double aspect) {
+    Rect? best;
+    for (final element in find.byType(CustomPaint).evaluate()) {
+      final widget = element.widget as CustomPaint;
+      if (widget.painter == null) continue;
+      final box = element.renderObject! as RenderBox;
+      if (!box.hasSize || box.size.width < 100 || box.size.height < 100) {
+        continue;
+      }
+      if ((box.size.width / box.size.height - aspect).abs() > 0.01) continue;
+      final rect = box.localToGlobal(Offset.zero) & box.size;
+      if (best == null || rect.width * rect.height > best.width * best.height) {
+        best = rect;
+      }
+    }
+    return best;
+  }
+
+  /// One mouse-wheel notch at the centre of the reader.
+  Future<void> wheel(WidgetTester tester, Offset delta) async {
+    final page = pageOfAspect(tester, 612 / 792);
+    final center =
+        page?.center ?? tester.getCenter(find.byType(Scaffold).first);
+    final pointer = TestPointer(1, PointerDeviceKind.mouse);
+    pointer.hover(center);
+    // In the live binding, `GestureBinding.handlePointerEvent` treats events as
+    // device-sourced and drops them; `sendEventToBinding` marks them as test
+    // events so the real hit-test path runs.
+    await tester.sendEventToBinding(pointer.scroll(delta));
+  }
+
   Future<ReaderHarness> harnessFor({
     String sample = 'standard-text.pdf',
     String id = 'standard',
@@ -90,6 +124,7 @@ void main() {
     expect(find.textContaining('3 / 3'), findsWidgets);
     expect(tester.takeException(), isNull);
 
+    await harness.capture('01-restore-saved-page');
     await harness.closeReader(tester);
   });
 
@@ -113,6 +148,7 @@ void main() {
     expect(menu.center.dy, lessThan(start.dy));
     expect(tester.takeException(), isNull);
 
+    await harness.capture('02-drag-selection-menu');
     await harness.closeReader(tester);
   });
 
@@ -158,6 +194,7 @@ void main() {
     expect(find.text('删除标注'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await harness.capture('03-annotation-menu');
     await harness.closeReader(tester);
   });
 
@@ -179,6 +216,7 @@ void main() {
     expect(find.textContaining('40 / 80'), findsWidgets);
     expect(tester.takeException(), isNull);
 
+    await harness.capture('04-page-jump');
     await harness.closeReader(tester);
   });
 
@@ -191,6 +229,7 @@ void main() {
     expect(find.textContaining('无文本层'), findsWidgets);
 
     // Leaving the reader flushes progress, including for a scanned page.
+    await harness.capture('05-scanned-disabled');
     await harness.closeReader(tester);
     final stored = await harness.database.progressDao.getProgress('scanned');
     expect(stored?.pageNumber, 1);
@@ -209,6 +248,7 @@ void main() {
 
     // Closing unmounts the reader and flushes pending progress, which is what
     // exiting the app does for persistence.
+    await harness.capture('06-page40-reopen-a');
     await harness.closeReader(tester);
     final stored = await harness.database.progressDao.getProgress('large');
     expect(stored?.pageNumber, 40);
@@ -218,6 +258,7 @@ void main() {
     // to page 1 (the defect-8 regression point).
     await harness.pumpReader(tester, 'large', size: const Size(1280, 800));
     expect(find.textContaining('40 / 80'), findsWidgets);
+    await harness.capture('06-page40-reopen-b');
     await harness.closeReader(tester);
 
     final after = await harness.database.progressDao.getProgress('large');
@@ -243,6 +284,63 @@ void main() {
     expect(menu.top, greaterThanOrEqualTo(0));
     expect(tester.takeException(), isNull);
 
+    await harness.capture('07-narrow-window-menu');
+    await harness.closeReader(tester);
+  });
+
+  testWidgets('Ctrl+wheel zooms the page and the scale survives a reopen', (
+    tester,
+  ) async {
+    final harness = await harnessFor();
+    await harness.pumpReader(tester, 'standard', size: const Size(1280, 800));
+
+    final before = pageOfAspect(tester, 612 / 792);
+    expect(before, isNotNull);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await wheel(tester, const Offset(0, -40));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await harness.settle(tester);
+
+    final after = pageOfAspect(tester, 612 / 792);
+    await harness.capture('08-ctrl-wheel-zoom');
+    expect(after, isNotNull);
+    // The zoom was a step up from fit-width, so the page grew.
+    expect(after!.width, greaterThan(before!.width));
+
+    // The requirement is that the zoom survives leaving and reopening the
+    // reader, not that a particular settings key exists: reopen from the
+    // stored settings and check the page is laid out at the same scale.
+    await harness.closeReader(tester);
+    await harness.pumpReader(tester, 'standard', size: const Size(1280, 800));
+    final reopened = pageOfAspect(tester, 612 / 792);
+    expect(reopened, isNotNull);
+    expect(reopened!.width, closeTo(after.width, 1));
+  });
+
+  testWidgets('a rotated page reads landscape in the real window', (
+    tester,
+  ) async {
+    final harness = await harnessFor(sample: 'rotated-text.pdf', id: 'rotated');
+    await harness.pumpReader(
+      tester,
+      'rotated',
+      size: const Size(1280, 800),
+      settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+    );
+
+    final page = pageOfAspect(tester, 792 / 612);
+    expect(page, isNotNull, reason: 'rotated page should lay out 792x612');
+    expect(page!.width, greaterThan(page.height));
+
+    // A tap on the text column selects a word, proving the rotated geometry
+    // maps pointers onto the real glyphs.
+    final target = page.topLeft + Offset(page.width * 0.92, page.height * 0.12);
+    await tester.tapAt(target);
+    await harness.settle(tester);
+    expect(find.text('高亮'), findsWidgets);
+
+    await harness.capture('09-rotated-page');
     await harness.closeReader(tester);
   });
 }

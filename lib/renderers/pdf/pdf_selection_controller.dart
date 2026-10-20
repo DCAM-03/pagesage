@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
@@ -22,6 +23,7 @@ final class PdfSelectionController {
     required this.renderer,
     required this.pageIndex,
     required this.box,
+    required this.rotation,
     required this.paintSize,
     required this.displayedSize,
     required this.globalOrigin,
@@ -31,6 +33,11 @@ final class PdfSelectionController {
   final PdfCanvasRenderer renderer;
   final int pageIndex;
   final PdfRect box;
+
+  /// The page's /Rotate value. Every widget↔page conversion goes through
+  /// [PdfPageGeometry], so a rotated page selects and reports rects in the
+  /// same place a browser would.
+  final int rotation;
 
   /// Size of the page's own coordinate space, in logical pixels. Pointer
   /// positions arrive in this space, so overlays are laid out against it.
@@ -45,6 +52,20 @@ final class PdfSelectionController {
   /// The page's rotation-aware size in PDF points
   /// (`PdfPageRenderer.pageSize`), i.e. what [paintSize] represents.
   final Size pageSize;
+
+  /// Widget space <-> PDF page space, including /Rotate.
+  late final PdfPageGeometry _geometry = PdfPageGeometry(
+    cropBox: box,
+    rotation: rotation,
+    viewSize: paintSize,
+  );
+
+  /// The same mapping at 1 unit per point, for normalising into 0..1.
+  late final PdfPageGeometry _unitGeometry = PdfPageGeometry(
+    cropBox: box,
+    rotation: rotation,
+    viewSize: pageSize,
+  );
 
   /// Logical pixels per PDF point at the current layout.
   ///
@@ -73,17 +94,12 @@ final class PdfSelectionController {
     if (dx < 0 || dy < 0 || dx > paintSize.width || dy > paintSize.height) {
       return null;
     }
-    // Normalise against the painted box, then flip into the PDF's y-up space.
-    final u = dx / paintSize.width;
-    final v = dy / paintSize.height;
-    return (x: box.left + u * box.width, y: box.top - v * box.height);
+    final (x, y) = _geometry.toPagePoint(local);
+    return (x: x, y: y);
   }
 
   /// PDF page coordinates -> widget-local offset.
-  Offset toWidgetPoint(double x, double y) => Offset(
-    (x - box.left) / box.width * paintSize.width,
-    (box.top - y) / box.height * paintSize.height,
-  );
+  Offset toWidgetPoint(double x, double y) => _geometry.toViewOffset(x, y);
 
   /// Selection covering the drag from [anchorWidget] to [currentWidget].
   ///
@@ -272,14 +288,18 @@ final class PdfSelectionController {
     return out;
   }
 
-  /// PDF page point -> 0..1 fraction of the page box.
+  /// PDF page point -> 0..1 fraction of the displayed page box.
   ///
-  /// Rotation stays out of scope until S1 centralises geometry on
-  /// [PdfPageGeometry]; see `docs/11-pdf-canvas-implementation-plan.md` §S0.
-  Offset _normalisePagePoint(double x, double y) => Offset(
-    ((x - box.left) / box.width).clamp(0.0, 1.0),
-    ((box.top - y) / box.height).clamp(0.0, 1.0),
-  );
+  /// The basis is the *rotated* page size, matching how stored
+  /// `selectionRects` are projected back: `x * viewSize.width`, no page-space
+  /// detour. Both directions therefore agree on 90°/270° pages too.
+  Offset _normalisePagePoint(double x, double y) {
+    final view = _unitGeometry.toViewOffset(x, y);
+    return Offset(
+      (view.dx / math.max(pageSize.width, 1)).clamp(0.0, 1.0),
+      (view.dy / math.max(pageSize.height, 1)).clamp(0.0, 1.0),
+    );
+  }
 
   /// Highlight rectangles for a text range, in widget coordinates.
   List<Rect> highlightsFor(int start, int end) => [

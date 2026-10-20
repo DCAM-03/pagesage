@@ -95,6 +95,14 @@ enum PdfZoomMode {
 }
 
 final class ReaderSettings {
+  /// Bounds for [pdfScale], shared with the renderer's zoom resolution.
+  ///
+  /// The WebView bridge used 0.5–3.0; the old reader toolbar clamped to
+  /// 0.7–2.4, so a scale saved by the bridge could not be reproduced. Keeping
+  /// one range keeps stored locators portable between renderers.
+  static const double pdfScaleMin = 0.5;
+  static const double pdfScaleMax = 3.0;
+
   const ReaderSettings({
     this.appThemeMode = ThemeMode.system,
     this.fontFamily = '',

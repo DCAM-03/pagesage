@@ -26,6 +26,7 @@ import '../../../renderers/common/renderer_event.dart';
 import '../../../renderers/epub/epub_document.dart';
 import '../../../renderers/epub/epub_document_loader.dart';
 import '../../../renderers/pdf/pdf_canvas_view.dart';
+import '../../../renderers/pdf/pdf_zoom.dart';
 import '../../../renderers/epub/epub_jump.dart';
 import '../../../renderers/epub/epub_renderer_view.dart';
 import '../../../renderers/pdf/pdf_renderer_view.dart';
@@ -58,6 +59,7 @@ final class ReaderRendererHostConfig {
     this.ocrOverlayToken = 0,
     this.ocrOverlayPage,
     this.ocrOverlayBlocks = const [],
+    this.onZoomChanged,
   });
 
   final Book book;
@@ -81,6 +83,11 @@ final class ReaderRendererHostConfig {
   final int ocrOverlayToken;
   final int? ocrOverlayPage;
   final List<Map<String, Object?>> ocrOverlayBlocks;
+
+  /// Zoom performed inside the renderer (pinch, Ctrl+wheel, double-click),
+  /// or null when the renderer has no such gesture (the WebView bridge owns
+  /// its own zoom and reports it through settings only).
+  final PdfZoomChanged? onZoomChanged;
 }
 
 final class ReaderPage extends ConsumerStatefulWidget {
@@ -701,6 +708,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                 ocrOverlayToken: _ocrOverlayToken,
                                 ocrOverlayPage: _ocrOverlayPage,
                                 ocrOverlayBlocks: _ocrOverlayBlocks,
+                                onZoomChanged: _handlePdfZoomChanged,
                               ),
                             ),
                           ),
@@ -1788,10 +1796,19 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
     final book = ref.read(readerBookProvider(widget.bookId)).value;
+    // In custom mode the saved scale is what the page is drawn at, and every
+    // renderer zoom writes it back. In the fit modes it is not: a fit-width
+    // page is rarely at 100%, so stepping it blindly would jump. There the
+    // reported layout scale is the honest base.
+    final base = book?.format == BookFormat.pdf
+        ? settings.pdfZoomMode == PdfZoomMode.custom
+              ? settings.pdfScale
+              : (_currentLocation?.locator.zoom ?? settings.pdfScale)
+        : settings.pdfScale;
     final next = book?.format == BookFormat.pdf
         ? settings.copyWith(
-            pdfScale: (settings.pdfScale + direction * 0.1)
-                .clamp(0.7, 2.4)
+            pdfScale: (base + direction * pdfZoomStep)
+                .clamp(ReaderSettings.pdfScaleMin, ReaderSettings.pdfScaleMax)
                 .toDouble(),
             pdfZoomMode: PdfZoomMode.custom,
           )
@@ -1806,6 +1823,30 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       book?.format == BookFormat.pdf
           ? '缩放 ${(next.pdfScale * 100).round()}%'
           : '字号 ${next.fontSize.round()}',
+    );
+  }
+
+  /// Persists a zoom performed inside the canvas renderer.
+  ///
+  /// Pinches and wheel notches arrive in bursts, so this plans the write
+  /// instead of forcing one per notch; the renderer keeps painting the
+  /// transient scale until the saved value round-trips.
+  void _handlePdfZoomChanged(double scale, PdfZoomMode mode) {
+    final settings = ref.read(readerSettingsProvider).value;
+    if (settings == null) {
+      return;
+    }
+    final next = settings.copyWith(
+      pdfScale: scale
+          .clamp(ReaderSettings.pdfScaleMin, ReaderSettings.pdfScaleMax)
+          .toDouble(),
+      pdfZoomMode: mode,
+    );
+    unawaited(ref.read(readerSettingsControllerProvider).save(next));
+    _setTransientStatus(
+      mode == PdfZoomMode.fitWidth
+          ? '适合宽度'
+          : '缩放 ${(next.pdfScale * 100).round()}%',
     );
   }
 
@@ -6480,6 +6521,7 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
     required this.ocrOverlayToken,
     required this.ocrOverlayPage,
     required this.ocrOverlayBlocks,
+    this.onZoomChanged,
   });
 
   final String bookId;
@@ -6495,6 +6537,7 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
   final int ocrOverlayToken;
   final int? ocrOverlayPage;
   final List<Map<String, Object?>> ocrOverlayBlocks;
+  final PdfZoomChanged? onZoomChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -6516,6 +6559,7 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
         ocrOverlayToken: ocrOverlayToken,
         ocrOverlayPage: ocrOverlayPage,
         ocrOverlayBlocks: ocrOverlayBlocks,
+        onZoomChanged: onZoomChanged,
       ),
     );
   }
@@ -6809,6 +6853,7 @@ final class _DefaultRendererHost extends StatelessWidget {
                 jumpToken: config.jumpToken,
                 clearSearchHighlightsVersion:
                     config.clearSearchHighlightsVersion,
+                onZoomChanged: config.onZoomChanged,
                 onEvent: config.onEvent,
               )
             : PdfRendererView(
@@ -7124,9 +7169,9 @@ final class _ReaderSettingsSheetState
                 _SliderSetting(
                   label: '自定义缩放',
                   value: _settings.pdfScale,
-                  min: 0.7,
-                  max: 2.4,
-                  divisions: 17,
+                  min: ReaderSettings.pdfScaleMin,
+                  max: ReaderSettings.pdfScaleMax,
+                  divisions: 25,
                   displayValue: '${(_settings.pdfScale * 100).round()}%',
                   onChanged: (value) => _update(
                     _settings.copyWith(

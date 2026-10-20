@@ -2,9 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
-import 'package:dart_pdf_editor/src/image_decoder.dart';
 import 'package:flutter/material.dart';
-import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
@@ -18,81 +16,37 @@ final class PdfCanvasRenderer {
 
   final PdfDocument _doc;
 
-  CosDocument get cos => _doc.cos;
-
   int get pageCount => _doc.pageCount;
 
   PdfPage pageAt(int index) => _doc.page(index);
 
-  /// Renders [pageIndex] at [scale] and returns the picture plus the size it
-  /// was rasterised at.
+  /// Renders [pageIndex] into a picture in page space.
   ///
-  /// [zoom] scales the page in PDF user units; the caller is responsible for
-  /// mapping [outputSize] back to widget space.
-  Future<PdfRenderedPage> renderPage(int pageIndex, {double zoom = 1.0}) async {
+  /// The picture is recorded at 1 unit = 1 PDF point in the page's *displayed*
+  /// space (after /Rotate), and the caller scales it to the on-screen page
+  /// box. Recording in point space rather than at a raster density means a
+  /// zoom change only re-lays-out and re-paints — the vector picture replays
+  /// sharp at every scale, and no page has to be re-rendered when the reader
+  /// zooms.
+  ///
+  /// Rotation is applied by `PdfPageRenderer`'s own transform. Never apply
+  /// /Rotate here as well: doing both turns 90° pages by 180°
+  /// (`docs/11-pdf-canvas-implementation-plan.md` §4.1).
+  Future<PdfRenderedPage> renderPage(int pageIndex) async {
     final page = _doc.page(pageIndex);
-    final box = page.cropBox;
-
-    // Pass 1: a scan-only walk collects every image request. Without this the
-    // device has no bitmaps and drawImage paints nothing — silently, with no
-    // exception.
-    final collector = ImageCollector();
-    PdfInterpreter(
-      cos: cos,
-      device: collector,
-      scanImagesOnly: true,
-    ).drawPage(page);
-    final images = await decodeImages(cos, collector.streams);
-
-    // Rasterise at device pixels, capped so a huge page at high zoom cannot
-    // allocate an unbounded buffer.
-    const maxPixels = 64 * 1024 * 1024;
-    var scale = zoom;
-    while (scale > 0.05 &&
-        (box.width * scale * box.height * scale) > maxPixels) {
-      scale *= 0.8;
-    }
-
-    final w = (box.width * scale).round().clamp(1, 20000);
-    final h = (box.height * scale).round().clamp(1, 20000);
-
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(
-      recorder,
-      Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+    // The renderer's default includes the page's own annotations. The canvas
+    // host paints the reader's stored annotations itself, and S0 never drew
+    // the document's, so keep the raster to the page content only.
+    final picture = await PdfPageRenderer.renderPicture(
+      page,
+      annotations: false,
+      // Null lets the library use the page's own /Rotate.
+      rotation: null,
     );
-
-    canvas.save();
-    // Uniform scale first, then the page transform. The flip must pivot around
-    // box.height — flipping around y=0 pushes content to negative y and the
-    // page renders blank. Mirrors dart_pdf_editor's _applyPageTransform.
-    canvas.scale(scale, scale);
-    switch (page.rotation) {
-      case 90:
-        canvas.translate(h / scale, 0);
-        canvas.rotate(mathPi / 2);
-      case 180:
-        canvas.translate(w / scale, h / scale);
-        canvas.rotate(mathPi);
-      case 270:
-        canvas.translate(0, w / scale);
-        canvas.rotate(-mathPi / 2);
-    }
-    canvas.translate(0, box.height);
-    canvas.scale(1, -1);
-    canvas.translate(-box.left, -box.bottom);
-
-    PdfInterpreter(
-      cos: cos,
-      device: CanvasPdfDevice(canvas, images: images),
-    ).drawPage(page);
-    canvas.restore();
-
-    final picture = recorder.endRecording();
-    for (final image in images.values) {
-      image.dispose();
-    }
-    return PdfRenderedPage(picture: picture, pixels: w * h, zoom: scale);
+    return PdfRenderedPage(
+      picture: picture,
+      displaySize: displaySizeOf(pageIndex),
+    );
   }
 
   /// Text of [pageIndex] with geometry, for selection and search.
@@ -157,21 +111,15 @@ final class PdfCanvasRenderer {
       PdfPageRenderer.pageSize(_doc.page(pageIndex));
 }
 
-const double mathPi = 3.1415926535897932;
-
-/// A rasterised page: the picture plus the zoom actually used.
+/// A rendered page: the point-space picture plus the display size it covers.
 final class PdfRenderedPage {
-  const PdfRenderedPage({
-    required this.picture,
-    required this.pixels,
-    required this.zoom,
-  });
+  const PdfRenderedPage({required this.picture, required this.displaySize});
 
+  /// Page-space picture, one unit per PDF point, rotation already applied.
   final ui.Picture picture;
-  final int pixels;
 
-  /// May be lower than requested when the pixel cap kicked in.
-  final double zoom;
+  /// Rotation-aware page size in PDF points; the picture spans exactly this.
+  final Size displaySize;
 
   void dispose() => picture.dispose();
 }

@@ -179,6 +179,16 @@ Future<List<GeneratedSample>> generateManualSamples({
       ),
     ),
     GeneratedSample(
+      fileName: 'rotated-text.pdf',
+      description: '90° 旋转文本 PDF：用于旋转页布局、选区与标注贴合验收。',
+      write: (file) => file.writeAsBytes(
+        buildTextPdf(const [
+          'Rotated PDF page. PageSage geometry check for /Rotate 90.',
+        ], rotate: 90),
+        flush: true,
+      ),
+    ),
+    GeneratedSample(
       fileName: 'image-only.pdf',
       description: '无文本层 PDF：只有矢量图形，用于搜索/划词禁用状态。',
       write: (file) => file.writeAsBytes(buildImageOnlyPdf(), flush: true),
@@ -301,10 +311,13 @@ Uint8List buildEpub({
   return Uint8List.fromList(ZipEncoder().encode(archive));
 }
 
-Uint8List buildTextPdf(List<String> pageTexts) {
+Uint8List buildTextPdf(List<String> pageTexts, {int rotate = 0}) {
   final pageObjects = <String>[];
   final contentObjects = <String>[];
   final fontObjectNumber = 3 + pageTexts.length * 2;
+  // /Rotate is clockwise on screen; only multiples of 90 are meaningful, which
+  // is also what the renderer's pageSize() assumes.
+  final rotateEntry = rotate % 360 == 0 ? '' : ' /Rotate ${rotate % 360}';
   for (var i = 0; i < pageTexts.length; i += 1) {
     final pageObjectNumber = 3 + i * 2;
     final contentObjectNumber = pageObjectNumber + 1;
@@ -320,7 +333,7 @@ BT
 ET''';
     pageObjects.add(
       '$pageObjectNumber 0 obj\n'
-      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]$rotateEntry '
       '/Contents $contentObjectNumber 0 R '
       '/Resources << /Font << /F1 $fontObjectNumber 0 R >> >> >>\n'
       'endobj\n',

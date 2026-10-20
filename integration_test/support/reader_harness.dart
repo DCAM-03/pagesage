@@ -1,13 +1,16 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/domain/books/book.dart';
+import 'package:pagesage/domain/books/reader_settings.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/features/reader/presentation/reader_page.dart';
 
@@ -22,6 +25,9 @@ final class ReaderHarness {
   ReaderHarness._(this.database);
 
   final AppDatabase database;
+
+  /// Root of the writer's widget tree, used by [capture].
+  final GlobalKey _captureKey = GlobalKey();
 
   static Future<ReaderHarness> create({
     required Iterable<Book> books,
@@ -66,16 +72,30 @@ final class ReaderHarness {
     String bookId, {
     ReadingLocator? initialLocator,
     Size? size,
+    ReaderSettings? settings,
   }) async {
     if (size != null) {
       tester.view.physicalSize = size * tester.view.devicePixelRatio;
       addTearDown(tester.view.reset);
     }
+    // Settings live in the same in-memory database the reader already reads,
+    // so seeding them here exercises the production settings stream rather
+    // than a test-only override.
+    if (settings != null) {
+      await database.settingsDao.setValue(
+        'reader.settings',
+        settings.toJsonText(),
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    }
     await tester.pumpWidget(
-      ProviderScope(
-        overrides: [appDatabaseProvider.overrideWithValue(database)],
-        child: MaterialApp(
-          home: ReaderPage(bookId: bookId, initialLocator: initialLocator),
+      RepaintBoundary(
+        key: _captureKey,
+        child: ProviderScope(
+          overrides: [appDatabaseProvider.overrideWithValue(database)],
+          child: MaterialApp(
+            home: ReaderPage(bookId: bookId, initialLocator: initialLocator),
+          ),
         ),
       ),
     );
@@ -91,6 +111,26 @@ final class ReaderHarness {
   Future<void> closeReader(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 50));
+  }
+
+  /// Writes what the real window is showing to `build/integration-captures/`.
+  ///
+  /// The live test binding paints "Test starting..." over the window between
+  /// tests, so a screenshot taken by hand or by the desktop rarely catches the
+  /// reader mid-test. This grabs the frame the assertions just ran against,
+  /// which is what makes a passing integration test reviewable after the fact
+  /// rather than only reported as a check mark.
+  Future<File?> capture(String name) async {
+    final boundary = _captureKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) return null;
+    final image = await boundary.toImage(pixelRatio: 1);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    if (bytes == null) return null;
+    final dir = Directory('build/integration-captures')
+      ..createSync(recursive: true);
+    return File('${dir.path}/$name.png')
+      ..writeAsBytesSync(bytes.buffer.asUint8List());
   }
 
   /// Pumps for real time so the renderer's location timer (120 ms) and the

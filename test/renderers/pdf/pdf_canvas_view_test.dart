@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/domain/books/book.dart';
@@ -8,6 +9,8 @@ import 'package:pagesage/domain/books/reader_settings.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/renderers/common/renderer_event.dart';
 import 'package:pagesage/renderers/pdf/pdf_canvas_view.dart';
+
+import 'support/canvas_test_helpers.dart';
 
 /// Behavioural tests for the S0 fixes in [PdfCanvasView].
 ///
@@ -31,9 +34,16 @@ void main() {
     String sample, {
     ReadingLocator? savedLocator,
     int session = 0,
+    ReaderSettings settings = const ReaderSettings(),
+    Size? viewport,
+    PdfZoomChanged? onZoomChanged,
   }) async {
     final events = <RendererEvent>[];
     final book = bookFor(sample);
+    if (viewport != null) {
+      tester.view.physicalSize = viewport * tester.view.devicePixelRatio;
+      addTearDown(tester.view.reset);
+    }
     await tester.runAsync(() async {
       await tester.pumpWidget(
         ProviderScope(
@@ -45,7 +55,7 @@ void main() {
                 // for a deliberate reopen of the same sample.
                 key: ValueKey('$sample#$session'),
                 book: book,
-                settings: const ReaderSettings(),
+                settings: settings,
                 initialProgress: savedLocator == null
                     ? null
                     : ReadingProgressSnapshot(
@@ -56,6 +66,7 @@ void main() {
                       ),
                 annotations: const [],
                 onEvent: events.add,
+                onZoomChanged: onZoomChanged,
               ),
             ),
           ),
@@ -207,5 +218,147 @@ void main() {
         reason: '$sample should reach RendererReady',
       );
     }
+  });
+
+  group('S1 zoom', () {
+    testWidgets('lays the page out at the resolved fit-width scale', (
+      tester,
+    ) async {
+      // 1000px window, 24px margins → (1000 - 48) / 612 per point.
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+      );
+      final page = paintedPageRect(tester);
+      expect(page, isNotNull);
+      expect(page!.width, closeTo(952, 1));
+      expect(page.height, closeTo(792 * 952 / 612, 1));
+    });
+
+    testWidgets('a custom scale is applied exactly once', (tester) async {
+      // The S0 bug this pins: raster density was multiplied by pdfScale while
+      // the FittedBox also fitted the page, so custom zoom cropped the page.
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(
+          pdfScale: 1.5,
+          pdfZoomMode: PdfZoomMode.custom,
+        ),
+      );
+      final page = paintedPageRect(tester);
+      expect(page, isNotNull);
+      expect(page!.width, closeTo(612 * 1.5, 1));
+      expect(page.height, closeTo(792 * 1.5, 1));
+    });
+
+    testWidgets('fit-page fits the shorter axis', (tester) async {
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 500),
+        settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+      );
+      final page = paintedPageRect(tester);
+      expect(page, isNotNull);
+      // The page box inside the reader is 500 tall minus the bottom pager
+      // (~44) and the 24px margins.
+      expect(page!.height, closeTo(396, 1));
+    });
+
+    testWidgets('a rotated page is laid out landscape', (tester) async {
+      await pumpReader(
+        tester,
+        'rotated-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+      );
+      // Display size is 792x612, so the page box's aspect is landscape.
+      final page = paintedPageRect(tester, aspect: 792 / 612);
+      expect(page, isNotNull);
+      expect(page!.width, greaterThan(page.height));
+      expect(page.width / page.height, closeTo(792 / 612, 0.01));
+    });
+
+    testWidgets('Ctrl+wheel zooms and reports the new scale', (tester) async {
+      final zooms = <(double, PdfZoomMode)>[];
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(
+          pdfScale: 1.5,
+          pdfZoomMode: PdfZoomMode.custom,
+        ),
+        onZoomChanged: (scale, mode) => zooms.add((scale, mode)),
+      );
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      addTearDown(() => tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft));
+      await simulateWheel(tester, const Offset(0, -40));
+      await tester.pumpAndSettle();
+
+      expect(zooms, isNotEmpty);
+      expect(zooms.last.$1, closeTo(1.6, 0.001));
+      expect(zooms.last.$2, PdfZoomMode.custom);
+      // And the layout followed for the rest of the session.
+      expect(paintedPageRect(tester)!.width, closeTo(612 * 1.6, 1));
+    });
+
+    testWidgets('plain wheel turns pages in a single-page layout', (
+      tester,
+    ) async {
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        savedLocator: ReadingLocator.pdf(page: 1, progress: 0),
+      );
+      expect(find.text('第 1 / 3 页'), findsOneWidget);
+      await simulateWheel(tester, const Offset(0, 60));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.text('第 2 / 3 页'), findsOneWidget);
+    });
+
+    testWidgets('a page wider than the viewport pans instead of turning', (
+      tester,
+    ) async {
+      // 2x is wider than the 1000px window, so the wheel must move the page
+      // (a mouse drag selects text and cannot pan) rather than turn it.
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(
+          pdfScale: 2.0,
+          pdfZoomMode: PdfZoomMode.custom,
+        ),
+      );
+      final before = paintedPageRect(tester);
+      await simulateWheel(tester, const Offset(60, 0));
+      await tester.pump();
+      final after = paintedPageRect(tester);
+      expect(before, isNotNull);
+      expect(after, isNotNull);
+      expect(after!.left, lessThan(before!.left));
+      expect(find.text('第 1 / 3 页'), findsOneWidget);
+    });
+
+    testWidgets('remembers the zoom in the reported locator', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(
+          pdfScale: 1.6,
+          pdfZoomMode: PdfZoomMode.custom,
+        ),
+      );
+      final location = result.events.whereType<RendererLocationChanged>().last;
+      expect(location.locator.zoom, closeTo(1.6, 0.001));
+    });
   });
 }

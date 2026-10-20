@@ -405,9 +405,11 @@ flutter test
 
 1. 缩放上下限统一：阅读器工具栏当前 0.7–2.4（`reader_page.dart:1793` clamp、设置页滑块 `min: 0.7, max: 2.4, divisions: 17`，`:7225` 附近），旧 bridge 与双指建议 0.5–3.0。建议本期统一为 0.5–3.0，设置页滑块同步（divisions 相应调整）。
    **与规格的冲突需一并裁决**：`docs/03-interaction-spec.md` §8.1 列的是「适合宽度 / 适合页面 / 100% / 125% / 150%」四个离散预设，而当前实现是连续滑块，`reader_page.dart` 里搜不到任何 1.25 / 1.5 / 125 / 150。要么保留滑块并更新 §8.1，要么恢复四个预设并与四种 `PdfZoomMode` 的关系重新定义。这个问题必须在 S1 前定，否则 S1 做出来的缩放 UI 和规格对不上。
+   **裁决（S1，2026-10-20）：保留连续滑块，上下限统一为 0.5–3.0。** 常量落到 `ReaderSettings.pdfScaleMin/pdfScaleMax`，设置页与阅读器工具栏滑块共用（divisions 25）；`PdfZoomMode` 的四个模式（actual/fitWidth/fitPage/custom）保持不变，滑块只写 `custom`。`docs/03` §8.1 的离散预设按此更新（S7 文档同步时落地）。理由：连续滑块已存在且与 `custom` 模式一一对应，恢复离散预设会把「双指/滚轮产生的任意比例」挤进固定档位，反而破坏"缩放值持久化后重开恢复"的验收；0.5–3.0 同时满足 bridge 与双指的取值范围。
 2. 双页模式是否在 v1 保留：旧 WebView 桌面端有，规格 `docs/02` §5.5 有；计划保留，但窄屏强制单页。实现方式是 Canvas 直接消费 EPUB/PDF 共用的 `settings.readerMode`，复刻 bridge `preferredDisplayMode()` 映射，不新增字段。
 3. `poc_pdf_canvas/` 删除还是保留：建议删除应用、保留样本生成脚本（迁到 `tool/make_samples.dart`），自动化用小样本迁入 `test/fixtures/pdf/`。
 4. **窄屏缩放启发式是否继承**：旧 bridge 在窄屏且用户值 ≤1.25 且 `widthScale < 1.2` 时压到 `widthScale`，打开时窄屏 `custom` 直接改判 `fit-width`（`bridge.js:2877`）。建议**继承**——该启发式正是为修复"360px 手机上 600pt 页按 1.2× 铺开导致横向混乱与页面变形"而存在，放弃它会在 Android 上重新引入这个已知回归。确认后写进 S1 步骤 6。
+   **裁决（S1，2026-10-20）：继承。** 实现拆成两个纯函数放在 `lib/renderers/pdf/pdf_zoom.dart`：`effectivePdfZoomMode` 负责"窄屏 + 尚未手动调整 + custom → fitWidth"（对应 `bridge.js:2877` 的打开时改判），`resolvePdfZoom` 负责"窄屏下 custom 值 ≤1.25 且 `widthScale < 1.2` 时压到 `widthScale`"（对应 `resolveZoomForPage`）。`userAdjustedScale` 由视图在用户第一次主动缩放后置位，此后尊重用户选择，与 bridge 的会话语义一致。
 
 ## 11. 参考
 
@@ -543,3 +545,51 @@ S0 的宿主侧验收改为可重复执行的测试，分两层：
 补充说明：
 - `release_readiness_test` 会校验许可清单，新增 `integration_test` 依赖后需重跑 `dart run tool/generate_third_party_licenses.dart`。`process`/`sync_http`/`webdriver` 仅随 dev 依赖进入，清单照实列入并已能找到 `LICENSE`。
 - `flutter test` 仍有 4 项 `widget_test.dart` 失败（移动端分类弹层、短窗口阅读控制条、设置弹层与页面标题），已在本次改动前复现，与 S0 无关；其余 199 项通过（2 项跳过：缺少 APK/AAB）。
+
+## 16. S1 施工记录（2026-10-20）
+
+按 §5 S1 完成，附带 4 个计划外发现。核心是把缩放收敛到单一来源：`lib/renderers/pdf/pdf_zoom.dart`（纯函数）+ `PdfPageRenderer.pageSize`（旋转感知尺寸），页面槽位、手势、`locator.zoom` 全部从这两处推导。
+
+### 16.1 与计划的偏差
+
+| # | 计划 | 实际 | 原因 |
+| --- | --- | --- | --- |
+| 1 | 步骤 1：光栅按 `_layoutScale * dpr` 渲染并受 64 MP 上限约束 | **不重渲染**：`renderPage` 录制 1 单位 = 1 PDF 点、已含 /Rotate 的 `ui.Picture`，视图按 `pxPerPoint = 显示宽 / 页宽` 缩放回放 | 按光栅密度渲染会在缩放时重新做一遍页面解释，且 `FittedBox` 与光栅密度叠加正是 S0 里 custom 比例被应用两次的根因。点空间 Picture 让 3× 放大依然清晰（矢量重放），也不需要 64 MP 上限与页缓存驱逐；S6 的主题重渲染会再引入缓存 |
+| 2 | 步骤 3：`didUpdateWidget` 比较 `pdfZoomMode/pdfScale/themePreset/readerMode/pageMargin/reduceMotion`，变化时清空页缓存并重渲染 | 只比较 `pdfScale/pdfZoomMode`，且**不清缓存**，只做 transient scale 的交接 | 点空间 Picture 与缩放无关，没有要清的缓存；themePreset 等字段的观察留到 S6（届时才有缓存） |
+| 3 | 步骤 4/5 未规定溢出时页面的锚点 | 内容超出视口时锚定左上角，否则居中 | 居中会让溢出的 fit-width 页面顶部被工具条遮住，S0 的拖选/标注集成测试因此回归；这也与浏览器滚动容器的行为一致 |
+| 4 | 步骤 5：`Ctrl + 滚轮` 调整并消费事件 | 普通滚轮只在**页面宽于视口**时平移（Shift 转横向），否则翻页（180 ms 防抖） | 平移必须有一条路径：桌面拖拽已被划词占用。只按高度溢出判断会让 fit-width 的竖版页面被误判成"可平移"，普通滚轮永远翻不了页 |
+| 5 | 步骤 7 双击列为 P2 | 已实现：双击在 fitWidth 与 2.0 之间切换，300 ms / 24 px 内算双击 | 与桌面阅读习惯一致，实现成本低 |
+
+### 16.2 计划外发现（已修，各有回归测试）
+
+| # | 现象 | 根因 | 覆盖 |
+| --- | --- | --- | --- |
+| A | 缺陷 6：旋转页按未旋转尺寸布局，页面上下留白、选区错位 | 布局用 `cropBox`，绘制用旋转后的图 | `PdfPageRenderer.pageSize` 统一为显示尺寸；`PdfSelectionController` 新增 `rotation`，所有换算走 `PdfPageGeometry`，选区归一化也按旋转后尺寸 |
+| B | 集成测试里 Ctrl+滚轮完全没有反应 | live binding 把 `GestureBinding.handlePointerEvent` 的事件当作 device 源丢弃，`Listener.onPointerSignal` 永不触发 | 测试改用 `tester.sendEventToBinding(pointer.scroll(...))`，走真实的 test 源命中路径 |
+| C | 自定义缩放被应用两次（S0 遗留） | 光栅密度乘了 `pdfScale`，`FittedBox` 又适配一次 | 同 16.1 #1；视图测试断言 612×1.5 的槽位宽恰为 918 |
+| D | 缩放快捷键从 100% 起跳，与页面当前显示比例脱节 | 工具栏 `_adjustReaderScale` 直接对 `pdfScale` 加减 | custom 模式以已保存的 `pdfScale` 为基准，fit 模式以渲染器上报的 `locator.zoom` 为基准（两处都写回 `custom`） |
+
+### 16.3 验证结果
+
+- `dart format`：仅本次触及文件被重排；`flutter analyze`：3 条 info，全部在 `poc_pdf_canvas/`（S7 删除该目录后消失），仓库自身代码 0 error。
+- 纯函数/组件测试：
+  - `test/renderers/pdf/pdf_zoom_test.dart` 14 项：四种模式、0.5–3.0 clamp、窄屏启发式两个方向、旋转页尺寸、手机边距、退化尺寸；
+  - `test/renderers/pdf/pdf_canvas_contract_test.dart` 9 项：含 /Rotate 90 样本的 `displaySize`、旋转后选区坐标与往返稳定性；
+  - `test/renderers/pdf/pdf_canvas_view_test.dart` 14 项：fit-width / custom 只应用一次 / fit-page / 旋转页横向 / Ctrl+滚轮改布局并上报 / 普通滚轮翻页 / 宽页平移 / locator.zoom。
+- 真实窗口集成测试（`integration_test/reader_s0_test.dart`，9 项全过）：在 S0 的 7 项之外新增"S0 回归 + Ctrl+滚轮缩放并跨重开保持"与"旋转页在真实窗口里横向阅读并可选字"。
+- `flutter test`：224 项通过、2 项跳过；4 项 `widget_test.dart` 失败与 HEAD 基线逐一对照一致（移动端分类弹层、短窗口阅读控制条、设置弹层与页面标题），与 S1 无关。
+- 视觉取证：集成 harness 增加 `RepaintBoundary` 截图（`build/integration-captures/`），覆盖恢复到第 3 页、选区菜单、窄窗口菜单、Ctrl+滚轮放大、旋转页九张。
+
+### 16.4 运行集成测试不要弹窗
+
+`flutter test integration_test/... -d linux` 会开真实 GTK 窗口，反复运行会打断正常使用。在本机用嵌套 Wayland 会话即可静默运行（截图仍由应用内部生成，不依赖屏幕）：
+
+```bash
+dbus-run-session -- kwin_wayland --virtual --socket pagesage-test \
+  --width 1400 --height 900 &
+WAYLAND_DISPLAY=pagesage-test GDK_BACKEND=wayland \
+  flutter test integration_test/reader_s0_test.dart -d linux
+pkill -f "kwin_wayland --virtual --socket pagesage-test"
+```
+
+注意只清理带 `--socket pagesage-test` 的进程，不要误杀桌面自己的 kwin。

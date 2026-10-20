@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:io';
 
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
@@ -17,6 +18,14 @@ import '../common/renderer_event.dart';
 import '../epub/epub_jump.dart';
 import 'pdf_canvas_renderer.dart';
 import 'pdf_selection_controller.dart';
+import 'pdf_zoom.dart';
+
+/// Reports a zoom the user performed inside the renderer.
+///
+/// The scale is in logical pixels per PDF point; [mode] tells the host whether
+/// to persist it as a custom scale or as a named mode (fit-width after a
+/// double-click).
+typedef PdfZoomChanged = void Function(double scale, PdfZoomMode mode);
 
 /// PDF renderer built on `pdf_graphics` painting straight to a Flutter Canvas.
 ///
@@ -24,9 +33,9 @@ import 'pdf_selection_controller.dart';
 /// panning, text selection and annotation overlays are ported; see
 /// `docs/10-pdf-renderer-migration.md`.
 ///
-/// This first slice covers page display, zoom modes, paging, and the
-/// location/ready events the reader host needs to persist progress. Selection
-/// and search are reported as unsupported for now.
+/// S1 makes zoom a single resolved scale: the page slot, the picture transform
+/// and `locator.zoom` all derive from [resolvePdfZoom], so a page is never
+/// fitted twice and a rotated page is laid out at its rotated size.
 final class PdfCanvasView extends ConsumerStatefulWidget {
   const PdfCanvasView({
     required this.book,
@@ -41,6 +50,7 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
     this.focusLocator,
     this.jumpToken = 0,
     this.clearSearchHighlightsVersion = 0,
+    this.onZoomChanged,
     super.key,
   });
 
@@ -67,6 +77,11 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
   /// Bumped by the host to drop search highlights.
   final int clearSearchHighlightsVersion;
 
+  /// Pinch, Ctrl+wheel and double-click zoom. The host persists the result;
+  /// the renderer keeps painting the transient scale until the new settings
+  /// arrive, so the page never jumps back for a frame.
+  final PdfZoomChanged? onZoomChanged;
+
   @override
   ConsumerState<PdfCanvasView> createState() => _PdfCanvasViewState();
 }
@@ -87,13 +102,20 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
 
   /// Layout scale of the current page, in logical pixels per PDF point.
   ///
-  /// The page widget reports it after layout; `locator.zoom` must carry this
-  /// value (what the WebView renderer exposed as `dataset.scale`), not the
-  /// user's `pdfScale` setting.
+  /// The page widget reports the scale it actually laid out at; `locator.zoom`
+  /// must carry this value (what the WebView renderer exposed as
+  /// `dataset.scale`), not the raw `pdfScale` setting.
   double _layoutScale = 1;
 
   /// Result of the text-layer probe, or null while it is still running.
   bool? _nativeTextLayer;
+
+  /// Whether the user has zoomed in this session.
+  ///
+  /// The bridge coerced a saved custom scale to fit-width when a document
+  /// opened on a phone; without this flag that coercion would also undo the
+  /// user's own pinch on the next rebuild.
+  bool _userAdjustedScale = false;
 
   @override
   void initState() {
@@ -363,6 +385,29 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     _reportLocation(renderer.pageCount);
   }
 
+  /// Forwards a zoom the user performed on the page to the host.
+  void _handleZoomChanged(double scale, PdfZoomMode mode) {
+    _userAdjustedScale = true;
+    widget.onZoomChanged?.call(
+      scale.clamp(pdfZoomMin, pdfZoomMax).toDouble(),
+      mode,
+    );
+  }
+
+  void _turnPage(int delta) {
+    final renderer = _renderer;
+    if (renderer == null) return;
+    final target = _currentPage + delta;
+    if (target < 0 || target >= renderer.pageCount) return;
+    unawaited(
+      _pageController.animateToPage(
+        target,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final renderer = _renderer;
@@ -375,6 +420,15 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     if (!_readySent) {
       return const Center(child: CircularProgressIndicator());
     }
+
+    // Window width, not the page box: the bridge's phone heuristic keys off
+    // `window.innerWidth < 900` (`bridge.js` `isNarrowViewport`).
+    final narrow = MediaQuery.sizeOf(context).width < pdfNarrowViewportWidth;
+    final zoomMode = effectivePdfZoomMode(
+      mode: widget.settings.pdfZoomMode,
+      narrow: narrow,
+      userAdjustedScale: _userAdjustedScale,
+    );
 
     return Column(
       children: [
@@ -390,6 +444,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               renderer: renderer,
               pageIndex: index,
               settings: widget.settings,
+              zoomMode: zoomMode,
+              narrow: narrow,
               searchQuads: _searchHighlights[index] ?? const [],
               annotations: widget.annotations,
               ocrBlocks: widget.ocrOverlayPage == index + 1
@@ -397,6 +453,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   : const [],
               onSelection: widget.onEvent,
               onAnnotationSelected: widget.onEvent,
+              onZoomChanged: _handleZoomChanged,
+              onPageTurn: _turnPage,
               onLayoutScaleChanged: index == _currentPage
                   ? (scale) {
                       _layoutScale = scale;
@@ -426,17 +484,21 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   }
 }
 
-/// One rasterised page, fitted into the available box.
+/// One page, laid out at the resolved zoom and panned inside the viewport.
 final class _CanvasPage extends StatefulWidget {
   const _CanvasPage({
     required this.renderer,
     required this.pageIndex,
     required this.settings,
+    required this.zoomMode,
+    required this.narrow,
     required this.searchQuads,
     required this.annotations,
     required this.ocrBlocks,
     required this.onSelection,
     required this.onAnnotationSelected,
+    required this.onZoomChanged,
+    required this.onPageTurn,
     this.onLayoutScaleChanged,
   });
 
@@ -444,12 +506,16 @@ final class _CanvasPage extends StatefulWidget {
   final int pageIndex;
   final ReaderSettings settings;
 
-  /// Page-space quads to paint as search highlights.
+  /// Already coerced for narrow viewports by [effectivePdfZoomMode].
+  final PdfZoomMode zoomMode;
+  final bool narrow;
   final List<PdfTextQuad> searchQuads;
   final List<Annotation> annotations;
   final List<Map<String, Object?>> ocrBlocks;
   final ValueChanged<RendererTextSelected> onSelection;
   final ValueChanged<RendererAnnotationSelected> onAnnotationSelected;
+  final PdfZoomChanged onZoomChanged;
+  final ValueChanged<int> onPageTurn;
 
   /// Reports the page's logical-pixels-per-point after layout, for
   /// `locator.zoom`. Only the current page passes a callback.
@@ -462,44 +528,88 @@ final class _CanvasPage extends StatefulWidget {
 final class _CanvasPageState extends State<_CanvasPage> {
   Future<PdfRenderedPage>? _future;
 
-  Size _lastBox = Size.zero;
+  /// The page box, in logical pixels, before panning.
+  Size _viewport = Size.zero;
+
+  /// Live zoom while the fingers are down, in logical pixels per PDF point.
+  ///
+  /// Kept after the gesture ends until the host's saved settings catch up, so
+  /// persisting a pinch does not flash the old scale for a frame.
+  double? _transientScale;
+
+  /// Content offset from the centred position, when zoomed past the viewport.
+  Offset _pan = Offset.zero;
+
+  double? _gestureStartScale;
+  Offset _gestureAnchor = Offset.zero;
+  bool _pinchMoved = false;
+
+  DateTime _lastWheelTurn = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime? _lastTapAt;
+  Offset? _lastTapGlobal;
+
   Offset? _dragAnchor;
   bool _dragSelecting = false;
   List<Rect> _selectionHighlights = const [];
 
-  /// The page's layout size in PDF points.
+  /// The page's rotation-aware display size, in PDF points.
   ///
-  /// S0 deliberately keeps using the unrotated crop box: the rasteriser also
-  /// records in that space, and switching only the layout would crop rotated
-  /// pages. S1 moves both onto `PdfPageRenderer.pageSize` together.
-  Size get _pageSize {
-    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
-    return Size(box.width, box.height);
+  /// `PdfPageRenderer.pageSize` applies /Rotate, so a 90° page lays out and
+  /// paints as landscape instead of being cropped to its unrotated box.
+  Size get _pageSize => widget.renderer.displaySizeOf(widget.pageIndex);
+
+  int get _rotation => widget.renderer.pageAt(widget.pageIndex).rotation;
+
+  PdfZoomGeometry? get _geometry =>
+      _viewport.isEmpty ? null : _resolveGeometry(_viewport);
+
+  PdfZoomGeometry _resolveGeometry(Size viewport) => resolvePdfZoom(
+    mode: widget.zoomMode,
+    customScale: widget.settings.pdfScale,
+    pageSize: _pageSize,
+    viewport: viewport,
+    narrow: widget.narrow,
+    pageMargin: widget.settings.pageMargin,
+  );
+
+  double get _displayScale =>
+      _transientScale ?? _geometry?.scale ?? widget.settings.pdfScale;
+
+  /// Size the page occupies on screen at the current scale.
+  Size get _paintedSize =>
+      Size(_pageSize.width * _displayScale, _pageSize.height * _displayScale);
+
+  @override
+  void initState() {
+    super.initState();
+    // The picture is recorded in page space (one unit per PDF point) and
+    // replayed at whatever size the page is laid out at, so it never has to
+    // be re-rendered for a zoom change. S1 therefore has no page cache to
+    // clear on `didUpdateWidget`; theme work in S6 will add one.
+    _future = widget.renderer.renderPage(widget.pageIndex);
   }
 
-  // Rendering waits for LayoutBuilder: the fit-width and fit-page zoom modes
-  // resolve against the real paint box, which is not known until layout. A
-  // zero-size or MediaQuery-derived guess would rasterise at the wrong scale
-  // and then have to be redone.
-
-  /// Device-pixel scale to rasterise the page at.
-  ///
-  /// Layout is handled by the FittedBox below, which scales the whole page to
-  /// fit the viewport. So this must only control raster density: multiplying
-  /// here by the viewport/page ratio would apply that fit twice and crop the
-  /// page. `custom` still honours the user's explicit scale.
-  double _resolveScale(Size viewport) {
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    if (widget.settings.pdfZoomMode != PdfZoomMode.custom) return dpr;
-    return widget.settings.pdfScale <= 0 ? dpr : widget.settings.pdfScale * dpr;
+  @override
+  void didUpdateWidget(covariant _CanvasPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.settings.pdfScale == widget.settings.pdfScale &&
+        oldWidget.settings.pdfZoomMode == widget.settings.pdfZoomMode) {
+      return;
+    }
+    // Drop the transient scale once the persisted settings match it. Until
+    // then the transient stays authoritative so the page does not flicker.
+    final transient = _transientScale;
+    if (transient != null &&
+        widget.settings.pdfZoomMode == PdfZoomMode.custom &&
+        (widget.settings.pdfScale - transient).abs() < 0.005) {
+      _transientScale = null;
+    }
   }
 
-  void _render(Size viewport) {
-    _lastBox = viewport;
-    _future = widget.renderer.renderPage(
-      widget.pageIndex,
-      zoom: _resolveScale(viewport),
-    );
+  @override
+  void dispose() {
+    _future?.then((page) => page.dispose());
+    super.dispose();
   }
 
   @override
@@ -507,74 +617,241 @@ final class _CanvasPageState extends State<_CanvasPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-        if (viewport != _lastBox) _render(viewport);
-
-        final pageSize = _pageSize;
-        final displayed = _displayedSize(constraints, pageSize);
+        _viewport = viewport;
+        final geometry = _resolveGeometry(viewport);
+        final scale = _transientScale ?? geometry.scale;
+        final content = Size(_pageSize.width * scale, _pageSize.height * scale);
+        final pan = _clampPan(_pan, content, viewport);
+        // Centre when the page fits; anchor to the top-left when it does not.
+        // Centring an overflowing page would open the reader mid-page with
+        // the first lines scrolled out of sight.
+        final origin =
+            Offset(
+              math.max(0.0, (viewport.width - content.width) / 2),
+              math.max(0.0, (viewport.height - content.height) / 2),
+            ) +
+            pan;
 
         // Report the layout scale once per frame; the parent stores it for
         // `locator.zoom`. Doing it in the builder (not in a post-frame hook)
         // keeps the value in sync with what the user is actually looking at.
         final onScale = widget.onLayoutScaleChanged;
-        if (onScale != null && pageSize.width > 0) {
-          onScale(displayed.width / pageSize.width);
+        if (onScale != null && _pageSize.width > 0) {
+          onScale(scale);
         }
 
-        return Center(
-          child: FutureBuilder<PdfRenderedPage>(
-            future: _future,
-            builder: (context, snapshot) {
-              final page = snapshot.data;
-              if (page == null) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              return SizedBox(
-                width: displayed.width,
-                height: displayed.height,
-                child: _SelectablePage(
-                  page: page,
-                  pageSize: pageSize,
-                  highlightedRects: [
-                    for (final q in widget.searchQuads)
-                      _quadToRect(q, pageSize),
-                    ..._selectionHighlights,
-                  ],
-                  annotations: _annotationBoxes(pageSize),
-                  ocrBoxes: _ocrBoxes(pageSize),
-                  onStart: _onDragStart,
-                  onUpdate: _onDragUpdate,
-                  onEnd: _onDragEnd,
-                ),
-              );
+        return Listener(
+          onPointerSignal: _handlePointerSignal,
+          child: RawGestureDetector(
+            behavior: HitTestBehavior.opaque,
+            gestures: <Type, GestureRecognizerFactory>{
+              _TouchScaleGestureRecognizer:
+                  GestureRecognizerFactoryWithHandlers<
+                    _TouchScaleGestureRecognizer
+                  >(
+                    () => _TouchScaleGestureRecognizer(debugOwner: this),
+                    (recognizer) => recognizer
+                      ..onStart = _onScaleStart
+                      ..onUpdate = _onScaleUpdate
+                      ..onEnd = _onScaleEnd,
+                  ),
             },
+            child: ClipRect(
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: origin.dx,
+                    top: origin.dy,
+                    width: content.width,
+                    height: content.height,
+                    child: FutureBuilder<PdfRenderedPage>(
+                      future: _future,
+                      builder: (context, snapshot) {
+                        final page = snapshot.data;
+                        if (page == null) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        return _SelectablePage(
+                          key: ValueKey(page),
+                          page: page,
+                          pageSize: _pageSize,
+                          highlightedRects: [
+                            for (final q in widget.searchQuads)
+                              _quadToRect(q, _pageSize),
+                            ..._selectionHighlights,
+                          ],
+                          annotations: _annotationBoxes(_paintedSize),
+                          ocrBoxes: _ocrBoxes(_paintedSize),
+                          onStart: _onDragStart,
+                          onUpdate: _onDragUpdate,
+                          onEnd: _onDragEnd,
+                          onTap: _handleTap,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
     );
   }
 
-  /// The size the page occupies on screen, in logical pixels.
-  Size _displayedSize(BoxConstraints constraints, Size pageSize) {
-    if (pageSize.width <= 0 || pageSize.height <= 0) return Size.zero;
-    final scale = math.min(
-      constraints.maxWidth / pageSize.width,
-      constraints.maxHeight / pageSize.height,
-    );
-    return Size(pageSize.width * scale, pageSize.height * scale);
+  /// Keeps the content from being dragged away from the viewport edges.
+  Offset _clampPan(Offset pan, Size content, Size viewport) {
+    final maxX = math.max(0.0, (content.width - viewport.width) / 2);
+    final maxY = math.max(0.0, (content.height - viewport.height) / 2);
+    return Offset(pan.dx.clamp(-maxX, maxX), pan.dy.clamp(-maxY, maxY));
   }
+
+  // --- zoom -------------------------------------------------------------
+
+  void _onScaleStart(ScaleStartDetails details) {
+    final viewport = _viewport;
+    if (viewport.isEmpty) return;
+    final geometry = _resolveGeometry(viewport);
+    final scale = _transientScale ?? geometry.scale;
+    final content = Size(_pageSize.width * scale, _pageSize.height * scale);
+    final pan = _clampPan(_pan, content, viewport);
+    final center = Offset(viewport.width / 2, viewport.height / 2);
+    _gestureStartScale = scale;
+    // The page-space point under the fingers, held in place while zooming.
+    _gestureAnchor =
+        (details.localFocalPoint - center - pan) / math.max(scale, 0.0001);
+    _pinchMoved = false;
+    if (_pan != pan) setState(() => _pan = pan);
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    final viewport = _viewport;
+    final start = _gestureStartScale;
+    if (viewport.isEmpty || start == null) return;
+
+    var scale = start;
+    // Trackpad pan/zoom events always report at least two pointers; only a
+    // real span change counts as a pinch.
+    if (details.pointerCount >= 2) {
+      scale = (start * details.scale).clamp(pdfZoomMin, pdfZoomMax).toDouble();
+      if ((scale - start).abs() > 0.001) _pinchMoved = true;
+    }
+
+    final center = Offset(viewport.width / 2, viewport.height / 2);
+    final content = Size(_pageSize.width * scale, _pageSize.height * scale);
+    final pan = _clampPan(
+      details.localFocalPoint - center - _gestureAnchor * scale,
+      content,
+      viewport,
+    );
+    setState(() {
+      if (_pinchMoved) _transientScale = scale;
+      _pan = pan;
+    });
+  }
+
+  void _onScaleEnd(ScaleEndDetails details) {
+    final transient = _transientScale;
+    if (_pinchMoved && transient != null) {
+      widget.onZoomChanged(transient, PdfZoomMode.custom);
+    }
+    _pinchMoved = false;
+    _gestureStartScale = null;
+  }
+
+  /// Ctrl+wheel zooms; plain wheel pans a zoomed page or turns pages.
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    final viewport = _viewport;
+    if (viewport.isEmpty) return;
+
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed || keyboard.isMetaPressed) {
+      final notches = event.scrollDelta.dy;
+      if (notches == 0) return;
+      // One notch is one 10% step, like the bridge's Ctrl+wheel handler.
+      _applyZoom(_displayScale + (notches < 0 ? pdfZoomStep : -pdfZoomStep));
+      return;
+    }
+
+    final content = _paintedSize;
+    // A page wider than the viewport can only happen past fit-width, and
+    // there the wheel has to pan or the page would be unreachable: mouse
+    // drags select text, so the wheel is the only pointer way to move it.
+    // A page that is only taller (fit-width on a portrait page) still turns
+    // pages, matching the bridge's single/double display behaviour.
+    if (content.width > viewport.width + 0.5) {
+      // Shift maps the vertical wheel to horizontal, since a mouse has no
+      // horizontal wheel.
+      final delta = keyboard.isShiftPressed
+          ? Offset(event.scrollDelta.dy + event.scrollDelta.dx, 0)
+          : event.scrollDelta;
+      setState(() {
+        _pan = _clampPan(_pan - delta, content, viewport);
+      });
+      return;
+    }
+
+    // Bridge behaviour for single/double display: the wheel turns pages.
+    // S2 replaces this with real scrolling in continuous mode.
+    final vertical = event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    if (vertical.abs() < 4) return;
+    final now = DateTime.now();
+    if (now.difference(_lastWheelTurn) < const Duration(milliseconds: 180)) {
+      return;
+    }
+    _lastWheelTurn = now;
+    widget.onPageTurn(vertical > 0 ? 1 : -1);
+  }
+
+  /// Sets the zoom for the session and hands it to the host to persist.
+  void _applyZoom(double target, {PdfZoomMode mode = PdfZoomMode.custom}) {
+    final scale = target.clamp(pdfZoomMin, pdfZoomMax).toDouble();
+    setState(() => _transientScale = mode == PdfZoomMode.custom ? scale : null);
+    widget.onZoomChanged(scale, mode);
+  }
+
+  /// Mouse double-click toggles fit-width and 2x, per the plan's S1 step 7.
+  void _handleTap(Offset globalPosition) {
+    final now = DateTime.now();
+    final lastAt = _lastTapAt;
+    final lastPosition = _lastTapGlobal;
+    _lastTapAt = now;
+    _lastTapGlobal = globalPosition;
+    if (lastAt == null ||
+        lastPosition == null ||
+        now.difference(lastAt) > const Duration(milliseconds: 300) ||
+        (globalPosition - lastPosition).distance > 24) {
+      return;
+    }
+    _lastTapAt = null;
+    _lastTapGlobal = null;
+    if (widget.zoomMode == PdfZoomMode.fitWidth) {
+      _applyZoom(2.0);
+    } else {
+      // Fit-width is a mode, not a scale; the host resolves it from the
+      // viewport, so the scale we pass is ignored.
+      _applyZoom(_displayScale, mode: PdfZoomMode.fitWidth);
+    }
+  }
+
+  // --- geometry and overlays -------------------------------------------
 
   /// Geometry for this page in its own painted box.
   ///
   /// [PdfPageGeometry] is the same helper dart_pdf_editor hands to
   /// `PdfViewer.pageOverlayBuilder`; it already accounts for the crop box
-  /// origin, /Rotate and the painted size. Doing this by hand is what put
-  /// annotations hundreds of pixels off the page.
-  PdfPageGeometry _geometryFor(Size painted) {
+  /// origin, /Rotate and the painted size.
+  PdfPageGeometry _geometryFor(Size viewSize) {
     final page = widget.renderer.pageAt(widget.pageIndex);
     return PdfPageGeometry(
       cropBox: page.cropBox,
       rotation: page.rotation,
-      viewSize: painted,
+      viewSize: viewSize,
     );
   }
 
@@ -648,17 +925,15 @@ final class _CanvasPageState extends State<_CanvasPage> {
     return out;
   }
 
-  PdfSelectionController _selectionFor(
-    BoxConstraints constraints,
-    Offset globalOrigin,
-  ) {
-    final displayed = _displayedSize(constraints, _pageSize);
+  PdfSelectionController _selectionFor(Offset globalOrigin) {
+    final painted = _paintedSize;
     return PdfSelectionController(
       renderer: widget.renderer,
       pageIndex: widget.pageIndex,
       box: widget.renderer.pageAt(widget.pageIndex).cropBox,
-      paintSize: displayed,
-      displayedSize: displayed,
+      rotation: _rotation,
+      paintSize: painted,
+      displayedSize: painted,
       globalOrigin: globalOrigin,
       pageSize: _pageSize,
     );
@@ -681,8 +956,8 @@ final class _CanvasPageState extends State<_CanvasPage> {
     return rect;
   }
 
-  void _onDragStart(Offset local, BoxConstraints constraints) {
-    final controller = _selectionFor(constraints, Offset.zero);
+  void _onDragStart(Offset local) {
+    final controller = _selectionFor(Offset.zero);
     if (!controller.hasText) return;
     setState(() {
       _dragAnchor = local;
@@ -691,15 +966,15 @@ final class _CanvasPageState extends State<_CanvasPage> {
     });
   }
 
-  void _onDragUpdate(Offset local, BoxConstraints constraints) {
+  void _onDragUpdate(Offset local) {
     if (!_dragSelecting) return;
-    final controller = _selectionFor(constraints, Offset.zero);
+    final controller = _selectionFor(Offset.zero);
     final anchor = _dragAnchor;
     if (anchor == null) return;
 
     // Live highlight feedback in view coordinates; the selection itself is
     // only committed on drag end.
-    final displayed = _displayedSize(constraints, _pageSize);
+    final displayed = _paintedSize;
     final rect = controller.selectionBetween(anchor, local);
     setState(() {
       _selectionHighlights = rect == null
@@ -716,12 +991,8 @@ final class _CanvasPageState extends State<_CanvasPage> {
     });
   }
 
-  void _onDragEnd(
-    Offset local,
-    BoxConstraints constraints,
-    Offset globalOrigin,
-  ) {
-    final controller = _selectionFor(constraints, globalOrigin);
+  void _onDragEnd(Offset local, Offset globalOrigin) {
+    final controller = _selectionFor(globalOrigin);
     final anchor = _dragAnchor;
     final wasDragging = _dragSelecting;
     _dragAnchor = null;
@@ -733,9 +1004,9 @@ final class _CanvasPageState extends State<_CanvasPage> {
       // a no-op. A tap on a painted annotation opens its actions menu; a tap
       // anywhere else selects the word under the pointer. The drag threshold
       // only exists to tell the two gestures apart when a pan did start.
-      if (_emitAnnotationTap(local, constraints, globalOrigin)) return;
+      if (_emitAnnotationTap(local, _paintedSize, globalOrigin)) return;
       final tapped = controller.selectionAtWord(local);
-      _applySelection(tapped, constraints);
+      _applySelection(tapped);
       return;
     }
     if (anchor == null) return;
@@ -745,7 +1016,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
         // A tap selects the word under it.
         ? controller.selectionAtWord(local)
         : controller.selectionBetween(anchor, local);
-    _applySelection(selection, constraints);
+    _applySelection(selection);
   }
 
   /// Emits [RendererAnnotationSelected] when a tap lands on a painted
@@ -754,12 +1025,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
   /// `sourceRect` is the annotation's band in global logical pixels — the
   /// same units `RendererTextSelected.sourceRect` uses, because the host
   /// places both menus with `_toOverlayLocalRect`.
-  bool _emitAnnotationTap(
-    Offset local,
-    BoxConstraints constraints,
-    Offset globalOrigin,
-  ) {
-    final displayed = _displayedSize(constraints, _pageSize);
+  bool _emitAnnotationTap(Offset local, Size displayed, Offset globalOrigin) {
     // Topmost first: later boxes paint over earlier ones.
     for (final box in _annotationBoxes(displayed).reversed) {
       if (!box.rect.contains(local)) continue;
@@ -781,11 +1047,8 @@ final class _CanvasPageState extends State<_CanvasPage> {
   }
 
   /// Paints the highlight for [selection] and hands it to the host.
-  void _applySelection(
-    RendererTextSelected? selection,
-    BoxConstraints constraints,
-  ) {
-    final displayed = _displayedSize(constraints, _pageSize);
+  void _applySelection(RendererTextSelected? selection) {
+    final displayed = _paintedSize;
     if (selection == null || selection.selectionRects.isEmpty) {
       setState(() => _selectionHighlights = const []);
       return;
@@ -802,12 +1065,6 @@ final class _CanvasPageState extends State<_CanvasPage> {
       ];
     });
     widget.onSelection(selection);
-  }
-
-  @override
-  void dispose() {
-    _future?.then((page) => page.dispose());
-    super.dispose();
   }
 }
 
@@ -826,7 +1083,7 @@ final class _PicturePainter extends CustomPainter {
   final List<_OcrBox> ocrBoxes;
 
   /// Painted pixels per PDF point. The canvas is sized in painted pixels, so
-  /// overlays land directly; only the rasterised page needs scaling.
+  /// overlays land directly; only the point-space picture needs scaling.
   final double pxPerPoint;
 
   @override
@@ -836,7 +1093,9 @@ final class _PicturePainter extends CustomPainter {
       Paint()..color = const Color(0xFFFFFFFF),
     );
 
-    // The rasterised page is in PDF point space; scale it into the page box.
+    // The picture is in PDF point space; scale it into the page box. Because
+    // it is recorded as vectors, a zoom change replays it sharply instead of
+    // stretching a raster.
     canvas.save();
     canvas.scale(pxPerPoint);
     canvas.drawPicture(page.picture);
@@ -895,7 +1154,8 @@ final class _PicturePainter extends CustomPainter {
       old.page != page ||
       old.highlights != highlights ||
       old.annotations != annotations ||
-      old.ocrBoxes != ocrBoxes;
+      old.ocrBoxes != ocrBoxes ||
+      old.pxPerPoint != pxPerPoint;
 }
 
 final class _PdfCanvasPager extends StatelessWidget {
@@ -950,6 +1210,8 @@ final class _SelectablePage extends StatefulWidget {
     required this.onStart,
     required this.onUpdate,
     required this.onEnd,
+    required this.onTap,
+    super.key,
   });
 
   final PdfRenderedPage page;
@@ -961,14 +1223,10 @@ final class _SelectablePage extends StatefulWidget {
   final List<_AnnotationBox> annotations;
   final List<_OcrBox> ocrBoxes;
 
-  final void Function(Offset local, BoxConstraints constraints) onStart;
-  final void Function(Offset local, BoxConstraints constraints) onUpdate;
-  final void Function(
-    Offset local,
-    BoxConstraints constraints,
-    Offset globalOrigin,
-  )
-  onEnd;
+  final void Function(Offset local) onStart;
+  final void Function(Offset local) onUpdate;
+  final void Function(Offset local, Offset globalOrigin) onEnd;
+  final void Function(Offset globalPosition) onTap;
 
   @override
   State<_SelectablePage> createState() => _SelectablePageState();
@@ -997,28 +1255,50 @@ final class _SelectablePageState extends State<_SelectablePage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
-        return GestureDetector(
+        return RawGestureDetector(
           behavior: HitTestBehavior.opaque,
-          // Browsers anchor a drag-selection at the pointer-down position.
-          // With the default `start`, the anchor is wherever the pointer was
-          // when the pan was recognised (past the slop), so the first word
-          // under the press is silently dropped.
-          dragStartBehavior: DragStartBehavior.down,
-          onPanStart: (d) =>
-              widget.onStart(_toLocal(d.globalPosition), constraints),
-          onPanUpdate: (d) =>
-              widget.onUpdate(_toLocal(d.globalPosition), constraints),
-          onPanEnd: (_) {
-            final last = _lastLocal;
-            if (last != null) {
-              widget.onEnd(last, constraints, _globalOrigin);
-            }
+          gestures: <Type, GestureRecognizerFactory>{
+            // Selection is a mouse gesture, like a desktop PDF viewer. Touch
+            // drags are rejected here so the page-level scale recognizer can
+            // pan a zoomed page and pinch to zoom; mobile word selection
+            // arrives with long-press handles in S3.
+            _MousePanGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  _MousePanGestureRecognizer
+                >(() => _MousePanGestureRecognizer(debugOwner: this), (
+                  recognizer,
+                ) {
+                  // Browsers anchor a drag-selection at the pointer-down
+                  // position. With the default `start`, the anchor is
+                  // wherever the pointer was when the pan was recognised
+                  // (past the slop), so the first word under the press is
+                  // silently dropped.
+                  recognizer.dragStartBehavior = DragStartBehavior.down;
+                  recognizer.onStart = (details) =>
+                      widget.onStart(_toLocal(details.globalPosition));
+                  recognizer.onUpdate = (details) =>
+                      widget.onUpdate(_toLocal(details.globalPosition));
+                  recognizer.onEnd = (_) {
+                    final last = _lastLocal;
+                    if (last != null) {
+                      widget.onEnd(last, _globalOrigin);
+                    }
+                  };
+                }),
+            TapGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+                  () => TapGestureRecognizer(debugOwner: this),
+                  (recognizer) {
+                    recognizer.onTapUp = (details) {
+                      widget.onTap(details.globalPosition);
+                      widget.onEnd(
+                        _toLocal(details.globalPosition),
+                        _globalOrigin,
+                      );
+                    };
+                  },
+                ),
           },
-          onTapUp: (d) => widget.onEnd(
-            _toLocal(d.globalPosition),
-            constraints,
-            _globalOrigin,
-          ),
           child: CustomPaint(
             key: _key,
             size: size,
@@ -1035,6 +1315,41 @@ final class _SelectablePageState extends State<_SelectablePage> {
         );
       },
     );
+  }
+}
+
+/// Pointer kinds that select text on the page.
+///
+/// The recognizer itself rejects everything else, so a touch drag never
+/// competes with (and never wins over) the page-level pan/pinch recognizer.
+const Set<PointerDeviceKind> _selectionPointerKinds = {
+  PointerDeviceKind.mouse,
+  PointerDeviceKind.stylus,
+};
+
+final class _MousePanGestureRecognizer extends PanGestureRecognizer {
+  _MousePanGestureRecognizer({super.debugOwner});
+
+  @override
+  bool isPointerAllowed(PointerEvent event) {
+    final allowed = super.isPointerAllowed(event);
+    if (event is! PointerDownEvent) return allowed;
+    if (!_selectionPointerKinds.contains(event.kind)) return false;
+    return allowed;
+  }
+}
+
+/// Pinch and two-axis pan for the page.
+///
+/// Mouse pointers are rejected: on desktop a mouse drag selects text, and the
+/// wheel handles panning and zoom.
+final class _TouchScaleGestureRecognizer extends ScaleGestureRecognizer {
+  _TouchScaleGestureRecognizer({super.debugOwner});
+
+  @override
+  bool isPointerAllowed(PointerDownEvent event) {
+    if (event.kind == PointerDeviceKind.mouse) return false;
+    return super.isPointerAllowed(event);
   }
 }
 
