@@ -515,3 +515,31 @@ flutter test
   - `sourceRect` 全局像素、`zoom == 布局缩放`（1.5）、`selectionRects` 保持 0..1；
   - 扫描件能力如实上报为 `false` 且带原因，损坏文件发 `RendererFailed`。
 - 视觉验证（临时 harness，已删）：在 `standard-text.pdf` 上鼠标拖选得到 `PageSage PDF sample page 1. Search`，`zoom = 1.0606 = 840/792`，`sourceRect` 落在首行上方；标注带与选区都贴合字形，点击标注命中 1 次、页外点击 0 次。
+
+### 15.4 自动化验收（替代人工过一遍）
+
+S0 的宿主侧验收改为可重复执行的测试，分两层：
+
+1. **真实窗口集成测试** `integration_test/reader_s0_test.dart`（`flutter test integration_test/reader_s0_test.dart -d linux`，7 项全过）。
+   运行真实的 GTK 窗口、真实的 `ReaderPage` 与 `PdfCanvasView`、真实的样本 PDF；只把 `appDatabaseProvider` 换成内存 Drift（`ReaderHarness`），因此不会碰到本机书库。覆盖：
+   - 打开 PDF 并恢复到存储的第 3 页；
+   - 鼠标拖选正文第二行后，菜单出现且中心位于选区上方；
+   - 预置标注后点击命中，弹出"标注 / 删除标注"菜单；
+   - 工具栏"跳转页码"对话框把 80 页样本跳到第 40 页；
+   - 扫描件显示"无文本层"原因，离开阅读器仍落库第 1 页；
+   - 第 40 页关闭后从数据库重开，仍是 40/80，再关闭不被重置；
+   - 900 宽窗口下菜单仍完整落在窗口内。
+
+   宿主浮层工具条会吞掉页面顶部第一行的指针，因此拖选与标注都瞄第二正文行（`y = 90pt`）；拖选使用 `PointerDeviceKind.mouse`，因为 `PageView` 只认触摸拖动，这与桌面阅读一致。
+2. **纯函数测试** `test/features/reader/floating_menu_placement_test.dart`（8 项全过）。
+   菜单定位从 `reader_page.dart` 抽到 `floating_menu_placement.dart` 的 `placeFloatingMenu`：上方 → 下方 → 右侧 → 左侧 → 最小遮挡兜底。测试覆盖正常上方、贴顶翻到下方、贴右仍在屏内、不遮挡选文、无几何时兜底、窄窗口有限坐标、超大选区、同输入同输出。
+
+集成测试期间的额外发现：
+
+| # | 现象 | 根因 | 处理 |
+| --- | --- | --- | --- |
+| D | 第二次打开"跳转页码"抛 `TextEditingController was used after being disposed` | `_showPageJump` 在 `showDialog` 的 builder 里创建控制器，从未 dispose，而 builder 会随弹层重建 | 拆出 `_PageJumpDialog` StatefulWidget，由它持有并在 `dispose` 释放控制器；首开即用当前页码作为初值 |
+
+补充说明：
+- `release_readiness_test` 会校验许可清单，新增 `integration_test` 依赖后需重跑 `dart run tool/generate_third_party_licenses.dart`。`process`/`sync_http`/`webdriver` 仅随 dev 依赖进入，清单照实列入并已能找到 `LICENSE`。
+- `flutter test` 仍有 4 项 `widget_test.dart` 失败（移动端分类弹层、短窗口阅读控制条、设置弹层与页面标题），已在本次改动前复现，与 S0 无关；其余 199 项通过（2 项跳过：缺少 APK/AAB）。
