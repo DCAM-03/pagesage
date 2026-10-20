@@ -1,0 +1,25 @@
+# Normalize all text files to LF in the repository regardless of the
+# platform's checkout settings. This keeps diffs reviewable: a full-file
+# CRLF<->LF rewrite shows up as noise and hides real changes.
+* text=auto eol=lf
+
+# Binary assets: never attempt text conversion.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.epub binary
+*.pdf binary
+*.db binary
+*.sqlite binary
+*.heapsnapshot binary
+
+# Windows-only build files stay LF in the repo; the toolchain reads LF fine
+# and eol=lf keeps the working tree identical on every platform.
