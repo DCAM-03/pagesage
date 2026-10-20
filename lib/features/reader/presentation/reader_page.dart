@@ -55,6 +55,7 @@ final class ReaderRendererHostConfig {
     required this.searchQuery,
     required this.focusLocator,
     required this.clearSearchHighlightsVersion,
+    this.clearSelectionVersion = 0,
     required this.onEvent,
     this.ocrOverlayToken = 0,
     this.ocrOverlayPage,
@@ -77,6 +78,10 @@ final class ReaderRendererHostConfig {
   /// Temporary source focus after note/bookmark/search jumps.
   final ReadingLocator? focusLocator;
   final int clearSearchHighlightsVersion;
+
+  /// Bumped when the selection should be dismissed; the renderer clears its
+  /// highlight and handles when this changes.
+  final int clearSelectionVersion;
   final ValueChanged<RendererEvent> onEvent;
 
   /// Bumped when a new OCR overlay should be painted onto the PDF page.
@@ -114,6 +119,15 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   String? _rendererSearchUnavailableReason;
   String? _rendererSearchQuery;
   int _clearSearchHighlightsVersion = 0;
+
+  /// Bumped when the selection menu closes so the renderer drops its
+  /// highlight and handles. The renderer cannot know when the host is done
+  /// with a selection; without this the paint would outlive the menu.
+  int _clearSelectionVersion = 0;
+
+  /// Identifies the current selection menu, so a replaced menu's `finally`
+  /// does not clear the paint of the one that replaced it.
+  int _selectionMenuEpoch = 0;
   List<RendererOutlineItem> _pdfOutline = const [];
   bool _markedOpened = false;
   int _ocrOverlayToken = 0;
@@ -704,6 +718,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                 focusLocator: _focusLocator,
                                 clearSearchHighlightsVersion:
                                     _clearSearchHighlightsVersion,
+                                clearSelectionVersion: _clearSelectionVersion,
                                 onEvent: _handleRendererEvent,
                                 ocrOverlayToken: _ocrOverlayToken,
                                 ocrOverlayPage: _ocrOverlayPage,
@@ -2302,6 +2317,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     BuildContext context,
     RendererTextSelected selection,
   ) async {
+    // A menu can be replaced by one for a newer selection before its future
+    // resumes; only the latest menu is allowed to clear the renderer's paint.
+    final epoch = ++_selectionMenuEpoch;
     _selectionActionsOpen = true;
     _showMobileChrome(autoHide: false);
     try {
@@ -2327,6 +2345,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     } finally {
       _selectionActionsOpen = false;
       _lastSelectionActionKey = null;
+      if (mounted && epoch == _selectionMenuEpoch) {
+        setState(() => _clearSelectionVersion += 1);
+      }
       _scheduleMobileChromeAutoHide();
     }
   }
@@ -2362,11 +2383,18 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     _selectionOverlayEntry = OverlayEntry(
       builder: (overlayContext) => Stack(
         children: [
+          // Tap-outside-to-dismiss, but pointer-transparent underneath: the
+          // selection handles sit outside the menu and must stay draggable
+          // while it is open. `ColoredBox` is hit-test opaque, so a fully
+          // transparent colour would still swallow every drag; `IgnorePointer`
+          // on the colour fill keeps only the tap recognizer live.
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: dismiss,
-              child: const ColoredBox(color: Color(0x00000000)),
+              child: const IgnorePointer(
+                child: ColoredBox(color: Color(0x00000000)),
+              ),
             ),
           ),
           Positioned(
@@ -6517,6 +6545,7 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
     required this.searchQuery,
     required this.focusLocator,
     required this.clearSearchHighlightsVersion,
+    required this.clearSelectionVersion,
     required this.onEvent,
     required this.ocrOverlayToken,
     required this.ocrOverlayPage,
@@ -6533,6 +6562,7 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
   final String? searchQuery;
   final ReadingLocator? focusLocator;
   final int clearSearchHighlightsVersion;
+  final int clearSelectionVersion;
   final ValueChanged<RendererEvent> onEvent;
   final int ocrOverlayToken;
   final int? ocrOverlayPage;
@@ -6555,6 +6585,7 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
         searchQuery: searchQuery,
         focusLocator: focusLocator,
         clearSearchHighlightsVersion: clearSearchHighlightsVersion,
+        clearSelectionVersion: clearSelectionVersion,
         onEvent: onEvent,
         ocrOverlayToken: ocrOverlayToken,
         ocrOverlayPage: ocrOverlayPage,
@@ -6853,6 +6884,7 @@ final class _DefaultRendererHost extends StatelessWidget {
                 jumpToken: config.jumpToken,
                 clearSearchHighlightsVersion:
                     config.clearSearchHighlightsVersion,
+                clearSelectionVersion: config.clearSelectionVersion,
                 onZoomChanged: config.onZoomChanged,
                 onEvent: config.onEvent,
               )

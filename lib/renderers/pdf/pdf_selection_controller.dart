@@ -8,6 +8,7 @@ import 'package:pdf_graphics/pdf_graphics.dart';
 import '../../domain/books/reading_position.dart';
 import '../common/renderer_event.dart';
 import 'pdf_canvas_renderer.dart';
+import 'pdf_selection.dart';
 
 /// A point in PDF page space (points, y-up), as opposed to widget space.
 typedef PagePoint = ({double x, double y});
@@ -101,41 +102,6 @@ final class PdfSelectionController {
   /// PDF page coordinates -> widget-local offset.
   Offset toWidgetPoint(double x, double y) => _geometry.toViewOffset(x, y);
 
-  /// Selection covering the drag from [anchorWidget] to [currentWidget].
-  ///
-  /// Returns null when the drag never crossed text, so the caller can treat it
-  /// as a plain tap rather than opening an empty selection menu.
-  RendererTextSelected? selectionBetween(
-    Offset anchorWidget,
-    Offset currentWidget,
-  ) {
-    final a = toPagePoint(anchorWidget);
-    final b = toPagePoint(currentWidget);
-    if (a == null || b == null) return null;
-
-    // Select from caret to caret rather than by rectangle containment.
-    // Rectangle selection needs a non-zero height (a horizontal drag along one
-    // line has none) and, worse, `textIn` + `indexOf` resolves repeated text
-    // to its first occurrence. Caret positions have neither problem and give
-    // the same multi-line range a browser selection would.
-    var start = _text.positionNear(a.x, a.y);
-    var end = _text.positionNear(b.x, b.y);
-    if (start < 0 || end < 0) return null;
-    if (start > end) {
-      final swap = start;
-      start = end;
-      end = swap;
-    }
-    if (end <= start) {
-      // A tap inside a character still means that character; fall back to the
-      // word under the pointer, matching `selectionAtWord`.
-      return selectionAtWord(anchorWidget);
-    }
-    final text = _text.text.substring(start, end).trim();
-    if (text.isEmpty) return null;
-    return _buildEvent(start, end, text);
-  }
-
   /// Word-sized selection at a tap, matching desktop reader behaviour.
   ///
   /// CJK characters count as single-character words so tapping one selects just
@@ -146,7 +112,7 @@ final class PdfSelectionController {
     final index = _text.positionNear(page.x, page.y);
     if (index < 0) return null;
 
-    final range = _wordRangeAt(index);
+    final range = pdfWordRangeAt(_text.text, index);
     if (range == null) return null;
     return _buildEvent(
       range.$1,
@@ -155,48 +121,24 @@ final class PdfSelectionController {
     );
   }
 
-  /// (start, end) of the word containing [index].
+  /// The caret under a widget-local point, or null when outside the page.
   ///
-  /// CJK characters are words in themselves: Chinese has no spaces, so
-  /// expanding over non-separator characters would swallow a whole sentence.
-  /// A double-click selects the single character instead, matching native CJK
-  /// input behaviour.
-  (int, int)? _wordRangeAt(int index) {
-    final text = _text.text;
-    if (text.isEmpty) return null;
-    final i = index.clamp(0, text.length - 1);
-
-    if (_isCjk(text.codeUnitAt(i))) return (i, i + 1);
-
-    var start = i;
-    while (start > 0 && !_isSeparator(text.codeUnitAt(start - 1))) {
-      start--;
-    }
-    var end = i;
-    while (end < text.length && !_isSeparator(text.codeUnitAt(end))) {
-      end++;
-    }
-    return end <= start ? null : (start, end);
+  /// A drag across pages tracks one caret per page and orders them in reading
+  /// order, so this deliberately ignores the pointer's closeness to the page
+  /// edge: the page the pointer is over is the page the caret belongs to.
+  PdfCaret? caretAt(Offset widgetPoint) {
+    final page = toPagePoint(widgetPoint);
+    if (page == null) return null;
+    final index = _text.positionNear(page.x, page.y);
+    if (index < 0) return null;
+    return (page: pageIndex, index: index);
   }
 
-  static const _asciiSeparators = ' \t\n\r,.!?;:\'"()[]{}<>/\\|@#\$%^&*-_=+';
-  static const _cjkPunctuation =
-      '、。，．；：？！…—～·「」『』《》【】（）〔〕｛｝'
-      '“”‘’　';
+  /// The length of this page's extracted text, for cross-page segment maths.
+  int get textLength => _text.text.length;
 
-  /// CJK punctuation counts as a separator, but CJK ideographs do not: they are
-  /// handled by [_wordRangeAt] as single-character words.
-  bool _isSeparator(int codeUnit) {
-    if (_cjkPunctuation.contains(String.fromCharCode(codeUnit))) return true;
-    return _asciiSeparators.contains(String.fromCharCode(codeUnit));
-  }
-
-  static bool _isCjk(int codeUnit) =>
-      (codeUnit >= 0x4E00 && codeUnit <= 0x9FFF) || // unified ideographs
-      (codeUnit >= 0x3400 && codeUnit <= 0x4DBF) || // extension A
-      (codeUnit >= 0xF900 && codeUnit <= 0xFAFF) || // compatibility
-      (codeUnit >= 0x3040 && codeUnit <= 0x30FF) || // kana
-      (codeUnit >= 0xAC00 && codeUnit <= 0xD7AF); // hangul
+  /// The extracted text of this page.
+  String get pageText => _text.text;
 
   RendererTextSelected _buildEvent(int start, int end, String text) {
     final rects = _readerRectsFor(start, end);
@@ -301,24 +243,27 @@ final class PdfSelectionController {
     );
   }
 
-  /// Highlight rectangles for a text range, in widget coordinates.
-  List<Rect> highlightsFor(int start, int end) => [
-    for (final quad in _text.quadsFor(start, end))
-      _boundsOf(quad.corners.map((c) => toWidgetPoint(c.$1, c.$2)).toList()),
-  ];
+  /// Normalised selection rects for [start]..[end] on this page.
+  ///
+  /// Cross-page selections clip their per-page ranges before calling this, so
+  /// the same geometry that produces a single-page selection produces each
+  /// page's share of a multi-page one.
+  List<ReaderRect> readerRectsFor(int start, int end) =>
+      _readerRectsFor(start, end);
 
-  Rect _boundsOf(List<Offset> points) {
-    if (points.isEmpty) return Rect.zero;
-    var minX = points.first.dx, maxX = points.first.dx;
-    var minY = points.first.dy, maxY = points.first.dy;
-    for (final p in points.skip(1)) {
-      minX = math.min(minX, p.dx);
-      maxX = math.max(maxX, p.dx);
-      minY = math.min(minY, p.dy);
-      maxY = math.max(maxY, p.dy);
-    }
-    return Rect.fromLTRB(minX, minY, maxX, maxY);
-  }
+  /// Normalised selection rects as widget-local rectangles.
+  ///
+  /// Selection chrome (drag feedback, touch handles) is painted inside the
+  /// page box, so it works in the same view coordinates as pointer input.
+  List<Rect> viewRectsFor(int start, int end) => [
+    for (final rect in _readerRectsFor(start, end))
+      Rect.fromLTWH(
+        rect.x * displayedSize.width,
+        rect.y * displayedSize.height,
+        rect.width * displayedSize.width,
+        rect.height * displayedSize.height,
+      ),
+  ];
 
   void invalidate() => _cached = null;
 }

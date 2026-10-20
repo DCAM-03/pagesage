@@ -2,7 +2,7 @@
 
 版本：0.2（经五轮复审；修订记录见 §12–§14）
 日期：2026-10-20
-状态：待执行
+状态：执行中（S0–S3 已完成，施工记录见 §16–§18）
 前置文档：`docs/10-pdf-renderer-migration.md`（技术决策）、`docs/02-feature-spec.md` §5、`docs/03-interaction-spec.md` §8、`docs/v1-experience-freeze.md`
 适用范围：`lib/renderers/pdf/`、`lib/features/reader/`、`lib/features/ocr/`、平台资源与依赖
 
@@ -341,7 +341,7 @@ Canvas 当前把下划线画成 `box.rect.height * 0.15`（`:672`），而 `box.
 - [x] 单页/双页模式可用（S2，共用 `ReaderSettings.readerMode`）
 - [ ] outline 跳转 + 无 outline 页码回退（S4）
 - [ ] 文本层检测如实上报，扫描件禁用划词/搜索并给出原因（S0）
-- [ ] 桌面拖选、移动长按选词 + 手柄、跨页选择（S3）
+- [x] 桌面拖选、移动长按选词 + 手柄、跨页选择（S3）
 - [ ] 书内搜索可取消、可跳转（S4）
 - [ ] 标注显示与点击命中（S5）
 - [ ] **F-02：永久标注不盖住未选中的下一行**（S5，含文本 PDF 与 OCR 页；S7 删除 WebView 后由 Canvas 独立满足）
@@ -354,6 +354,7 @@ Canvas 当前把下划线画成 `box.rect.height * 0.15`（`:672`），而 `box.
 - [ ] WebView 渲染器与 PDF.js 资源删除（S7）
 - [ ] 文档、许可、任务清单同步（S7）
 - [ ] 90°/270° 旋转页布局、选区、标注全部正确（S1/S3/S6，含 replay 路径 `rotation: null`）
+  - 布局与选区已在 S1/S3 卡住；标注投影与 replay 路径留到 S5/S6
 
 ## 7. 风险与应对
 
@@ -639,3 +640,48 @@ pkill -f "kwin_wayland --virtual --socket pagesage-test"
 ### 17.4 已知限制
 
 - 混合页面尺寸的文档仍以第 1 页尺寸统一布局（与 bridge 的 `resolveZoomForPage(first)` 一致），页面本身按其真实显示尺寸绘制并居中，因此不同高度页之间会有额外留白，但不影响位置换算。
+
+## 18. S3 施工记录（2026-10-20）
+
+按 §5 S3 完成：选区状态上移到视图层、桌面拖选、移动长按选词、手柄拖动扩展、跨页选区、旋转页归一化、空文本层提示。选区算术收敛到新的 `lib/renderers/pdf/pdf_selection.dart`（纯函数），视图与按页控制器只提供几何。
+
+### 18.1 与计划的偏差
+
+| # | 计划 | 实际 | 原因 |
+| --- | --- | --- | --- |
+| 1 | 步骤 1：选区状态「上移」 | 上移到 `PdfCanvasView` 的 State，而不是宿主的 `ReaderPage`；caret 用 `PdfCaret = ({int page, int index})`，范围按页拆分 | 跨页拖选需要每一页的 caret 几何，只有渲染器同时持有所有可见页的绘制框；宿主只需要最终的 `RendererTextSelected`。状态留在视图内也让宿主继续遵守「选区事件不 `setState`」的既有约定 |
+| 2 | 步骤 3：手柄与菜单走 Overlay | 菜单在宿主 Overlay（原有实现不变），手柄画在页面自身的 Stack 内 | 手柄必须跟随页面滚动与缩放，放进 Overlay 就要在每次滚动/缩放时同步位置；页面内 `Positioned` 天然跟随，且命中区域仍是 44 px |
+| 3 | 步骤 3：「选中后不重建整个 reader」 | 视图自身 `setState` 重建可见页；宿主未改，仍按 `RendererTextSelected` 去重 | 高亮必须在拖动过程中实时跟随，视图内重建只触及可见页的 painter，代价与滚动时相同 |
+| 4 | 步骤 4：空文本层只发 `RendererNotice` | 仅在能力检测确认 `nativeTextLayer == false` 时发；有文本层但指针落在空白处时静默 | 有文本层的页面点在页边空白是正常操作，弹「没有可选择文本」会误导 |
+| 5 | 长按选词 350 ms（原交互稿） | 用 Flutter `LongPressGestureRecognizer` 的平台默认值（约 500 ms），并保留拖动扩展 | 与系统文本框一致；测试里长按 700 ms 已稳定。若产品坚持 350 ms，需要自定义 recognizer 的超时，留到 S8 统一手势参数时再定 |
+| 6 | 计划未提：宿主如何结束选区 | 新增 `ReaderRendererHostConfig.clearSelectionVersion`，菜单关闭时宿主自增，渲染器在其变化时清空选区 | 宿主拥有菜单，也最清楚选区何时用完；没有这条，菜单关闭后高亮和手柄会永久留在页面上 |
+| 7 | 计划未提：菜单遮罩与手柄争指针 | 桌面菜单的全屏遮罩改为 `IgnorePointer` 包住的透明填充，只保留点击关闭 | 「移动端手柄可点中」是 S3 验收项。原遮罩是 hit-test opaque 的 `ColoredBox`，真实窗口里手柄拖动完全无效（widget 测试不经过宿主 Overlay，所以没暴露） |
+
+### 18.2 计划外发现（已修，各有回归测试）
+
+| # | 现象 | 根因 | 覆盖 |
+| --- | --- | --- | --- |
+| A | 长按选中的是一个字符而不是一个词（英文） | 触摸长按只把 anchor/focus 设为按下处的 caret，没有按词扩展 | `_wordAt` 同时供点击与长按使用；组件测试断言点击后文本为 `PageSage` |
+| B | 拖动手柄时页面滚动，选区不扩展 | `GestureDetector` 的 pan 在竞技场里输给连续列表的垂直拖拽，指针按下后立刻 `onPanCancel` | 新增 `_HandleDragRecognizer`：指针按下即 `resolve(accepted)`，手柄盒内拖动归手柄。组件测试「end handle drags the selection further」与集成测试「long-press selects a word and a handle extends it」 |
+| C | 手柄的 44 px 盒中心落在页面选区外，按中心抓取会开始新选区 | 手柄锚在选区末字符的右下角，旋钮在盒顶 | 测试统一抓 `box.topCenter + 6`（旋钮位置）；真实窗口截图 `13-handle-extended.png` 可见整行被选中 |
+| D | 跨页拖选把锚点页和焦点页之外的页码算错 | 逐页裁剪需要每页文本长度，早期实现只取当前页 | `pdfSelectionSegments` 用 `textLengthOf` 前缀/后缀拆分；`pdf_selection_test.dart` 覆盖向前、向后、空中间页、越界 clamp |
+| E | 旋转页的选区矩形在一个轴上越出 0..1 | 归一化基准用了未旋转的 `cropBox` 宽高 | 统一用 `PdfPageGeometry(cropBox, rotation, viewSize: pageSize)` 转到显示页框再除以显示尺寸；组件测试在 `rotated-text.pdf` 上断言矩形在 0..1 内且为竖长条 |
+| F | 点按已选中的词会清掉选区，菜单随之关闭 | `_tapSelection` 先清空再判断 | 点在选区矩形内时保留（菜单继续可用），点在选区外才清空 |
+| G | 菜单关闭后选区高亮与手柄残留 | 宿主与渲染器之间没有「选区结束」的信号 | `clearSelectionVersion`（见 18.1 #6）；组件测试「a host clear request drops the highlight and handles」 |
+
+### 18.3 验证结果
+
+- `dart format`：仅触及 S3 文件；`flutter analyze`：3 条 info，全部在 `poc_pdf_canvas/`（S7 删除该目录后消失），仓库自身代码 0 error。
+- 纯函数测试 `test/renderers/pdf/pdf_selection_test.dart` 16 项：caret 排序（同页、跨页、反向）、英文/CJK/标点分词、跨页段拆分（前向、反向、空中间页、锚点在页尾、折叠、越界 clamp）、多页文本拼接与空白折叠。
+- 组件测试 `test/renderers/pdf/pdf_canvas_view_test.dart` 新增 8 项（S3 组）：鼠标拖选一行、点击选整词、跨页拖动时两家页都有矩形、扫描件提示、CJK 单击只选一字、旋转页矩形贴合显示页框、拖动手柄扩展选区、宿主清空后手柄消失。
+- `test/renderers/pdf/` 共 86 项全过（S2 时为 62 项；新增 16 项纯函数 + 8 项组件，其余为既有用例计数修正）。
+- 真实窗口集成测试（`integration_test/reader_s0_test.dart`，11 项全过）：新增「长按选词 → 手柄扩展 → 点击页面关闭菜单并清空选区」。这一项在真实窗口里暴露了 18.2 B/C 两个问题，widget 测试因为不经过宿主 Overlay 和真实竞技场没有发现。
+- `flutter test`：272 项通过、2 项跳过；仍为 4 项 `widget_test.dart` 失败（移动端分类弹层、短窗口阅读控制条、设置弹层与页面标题），与 S2 改动前一致。
+- 视觉取证：`build/integration-captures/12-long-press-select.png`（长按选词 + 两个手柄）、`13-handle-extended.png`（手柄拖到行尾，选区覆盖整行）、`14-selection-cleared.png`（菜单关闭后页面干净）。
+
+### 18.4 已知限制
+
+- 跨页拖选依赖指针移动触发滚动（`_ensureSelectionVisible` 在指针进入视口上下 56 px 时滚动半屏）。拖到窗口外不会继续自动滚动，与浏览器行为仍有差距。
+- 选区只在连续模式下手柄可见；分页模式中跨页选区仍需翻页后重新拖选，S4/S5 再评估分页模式的手柄。
+- 双击缩放（`fitWidth ↔ 2.0`）与单击选词共用 tap 路径，300 ms 内的两次点击按双击处理，因此快速连点两下会缩放而不是选中第二个词。与 WebView 渲染器的既有行为一致。
+- 手柄与菜单同屏时，手柄在菜单遮罩之下（`Stack` 顺序），所以手柄可以拖动但不会被菜单遮挡的文本仍可选。真正的浮层层级（手柄永远在菜单之上）留到 S5 和标注菜单统一处理。

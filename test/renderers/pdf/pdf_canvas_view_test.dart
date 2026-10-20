@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,7 +39,10 @@ void main() {
     updatedAt: 0,
   );
 
-  Future<({List<RendererEvent> events, Book book})> pumpReader(
+  Future<
+    ({List<RendererEvent> events, Book book, ValueNotifier<int> clearSelection})
+  >
+  pumpReader(
     WidgetTester tester,
     String sample, {
     ReadingLocator? savedLocator,
@@ -46,8 +50,13 @@ void main() {
     ReaderSettings settings = const ReaderSettings(),
     Size? viewport,
     PdfZoomChanged? onZoomChanged,
+    int clearSelectionVersion = 0,
   }) async {
     final events = <RendererEvent>[];
+    // The host clears the paint by bumping this; exposed so tests can do the
+    // same without rebuilding the whole reader page.
+    final clearSelection = ValueNotifier<int>(clearSelectionVersion);
+    addTearDown(clearSelection.dispose);
     final book = bookFor(sample);
     if (viewport != null) {
       tester.view.physicalSize = viewport * tester.view.devicePixelRatio;
@@ -58,24 +67,28 @@ void main() {
         ProviderScope(
           child: MaterialApp(
             home: Scaffold(
-              body: PdfCanvasView(
-                // A fresh key per sample: without it the previous test's state
-                // is reused and no new open happens. `session` does the same
-                // for a deliberate reopen of the same sample.
-                key: ValueKey('$sample#$session'),
-                book: book,
-                settings: settings,
-                initialProgress: savedLocator == null
-                    ? null
-                    : ReadingProgressSnapshot(
-                        bookId: book.id,
-                        locator: savedLocator,
-                        progress: savedLocator.progress,
-                        updatedAt: 0,
-                      ),
-                annotations: const [],
-                onEvent: events.add,
-                onZoomChanged: onZoomChanged,
+              body: ValueListenableBuilder<int>(
+                valueListenable: clearSelection,
+                builder: (context, clearVersion, _) => PdfCanvasView(
+                  // A fresh key per sample: without it the previous test's
+                  // state is reused and no new open happens. `session` does
+                  // the same for a deliberate reopen of the same sample.
+                  key: ValueKey('$sample#$session'),
+                  book: book,
+                  settings: settings,
+                  initialProgress: savedLocator == null
+                      ? null
+                      : ReadingProgressSnapshot(
+                          bookId: book.id,
+                          locator: savedLocator,
+                          progress: savedLocator.progress,
+                          updatedAt: 0,
+                        ),
+                  annotations: const [],
+                  onEvent: events.add,
+                  onZoomChanged: onZoomChanged,
+                  clearSelectionVersion: clearVersion,
+                ),
               ),
             ),
           ),
@@ -94,7 +107,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 40));
       }
     });
-    return (events: events, book: book);
+    return (events: events, book: book, clearSelection: clearSelection);
   }
 
   testWidgets('restores the saved page without interaction', (tester) async {
@@ -517,6 +530,310 @@ void main() {
         expect(location.locator.scrollOffset, closeTo(108, 2));
         expect(location.pageNumber, 2);
       });
+    });
+  });
+
+  group('S3 selection', () {
+    /// A painted page box for [sample], found by its aspect ratio.
+    Rect pageBox(WidgetTester tester, {double aspect = 612 / 792}) {
+      Rect? best;
+      for (final element in find.byType(CustomPaint).evaluate()) {
+        final widget = element.widget as CustomPaint;
+        if (widget.painter == null) continue;
+        final box = element.renderObject;
+        if (box is! RenderBox || !box.hasSize) continue;
+        if (box.size.width < 100 || box.size.height < 100) continue;
+        final ratio = box.size.width / box.size.height;
+        if ((ratio - aspect).abs() > 0.01) continue;
+        final rect = box.localToGlobal(Offset.zero) & box.size;
+        if (best == null ||
+            rect.width * rect.height > best.width * best.height) {
+          best = rect;
+        }
+      }
+      return best!;
+    }
+
+    /// Drags with a mouse pointer from [from] by [delta], in steps.
+    Future<void> dragBy(
+      WidgetTester tester,
+      Offset from,
+      Offset delta, {
+      int steps = 24,
+    }) async {
+      final gesture = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      for (var i = 1; i <= steps; i++) {
+        await gesture.moveTo(from + delta * (i / steps));
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+
+    testWidgets('a mouse drag selects a range of text', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      // First line's baseline area at fit-width.
+      final lineY = rect.top + (792 - 733) * scale;
+      await tester.runAsync(() async {
+        await dragBy(
+          tester,
+          Offset(rect.left + 76 * scale, lineY),
+          Offset(80 * scale, 0),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+
+      final selections = result.events.whereType<RendererTextSelected>();
+      expect(selections, isNotEmpty);
+      expect(selections.last.text, startsWith('PageSage'));
+      // Rects are stored normalised, one band per selected line.
+      for (final r in selections.last.selectionRects) {
+        expect(r.x, inInclusiveRange(0, 1));
+        expect(r.y, inInclusiveRange(0, 1));
+        expect(r.page, 1);
+      }
+    });
+
+    testWidgets('a tap selects the whole word under the pointer', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      await tester.runAsync(() async {
+        await tester.tapAt(
+          Offset(rect.left + 80 * scale, rect.top + (792 - 733) * scale),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+
+      final selection = result.events.whereType<RendererTextSelected>().last;
+      // "PageSage" starts at 72pt; a tap 8pt into it must not stop at "P".
+      expect(selection.text, 'PageSage');
+    });
+
+    testWidgets('a cross-page drag lists rects on both pages', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+      );
+      // Start in page 1's body, drag far enough to reach page 2's text.
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      final start = Offset(
+        rect.left + 76 * scale,
+        rect.top + (792 - 700) * scale,
+      );
+      await tester.runAsync(() async {
+        await dragBy(tester, start, const Offset(0, 1400), steps: 40);
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await tester.pump();
+      });
+
+      final selection = result.events.whereType<RendererTextSelected>().last;
+      final pages = {for (final r in selection.selectionRects) r.page};
+      expect(pages.length, greaterThanOrEqualTo(2));
+      expect(selection.text, contains('PageSage'));
+    });
+
+    testWidgets('a scanned page says there is no selectable text', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'image-only.pdf',
+        viewport: const Size(1000, 900),
+      );
+      final rect = pageBox(tester);
+      await tester.runAsync(() async {
+        await dragBy(tester, rect.center, const Offset(120, 0));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+      // A non-text document must say so rather than silently swallow the
+      // gesture, per the interaction spec §8.3.
+      expect(
+        result.events.whereType<RendererNotice>().map((n) => n.message),
+        contains('此 PDF 没有可选择文本'),
+      );
+      expect(result.events.whereType<RendererTextSelected>(), isEmpty);
+    });
+
+    testWidgets('a tap on a CJK page selects exactly one character', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'chinese-embedded.pdf',
+        viewport: const Size(1000, 900),
+      );
+      // The document is A4 (595x842); fit-width makes it taller than the
+      // window, so aim at the title line near the top of the page.
+      final rect = pageBox(tester, aspect: 595 / 842);
+      final scale = rect.width / 595;
+      await tester.runAsync(() async {
+        await tester.tapAt(
+          Offset(rect.left + 60 * scale, rect.top + 58 * scale),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+
+      final selection = result.events.whereType<RendererTextSelected>().last;
+      // "嵌" is the first character of the title 嵌入字体渲染测试. Selecting
+      // the whole run would mean the CJK word splitter fell back to Latin
+      // rules, which have no spaces to stop at.
+      expect(selection.text.length, 1);
+      expect('嵌入字体渲染测试', contains(selection.text));
+      expect(selection.selectionRects, isNotEmpty);
+    });
+
+    testWidgets('a rotated page reports rects against the displayed box', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'rotated-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+      );
+      // /Rotate 90 on a 612x792 page means the displayed box is 792x612.
+      // The body line runs vertically in display space, at ~90.3% of the
+      // box width; drag down its length.
+      final rect = pageBox(tester, aspect: 792 / 612);
+      await tester.runAsync(() async {
+        await dragBy(
+          tester,
+          Offset(
+            rect.left + rect.width * 0.903,
+            rect.top + rect.height * 0.163,
+          ),
+          Offset(0, rect.height * 0.245),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+
+      final selection = result.events.whereType<RendererTextSelected>().last;
+      expect(selection.text, contains('PageSage'));
+      expect(selection.selectionRects, isNotEmpty);
+      for (final r in selection.selectionRects) {
+        // The normalisation basis is the rotated (displayed) page box: a
+        // rect computed from the raw crop box would come out rotated the
+        // wrong way and land outside 0..1 on one axis.
+        expect(r.x, inInclusiveRange(0, 1));
+        expect(r.y, inInclusiveRange(0, 1));
+        expect(r.x + r.width, lessThanOrEqualTo(1.0001));
+        expect(r.y + r.height, lessThanOrEqualTo(1.0001));
+        // A vertical run of rotated text is tall and narrow in display space.
+        expect(r.height, greaterThan(r.width));
+      }
+    });
+
+    testWidgets('the end handle drags the selection further', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      await tester.runAsync(() async {
+        // A short drag on the first line, then extend downward by its handle.
+        await dragBy(
+          tester,
+          Offset(rect.left + 76 * scale, rect.top + (792 - 733) * scale),
+          Offset(80 * scale, 0),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+      final first = result.events.whereType<RendererTextSelected>().last;
+
+      final endHandle = find.byKey(const ValueKey('pdf-selection-handle-end'));
+      expect(endHandle, findsOneWidget);
+
+      await tester.runAsync(() async {
+        // The handle's touch box is 44 px, and its top edge starts only a few
+        // px below the anchor; a mouse press at the centre would sit on the
+        // page (and start a new selection) rather than on the handle. Grab
+        // the knob itself at the top of the box.
+        final box = tester.getRect(endHandle);
+        final from = box.topCenter + Offset(0, 6);
+
+        final gesture = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.touch,
+        );
+        // Two lines down: the second line sits 28pt below the first.
+        final to = from + Offset(0, 56 * scale);
+        for (var i = 1; i <= 12; i++) {
+          await gesture.moveTo(Offset.lerp(from, to, i / 12)!);
+          await tester.pump(const Duration(milliseconds: 8));
+        }
+        await gesture.up();
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+
+      final extended = result.events.whereType<RendererTextSelected>().last;
+      expect(extended.text.length, greaterThan(first.text.length));
+      expect(extended.text, startsWith(first.text));
+      // More than one band now: the selection crossed a line break.
+      expect(
+        extended.selectionRects.length,
+        greaterThan(first.selectionRects.length),
+      );
+    });
+
+    testWidgets('a host clear request drops the highlight and handles', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      await tester.runAsync(() async {
+        await tester.tapAt(
+          Offset(rect.left + 80 * scale, rect.top + (792 - 733) * scale),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+      expect(result.events.whereType<RendererTextSelected>(), isNotEmpty);
+      final handle = find.byKey(const ValueKey('pdf-selection-handle-end'));
+      expect(handle, findsOneWidget);
+
+      result.clearSelection.value += 1;
+      await tester.pump();
+
+      // The menu is gone, so the paint it belonged to must go too; otherwise
+      // the page keeps a frozen highlight with nothing that can act on it.
+      expect(handle, findsNothing);
     });
   });
 

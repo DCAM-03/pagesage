@@ -1,0 +1,170 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/renderers/pdf/pdf_selection.dart';
+
+/// S3's selection arithmetic, pinned without a widget.
+///
+/// Cross-page selection is the part that cannot be checked by eye from a
+/// screenshot: a range that silently loses the last character of a page or
+/// repeats it on the next shows up in the stored annotation, not on screen.
+void main() {
+  group('caret order', () {
+    test('same page orders by character index', () {
+      final a = (page: 0, index: 10);
+      final b = (page: 0, index: 3);
+      expect(pdfOrderCarets(a, b), (start: b, end: a));
+      expect(pdfOrderCarets(b, a), (start: b, end: a));
+    });
+
+    test('a backward drag across pages still starts on the earlier page', () {
+      final a = (page: 4, index: 2);
+      final b = (page: 1, index: 90);
+      expect(pdfOrderCarets(a, b), (start: b, end: a));
+    });
+  });
+
+  group('words', () {
+    test('an English word expands to its separators', () {
+      // The hyphen is a separator here, like a space: selecting "local" must
+      // not drag "first" along with it.
+      expect(pdfWordRangeAt('local-first reader', 2), (0, 5));
+      expect(pdfWordRangeAt('local-first reader', 7), (6, 11));
+      expect(pdfWordRangeAt('local-first reader', 13), (12, 18));
+    });
+
+    test('a CJK character is a word by itself', () {
+      const text = '嵌入字体渲染测试';
+      for (var i = 0; i < text.length; i++) {
+        expect(pdfWordRangeAt(text, i), (i, i + 1), reason: 'index $i');
+      }
+    });
+
+    test('CJK punctuation is a separator, not a word', () {
+      expect(pdfWordRangeAt('测试，完成', 2), isNull);
+      // Ideographs on either side stay single-character words; the
+      // punctuation between them belongs to neither.
+      expect(pdfWordRangeAt('测试，完成', 0), (0, 1));
+      expect(pdfWordRangeAt('测试，完成', 3), (3, 4));
+    });
+
+    test('whitespace selects nothing', () {
+      expect(pdfWordRangeAt('a b', 1), isNull);
+      expect(pdfWordRangeAt('', 0), isNull);
+    });
+  });
+
+  group('segments', () {
+    int lengthOf(int page) => const [10, 20, 30][page];
+
+    test('a single-page selection keeps its own bounds', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 0, index: 2),
+          focus: (page: 0, index: 7),
+          textLengthOf: lengthOf,
+        ),
+        [(page: 0, start: 2, end: 7)],
+      );
+    });
+
+    test('a backward same-page selection is normalised', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 0, index: 7),
+          focus: (page: 0, index: 2),
+          textLengthOf: lengthOf,
+        ),
+        [(page: 0, start: 2, end: 7)],
+      );
+    });
+
+    test('a cross-page selection covers the tail, interior and head', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 0, index: 4),
+          focus: (page: 2, index: 6),
+          textLengthOf: lengthOf,
+        ),
+        [
+          (page: 0, start: 4, end: 10),
+          (page: 1, start: 0, end: 20),
+          (page: 2, start: 0, end: 6),
+        ],
+      );
+    });
+
+    test('dragging backward across pages yields the same segments', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 2, index: 6),
+          focus: (page: 0, index: 4),
+          textLengthOf: lengthOf,
+        ),
+        [
+          (page: 0, start: 4, end: 10),
+          (page: 1, start: 0, end: 20),
+          (page: 2, start: 0, end: 6),
+        ],
+      );
+    });
+
+    test('an empty interior page contributes no segment', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 0, index: 4),
+          focus: (page: 2, index: 0),
+          textLengthOf: (page) => page == 1 ? 0 : lengthOf(page),
+        ),
+        [
+          (page: 0, start: 4, end: 10),
+          // Zero characters on the end page means nothing to select there.
+        ],
+      );
+    });
+
+    test('an anchor at the very end of a page yields no tail', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 0, index: 10),
+          focus: (page: 1, index: 3),
+          textLengthOf: lengthOf,
+        ),
+        [(page: 1, start: 0, end: 3)],
+      );
+    });
+
+    test('a collapsed selection has no segments', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 1, index: 5),
+          focus: (page: 1, index: 5),
+          textLengthOf: lengthOf,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('out-of-range indices clamp instead of throwing', () {
+      expect(
+        pdfSelectionSegments(
+          anchor: (page: 0, index: -4),
+          focus: (page: 0, index: 99),
+          textLengthOf: lengthOf,
+        ),
+        [(page: 0, start: 0, end: 10)],
+      );
+    });
+  });
+
+  group('text', () {
+    test('pages join with a space and runs of whitespace collapse', () {
+      expect(
+        pdfSelectionText(['PageSage PDF', 'Generated by\nPageSage']),
+        'PageSage PDF Generated by PageSage',
+      );
+    });
+
+    test('empty pages do not leave double spaces', () {
+      expect(pdfSelectionText(['a', '', 'b']), 'a b');
+    });
+  });
+}

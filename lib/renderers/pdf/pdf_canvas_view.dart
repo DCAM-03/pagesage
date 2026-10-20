@@ -18,6 +18,7 @@ import '../common/renderer_event.dart';
 import '../epub/epub_jump.dart';
 import 'pdf_canvas_renderer.dart';
 import 'pdf_layout.dart';
+import 'pdf_selection.dart';
 import 'pdf_selection_controller.dart';
 import 'pdf_zoom.dart';
 
@@ -56,6 +57,7 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
     this.focusLocator,
     this.jumpToken = 0,
     this.clearSearchHighlightsVersion = 0,
+    this.clearSelectionVersion = 0,
     this.onZoomChanged,
     super.key,
   });
@@ -82,6 +84,13 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
 
   /// Bumped by the host to drop search highlights.
   final int clearSearchHighlightsVersion;
+
+  /// Bumped by the host when the selection should go away.
+  ///
+  /// The host owns the action menu, so it is also the one that knows when the
+  /// selection is finished with; without this the highlight and handles would
+  /// stay painted after the menu closes.
+  final int clearSelectionVersion;
 
   /// Pinch, Ctrl+wheel and double-click zoom. The host persists the result;
   /// the renderer keeps painting the transient scale until the new settings
@@ -144,6 +153,46 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// user's own pinch on the next rebuild.
   bool _userAdjustedScale = false;
 
+  /// The live text selection, as two carets in extracted-text coordinates.
+  ///
+  /// S3 moved this out of the page widgets: a drag may start on one page and
+  /// end on another, and only the view knows every page's caret geometry.
+  /// Pages ask for their own slice with [_rangeForPage] and paint it.
+  PdfCaret? _selectionAnchor;
+  PdfCaret? _selectionFocus;
+
+  /// True while a pointer is down and extending the selection.
+  bool _selectionDragging = false;
+
+  /// The last selection handed to the host, so a rebuild does not re-emit a
+  /// menu for the same selection.
+  String? _emittedSelectionKey;
+
+  /// Page index -> the painted box of that page, in global coordinates.
+  ///
+  /// Selection needs to turn a global pointer into (page, caret); the page
+  /// widgets report their box whenever they lay out.
+  final Map<int, Rect> _pageGlobalRects = {};
+
+  /// The current selection as per-page ranges, keyed by page index.
+  Map<int, ({int start, int end})> get _selectionRanges {
+    final anchor = _selectionAnchor;
+    final focus = _selectionFocus;
+    if (anchor == null || focus == null) return const {};
+    final out = <int, ({int start, int end})>{};
+    for (final segment in pdfSelectionSegments(
+      anchor: anchor,
+      focus: focus,
+      textLengthOf: (page) => _renderer?.textOf(page).text.length ?? 0,
+    )) {
+      out[segment.page] = (start: segment.start, end: segment.end);
+    }
+    return out;
+  }
+
+  ({int start, int end})? _rangeForPage(int pageIndex) =>
+      _selectionRanges[pageIndex];
+
   @override
   void initState() {
     super.initState();
@@ -159,6 +208,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     if (oldWidget.clearSearchHighlightsVersion !=
         widget.clearSearchHighlightsVersion) {
       setState(() => _searchHighlights.clear());
+    }
+    if (oldWidget.clearSelectionVersion != widget.clearSelectionVersion) {
+      _clearSelection();
     }
     // The host puts the jump target in `initialProgress`: `_jumpProgress`
     // carries the enriched locator, while `focusLocator` is only set when the
@@ -627,7 +679,16 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               ocrBlocks: widget.ocrOverlayPage == index + 1
                   ? widget.ocrOverlayBlocks
                   : const [],
-              onSelection: widget.onEvent,
+              selectionRange: _rangeForPage(index),
+              selectionStartsHere: _selectionStartsAt(index),
+              selectionEndsHere: _selectionEndsAt(index),
+              onSelectionStart: _beginSelection,
+              onSelectionMove: _moveSelection,
+              onSelectionEnd: _endSelection,
+              onSelectionTap: _tapSelection,
+              onSelectionHandleDrag: _dragSelectionHandle,
+              onSelectionHandleDragEnd: _endSelectionHandleDrag,
+              onPaintedRect: _recordPaintedRect,
               onAnnotationSelected: widget.onEvent,
               onZoomChanged: _handleZoomChanged,
               onPageTurn: _turnPage,
@@ -689,7 +750,16 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   ocrBlocks: widget.ocrOverlayPage == indices[i] + 1
                       ? widget.ocrOverlayBlocks
                       : const [],
-                  onSelection: widget.onEvent,
+                  selectionRange: _rangeForPage(indices[i]),
+                  selectionStartsHere: _selectionStartsAt(indices[i]),
+                  selectionEndsHere: _selectionEndsAt(indices[i]),
+                  onSelectionStart: _beginSelection,
+                  onSelectionMove: _moveSelection,
+                  onSelectionEnd: _endSelection,
+                  onSelectionTap: _tapSelection,
+                  onSelectionHandleDrag: _dragSelectionHandle,
+                  onSelectionHandleDragEnd: _endSelectionHandleDrag,
+                  onPaintedRect: _recordPaintedRect,
                   onAnnotationSelected: widget.onEvent,
                   onZoomChanged: _handleZoomChanged,
                   onPageTurn: _turnPage,
@@ -733,6 +803,372 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   int _pageForSpread(int spread) {
     if (spread <= 0) return 0;
     return spread * 2 - 1;
+  }
+
+  // --- selection --------------------------------------------------------
+
+  /// Page and caret under a global pointer, or null off every page.
+  ///
+  /// A pointer outside a page's box clamps to that page's nearest text rather
+  /// than resolving to nothing: dragging past the bottom of a page to the end
+  /// of a paragraph is normal, and the browser selection this replaces did the
+  /// same.
+  PdfCaret? _caretAtGlobal(Offset global, {int? preferPage}) {
+    final renderer = _renderer;
+    if (renderer == null) return null;
+    final preferred = preferPage == null ? null : _pageGlobalRects[preferPage];
+    final page = preferred == null
+        ? _pageAtGlobal(global)
+        : (preferred.inflate(8).contains(global)
+              ? preferPage
+              : _pageAtGlobal(global));
+    if (page == null) return null;
+    final rect = _pageGlobalRects[page];
+    if (rect == null) return null;
+    return _selectionControllerFor(page)?.caretAt(global - rect.topLeft);
+  }
+
+  int? _pageAtGlobal(Offset global) {
+    int? best;
+    var bestDistance = double.infinity;
+    for (final entry in _pageGlobalRects.entries) {
+      final rect = entry.value;
+      if (rect.contains(global)) {
+        // A spread can have two pages side by side; only one contains it.
+        return entry.key;
+      }
+      // Off every page (pointer in the margin between pages): the nearest one
+      // is the page the reader is dragging toward.
+      final dx = math.max(
+        0.0,
+        math.max(rect.left - global.dx, global.dx - rect.right),
+      );
+      final dy = math.max(
+        0.0,
+        math.max(rect.top - global.dy, global.dy - rect.bottom),
+      );
+      final distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = entry.key;
+      }
+    }
+    return best;
+  }
+
+  PdfSelectionController? _selectionControllerFor(int pageIndex) {
+    final renderer = _renderer;
+    final rect = _pageGlobalRects[pageIndex];
+    if (renderer == null || rect == null) return null;
+    final pageSize = renderer.displaySizeOf(0);
+    final painted = Size(
+      pageSize.width * _layoutScale,
+      pageSize.height * _layoutScale,
+    );
+    return PdfSelectionController(
+      renderer: renderer,
+      pageIndex: pageIndex,
+      box: renderer.pageAt(pageIndex).cropBox,
+      rotation: renderer.pageAt(pageIndex).rotation,
+      paintSize: painted,
+      displayedSize: painted,
+      globalOrigin: rect.topLeft,
+      pageSize: pageSize,
+    );
+  }
+
+  /// Pointer down: start a new selection, or keep the current one when the
+  /// press lands inside it (a press inside a selection would otherwise kill
+  /// it before a copy action could use it).
+  void _beginSelection(Offset global, PointerDeviceKind kind) {
+    final caret = _caretAtGlobal(global);
+    if (caret == null) {
+      _noticeNoText();
+      _clearSelection();
+      return;
+    }
+    // Touch selects a word first, like every mobile reader; a later drag
+    // extends from that word's far edge instead of from the touched
+    // character. The whole word is selected, not the part before the caret.
+    final word = kind == PointerDeviceKind.touch ? _wordAt(caret) : null;
+    setState(() {
+      _selectionAnchor = word?.anchor ?? caret;
+      _selectionFocus = word?.focus ?? caret;
+      _selectionDragging = true;
+      _emittedSelectionKey = null;
+    });
+    // A long-press word selection is already meaningful, so the host should
+    // show its menu without waiting for a drag.
+    if (kind == PointerDeviceKind.touch) {
+      _emitSelectionIfChanged(commit: false);
+    }
+  }
+
+  void _moveSelection(Offset global, PointerDeviceKind kind) {
+    if (!_selectionDragging) return;
+    final anchor = _selectionAnchor;
+    if (anchor == null) return;
+    final caret = _caretAtGlobal(global, preferPage: anchor.page);
+    if (caret == null) return;
+    _ensureSelectionVisible(global);
+    if (caret.page == _selectionFocus?.page &&
+        caret.index == _selectionFocus?.index) {
+      return;
+    }
+    setState(() => _selectionFocus = caret);
+  }
+
+  void _endSelection(Offset global, PointerDeviceKind kind) {
+    if (!_selectionDragging) return;
+    _selectionDragging = false;
+    _moveSelection(global, kind);
+    _emitSelectionIfChanged(commit: true);
+  }
+
+  /// A tap that did not hit an annotation: a live selection dismisses, an
+  /// otherwise plain tap selects the word under the pointer.
+  void _tapSelection(Offset global) {
+    if (_selectionAnchor != null) {
+      // Tapping outside the selection dismisses it; tapping inside keeps it
+      // so the toolbar can act on it. The harness's menu already treats a
+      // second tap as a dismiss, so only clear when it is outside.
+      final inside = _selectionGlobalRects().any((r) => r.contains(global));
+      if (inside) return;
+      _clearSelection();
+      return;
+    }
+    final caret = _caretAtGlobal(global);
+    if (caret == null) return;
+    // Desktop tap selects the whole word under the pointer, matching the
+    // previous behaviour.
+    final word = _wordAt(caret);
+    if (word == null) return;
+    setState(() {
+      _selectionAnchor = word.anchor;
+      _selectionFocus = word.focus;
+      _emittedSelectionKey = null;
+    });
+    _emitSelectionIfChanged(commit: true);
+  }
+
+  /// The selection's page rectangles in global coordinates.
+  List<Rect> _selectionGlobalRects() {
+    final out = <Rect>[];
+    for (final entry in _selectionRanges.entries) {
+      final rect = _pageGlobalRects[entry.key];
+      final controller = _selectionControllerFor(entry.key);
+      if (rect == null || controller == null) continue;
+      for (final local in controller.viewRectsFor(
+        entry.value.start,
+        entry.value.end,
+      )) {
+        out.add(local.shift(rect.topLeft));
+      }
+    }
+    return out;
+  }
+
+  /// Builds and emits [RendererTextSelected] for the current selection.
+  ///
+  /// Emitting is deduplicated by page + text, exactly like the bridge's
+  /// `lastReportedSelectionKey`: rebuilding the reader on every drag update
+  /// would otherwise reopen the host's menu forever.
+  void _emitSelectionIfChanged({required bool commit}) {
+    final renderer = _renderer;
+    final anchor = _selectionAnchor;
+    final focus = _selectionFocus;
+    if (renderer == null || anchor == null || focus == null) return;
+    final ranges = _selectionRanges;
+    if (ranges.isEmpty) return;
+
+    final texts = <String>[];
+    final rects = <ReaderRect>[];
+    Rect? anchorGlobal;
+    for (final entry in ranges.entries) {
+      final page = entry.key;
+      final controller = _selectionControllerFor(page);
+      final pageRect = _pageGlobalRects[page];
+      if (controller == null || pageRect == null) continue;
+      texts.add(
+        controller.pageText.substring(entry.value.start, entry.value.end),
+      );
+      final pageRects = controller.readerRectsFor(
+        entry.value.start,
+        entry.value.end,
+      );
+      rects.addAll(pageRects);
+      if (anchorGlobal == null && pageRects.isNotEmpty) {
+        final first = pageRects.first;
+        anchorGlobal = Rect.fromLTWH(
+          pageRect.left + first.x * pageRect.width,
+          pageRect.top + first.y * pageRect.height,
+          first.width * pageRect.width,
+          first.height * pageRect.height,
+        );
+      }
+    }
+    final text = pdfSelectionText(texts);
+    if (text.isEmpty) return;
+    final key = '${anchor.page}\n$text';
+    if (key == _emittedSelectionKey) return;
+    _emittedSelectionKey = key;
+
+    final locatorPage = anchor.page + 1;
+    widget.onEvent(
+      RendererTextSelected(
+        text: text,
+        locator: ReadingLocator.pdf(
+          page: locatorPage,
+          zoom: _layoutScale,
+          scrollOffset: _scrollOffsetForCurrentPage(),
+          progress: renderer.pageCount <= 1
+              ? 1.0
+              : (locatorPage - 1) / (renderer.pageCount - 1),
+          excerpt: text,
+          selectionRects: rects,
+        ),
+        sourceRect: anchorGlobal == null
+            ? null
+            : ReaderRect(
+                page: locatorPage,
+                x: anchorGlobal.left,
+                y: anchorGlobal.top,
+                width: anchorGlobal.width,
+                height: anchorGlobal.height,
+              ),
+        selectionRects: rects,
+      ),
+    );
+  }
+
+  /// Records a page's painted box, for caret mapping and handles.
+  void _recordPaintedRect(int pageIndex, Rect rect) {
+    if (_pageGlobalRects[pageIndex] == rect) return;
+    _pageGlobalRects[pageIndex] = rect;
+  }
+
+  /// Whether [pageIndex] holds the start of the current selection.
+  bool _selectionStartsAt(int pageIndex) {
+    final anchor = _selectionAnchor;
+    final focus = _selectionFocus;
+    if (anchor == null || focus == null) return false;
+    return pdfOrderCarets(anchor, focus).start.page == pageIndex;
+  }
+
+  /// Whether [pageIndex] holds the end of the current selection.
+  bool _selectionEndsAt(int pageIndex) {
+    final anchor = _selectionAnchor;
+    final focus = _selectionFocus;
+    if (anchor == null || focus == null) return false;
+    return pdfOrderCarets(anchor, focus).end.page == pageIndex;
+  }
+
+  /// Extends the selection from a dragged handle.
+  ///
+  /// The start handle moves the anchor and the end handle the focus, so
+  /// dragging either end shrinks and grows the selection from that side, the
+  /// way a native text selection does.
+  void _dragSelectionHandle(Offset global, {required bool isStart}) {
+    final caret = _caretAtGlobal(global);
+    if (caret == null) return;
+    _ensureSelectionVisible(global);
+    setState(() {
+      if (isStart) {
+        _selectionAnchor = caret;
+      } else {
+        _selectionFocus = caret;
+      }
+      _emittedSelectionKey = null;
+    });
+  }
+
+  void _endSelectionHandleDrag() {
+    _emitSelectionIfChanged(commit: true);
+  }
+
+  /// Says why selection did nothing, instead of leaving the gesture silent.
+  ///
+  /// The host drops the sticky capability copy but shows this one, matching
+  /// the interaction spec's "long-press or drag does nothing" notice.
+  void _noticeNoText() {
+    if (_nativeTextLayer == false) {
+      widget.onEvent(const RendererNotice('此 PDF 没有可选择文本'));
+    }
+  }
+
+  /// Scrolls the selection into view when it leaves the viewport.
+  ///
+  /// A drag that starts on one page and runs off the bottom of the window has
+  /// to keep working, or cross-page selection is impossible in continuous
+  /// mode. Guarded so a stationary pointer cannot scroll forever.
+  void _ensureSelectionVisible(Offset global) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final viewport = box.globalToLocal(global);
+    final height = box.size.height;
+    final top = 56.0;
+    final bottom = height - 56;
+    if (viewport.dy > top && viewport.dy < bottom) return;
+    final direction = viewport.dy <= top ? -1.0 : 1.0;
+    if (_scrollController.hasClients) {
+      final position = _scrollController.position;
+      unawaited(
+        _scrollController.animateTo(
+          (position.pixels + direction * height * 0.5).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          ),
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+        ),
+      );
+      return;
+    }
+    final controller = _pageController;
+    if (controller != null && controller.hasClients) {
+      if (direction > 0) {
+        unawaited(
+          controller.nextPage(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          ),
+        );
+      } else {
+        unawaited(
+          controller.previousPage(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          ),
+        );
+      }
+    }
+  }
+
+  void _clearSelection() {
+    if (_selectionAnchor == null && _selectionFocus == null) return;
+    setState(() {
+      _selectionAnchor = null;
+      _selectionFocus = null;
+      _selectionDragging = false;
+      _emittedSelectionKey = null;
+    });
+  }
+
+  /// The whole word at [caret], as anchor and focus carets.
+  ///
+  /// Returns null when the caret sits on a separator or the page has no text
+  /// there, so callers can decide between doing nothing and selecting a
+  /// single character.
+  ({PdfCaret anchor, PdfCaret focus})? _wordAt(PdfCaret caret) {
+    final renderer = _renderer;
+    if (renderer == null) return null;
+    final text = renderer.textOf(caret.page).text;
+    final range = pdfWordRangeAt(text, caret.index);
+    if (range == null) return null;
+    return (
+      anchor: (page: caret.page, index: range.$1),
+      focus: (page: caret.page, index: range.$2),
+    );
   }
 
   // --- scrolling --------------------------------------------------------
@@ -966,7 +1402,16 @@ final class _CanvasPage extends StatefulWidget {
     required this.searchQuads,
     required this.annotations,
     required this.ocrBlocks,
-    required this.onSelection,
+    required this.selectionRange,
+    required this.selectionStartsHere,
+    required this.selectionEndsHere,
+    required this.onSelectionStart,
+    required this.onSelectionMove,
+    required this.onSelectionEnd,
+    required this.onSelectionTap,
+    required this.onSelectionHandleDrag,
+    required this.onSelectionHandleDragEnd,
+    required this.onPaintedRect,
     required this.onAnnotationSelected,
     required this.onZoomChanged,
     required this.onPageTurn,
@@ -999,7 +1444,42 @@ final class _CanvasPage extends StatefulWidget {
   final List<PdfTextQuad> searchQuads;
   final List<Annotation> annotations;
   final List<Map<String, Object?>> ocrBlocks;
-  final ValueChanged<RendererTextSelected> onSelection;
+
+  /// The part of the current selection that falls on this page, or null.
+  ///
+  /// The selection itself lives in the view: a drag may run across pages, and
+  /// only the view knows every page's caret geometry. The page paints its own
+  /// share and reports pointer positions upward in global coordinates.
+  final ({int start, int end})? selectionRange;
+
+  /// Whether this page holds the start / end of the selection.
+  ///
+  /// Only those two pages get a handle: with a three-page selection the
+  /// interior page has no end to grab.
+  final bool selectionStartsHere;
+  final bool selectionEndsHere;
+
+  /// Pointer-down with a selecting device (mouse, stylus, touch long-press).
+  final void Function(Offset global, PointerDeviceKind kind) onSelectionStart;
+
+  /// Pointer moved while selecting; [global] may be outside the page box.
+  final void Function(Offset global, PointerDeviceKind kind) onSelectionMove;
+
+  /// Pointer released.
+  final void Function(Offset global, PointerDeviceKind kind) onSelectionEnd;
+
+  /// A tap that did not land on an annotation.
+  final ValueChanged<Offset> onSelectionTap;
+
+  /// A handle was dragged; [isStart] says which end.
+  final void Function(Offset global, {required bool isStart})
+  onSelectionHandleDrag;
+
+  /// A handle drag ended and the selection should be reported.
+  final VoidCallback onSelectionHandleDragEnd;
+
+  /// Reports where this page painted itself, in global coordinates.
+  final void Function(int pageIndex, Rect rect) onPaintedRect;
   final ValueChanged<RendererAnnotationSelected> onAnnotationSelected;
   final PdfZoomChanged onZoomChanged;
   final ValueChanged<int> onPageTurn;
@@ -1031,9 +1511,9 @@ final class _CanvasPageState extends State<_CanvasPage> {
   DateTime? _lastTapAt;
   Offset? _lastTapGlobal;
 
-  Offset? _dragAnchor;
-  bool _dragSelecting = false;
-  List<Rect> _selectionHighlights = const [];
+  /// Touch long-press selects the word under the finger, then a drag extends
+  /// it. The recognizer arms on touch down; this flag remembers that it fired.
+  bool _longPressSelecting = false;
 
   /// The page's rotation-aware display size, in PDF points.
   ///
@@ -1080,6 +1560,39 @@ final class _CanvasPageState extends State<_CanvasPage> {
   void dispose() {
     _future?.then((page) => page.dispose());
     super.dispose();
+  }
+
+  final GlobalKey _selectableKey = GlobalKey();
+
+  /// Selection rectangles for this page's share of the live selection.
+  ///
+  /// Painted inside the page box, in the same view coordinates the pointers
+  /// arrive in; the view owns the carets and hands each page its own range.
+  List<Rect> get _selectionHighlights {
+    final range = widget.selectionRange;
+    if (range == null || range.end <= range.start) return const [];
+    return _selectionFor(Offset.zero).viewRectsFor(range.start, range.end);
+  }
+
+  Widget _selectablePageFor(PdfRenderedPage page) {
+    return _SelectablePage(
+      key: _selectableKey,
+      page: page,
+      pageSize: _pageSize,
+      highlightedRects: [
+        for (final q in widget.searchQuads) _quadToRect(q, _pageSize),
+        ..._selectionHighlights,
+      ],
+      annotations: _annotationBoxes(_paintedSize),
+      ocrBoxes: _ocrBoxes(_paintedSize),
+      onStart: _onDragStart,
+      onUpdate: _onDragUpdate,
+      onEnd: _onDragEnd,
+      onTap: _handleTap,
+      onLongPressStart: _onLongPressStart,
+      onLongPressMove: _onLongPressMoveUpdate,
+      onLongPressEnd: _onLongPressEnd,
+    );
   }
 
   @override
@@ -1141,25 +1654,28 @@ final class _CanvasPageState extends State<_CanvasPage> {
                             child: CircularProgressIndicator(),
                           );
                         }
-                        return _SelectablePage(
-                          key: ValueKey(page),
-                          page: page,
-                          pageSize: _pageSize,
-                          highlightedRects: [
-                            for (final q in widget.searchQuads)
-                              _quadToRect(q, _pageSize),
-                            ..._selectionHighlights,
-                          ],
-                          annotations: _annotationBoxes(_paintedSize),
-                          ocrBoxes: _ocrBoxes(_paintedSize),
-                          onStart: _onDragStart,
-                          onUpdate: _onDragUpdate,
-                          onEnd: _onDragEnd,
-                          onTap: _handleTap,
-                        );
+                        // Report the painted box so the view can turn global
+                        // pointers into carets and draw selection handles
+                        // where the page actually is.
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted) return;
+                          final box =
+                              _selectableKey.currentContext?.findRenderObject()
+                                  as RenderBox?;
+                          if (box == null || !box.hasSize) return;
+                          widget.onPaintedRect(
+                            widget.pageIndex,
+                            box.localToGlobal(Offset.zero) & box.size,
+                          );
+                        });
+                        return _selectablePageFor(page);
                       },
                     ),
                   ),
+                  // Touch selection handles sit above the page so they are
+                  // reachable even at the very edge of the text.
+                  if (widget.selectionRange != null)
+                    ..._buildSelectionHandles(origin),
                 ],
               ),
             ),
@@ -1167,6 +1683,58 @@ final class _CanvasPageState extends State<_CanvasPage> {
         );
       },
     );
+  }
+
+  /// Touch selection handles: one at each end of this page's selection band.
+  ///
+  /// Handles are only painted for the page the selection starts on and the
+  /// page it ends on; an interior page of a three-page selection has no end
+  /// to grab. The hit area is 44 px even though the knob is 16 px, which is
+  /// the smallest comfortable touch target in the design system.
+  List<Widget> _buildSelectionHandles(Offset origin) {
+    final range = widget.selectionRange;
+    if (range == null) return const [];
+    final rects = _selectionHighlights;
+    if (rects.isEmpty) return const [];
+    final pageRect = _paintedSize;
+    final first = rects.first;
+    final last = rects.last;
+    final widgets = <Widget>[];
+    // Start handle sits above the first line's start, end handle below the
+    // last line's end, like a native text selection.
+    if (widget.selectionStartsHere) {
+      final startAt = Offset(
+        (first.left + origin.dx).clamp(0.0, pageRect.width - 1),
+        (first.top + origin.dy).clamp(0.0, pageRect.height - 1),
+      );
+      widgets.add(
+        _SelectionHandle(
+          key: const ValueKey('pdf-selection-handle-start'),
+          anchor: startAt,
+          above: true,
+          onDrag: (global) =>
+              widget.onSelectionHandleDrag(global, isStart: true),
+          onDragEnd: widget.onSelectionHandleDragEnd,
+        ),
+      );
+    }
+    if (widget.selectionEndsHere) {
+      final endAt = Offset(
+        (last.right + origin.dx).clamp(0.0, pageRect.width - 1),
+        (last.bottom + origin.dy).clamp(0.0, pageRect.height - 1),
+      );
+      widgets.add(
+        _SelectionHandle(
+          key: const ValueKey('pdf-selection-handle-end'),
+          anchor: endAt,
+          above: false,
+          onDrag: (global) =>
+              widget.onSelectionHandleDrag(global, isStart: false),
+          onDragEnd: widget.onSelectionHandleDragEnd,
+        ),
+      );
+    }
+    return widgets;
   }
 
   /// Whether the page is larger than the box it sits in on either axis.
@@ -1299,28 +1867,85 @@ final class _CanvasPageState extends State<_CanvasPage> {
     widget.onZoomChanged(scale, mode);
   }
 
-  /// Mouse double-click toggles fit-width and 2x, per the plan's S1 step 7.
+  // --- selection gestures ----------------------------------------------
+
+  /// Global origin of the painted page box.
+  ///
+  /// Selection carets are resolved by the view from global positions, so this
+  /// page only converts its own local pointer positions outward.
+  Offset get _globalOrigin {
+    final box = _selectableKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return Offset.zero;
+    return box.localToGlobal(Offset.zero);
+  }
+
+  Offset _toGlobal(Offset local) => _globalOrigin + local;
+
+  void _onDragStart(Offset local) {
+    widget.onSelectionStart(_toGlobal(local), PointerDeviceKind.mouse);
+  }
+
+  void _onDragUpdate(Offset local) {
+    // The view holds the carets and rebuilds every page with its new
+    // `selectionRange`, so the highlight follows the drag without the page
+    // tracking selection state of its own.
+    widget.onSelectionMove(_toGlobal(local), PointerDeviceKind.mouse);
+  }
+
+  void _onDragEnd(Offset local, Offset globalOrigin) {
+    widget.onSelectionEnd(_toGlobal(local), PointerDeviceKind.mouse);
+  }
+
+  /// Touch long-press selects the word under the finger.
+  ///
+  /// Desktop browsers select by dragging; touch devices have no hover and no
+  /// cursor, so the platform convention is press-and-hold on a word. The
+  /// recognizer arms on press-down but only wins after the hold timer, so a
+  /// quick swipe still reaches the pan and pinch recognizers.
+  void _onLongPressStart(LongPressStartDetails details) {
+    _longPressSelecting = true;
+    widget.onSelectionStart(details.globalPosition, PointerDeviceKind.touch);
+  }
+
+  void _onLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
+    if (!_longPressSelecting) return;
+    widget.onSelectionMove(details.globalPosition, PointerDeviceKind.touch);
+  }
+
+  void _onLongPressEnd(LongPressEndDetails details) {
+    if (!_longPressSelecting) return;
+    _longPressSelecting = false;
+    widget.onSelectionEnd(details.globalPosition, PointerDeviceKind.touch);
+  }
+
+  /// Tap on the page: an annotation under the pointer wins, then the view
+  /// decides between selecting a word and double-click zoom.
   void _handleTap(Offset globalPosition) {
+    final local = globalPosition - _globalOrigin;
+    if (_emitAnnotationTap(local, _paintedSize, _globalOrigin)) return;
+
     final now = DateTime.now();
     final lastAt = _lastTapAt;
     final lastPosition = _lastTapGlobal;
     _lastTapAt = now;
     _lastTapGlobal = globalPosition;
-    if (lastAt == null ||
-        lastPosition == null ||
-        now.difference(lastAt) > const Duration(milliseconds: 300) ||
-        (globalPosition - lastPosition).distance > 24) {
+    if (lastAt != null &&
+        lastPosition != null &&
+        now.difference(lastAt) <= const Duration(milliseconds: 300) &&
+        (globalPosition - lastPosition).distance <= 24) {
+      // Mouse double-click toggles fit-width and 2x, per the plan's S1 step 7.
+      _lastTapAt = null;
+      _lastTapGlobal = null;
+      if (widget.settings.pdfZoomMode == PdfZoomMode.fitWidth) {
+        _applyZoom(2.0);
+      } else {
+        // Fit-width is a mode, not a scale; the host resolves it from the
+        // viewport, so the scale we pass is ignored.
+        _applyZoom(_displayScale, mode: PdfZoomMode.fitWidth);
+      }
       return;
     }
-    _lastTapAt = null;
-    _lastTapGlobal = null;
-    if (widget.settings.pdfZoomMode == PdfZoomMode.fitWidth) {
-      _applyZoom(2.0);
-    } else {
-      // Fit-width is a mode, not a scale; the host resolves it from the
-      // viewport, so the scale we pass is ignored.
-      _applyZoom(_displayScale, mode: PdfZoomMode.fitWidth);
-    }
+    widget.onSelectionTap(globalPosition);
   }
 
   // --- geometry and overlays -------------------------------------------
@@ -1440,69 +2065,6 @@ final class _CanvasPageState extends State<_CanvasPage> {
     return rect;
   }
 
-  void _onDragStart(Offset local) {
-    final controller = _selectionFor(Offset.zero);
-    if (!controller.hasText) return;
-    setState(() {
-      _dragAnchor = local;
-      _dragSelecting = true;
-      _selectionHighlights = const [];
-    });
-  }
-
-  void _onDragUpdate(Offset local) {
-    if (!_dragSelecting) return;
-    final controller = _selectionFor(Offset.zero);
-    final anchor = _dragAnchor;
-    if (anchor == null) return;
-
-    // Live highlight feedback in view coordinates; the selection itself is
-    // only committed on drag end.
-    final displayed = _paintedSize;
-    final rect = controller.selectionBetween(anchor, local);
-    setState(() {
-      _selectionHighlights = rect == null
-          ? const []
-          : [
-              for (final r in rect.selectionRects)
-                Rect.fromLTWH(
-                  r.x * displayed.width,
-                  r.y * displayed.height,
-                  r.width * displayed.width,
-                  r.height * displayed.height,
-                ),
-            ];
-    });
-  }
-
-  void _onDragEnd(Offset local, Offset globalOrigin) {
-    final controller = _selectionFor(globalOrigin);
-    final anchor = _dragAnchor;
-    final wasDragging = _dragSelecting;
-    _dragAnchor = null;
-    if (wasDragging) {
-      setState(() => _dragSelecting = false);
-    }
-    if (!wasDragging) {
-      // A tap never sets _dragSelecting, so bailing out here made tap-to-select
-      // a no-op. A tap on a painted annotation opens its actions menu; a tap
-      // anywhere else selects the word under the pointer. The drag threshold
-      // only exists to tell the two gestures apart when a pan did start.
-      if (_emitAnnotationTap(local, _paintedSize, globalOrigin)) return;
-      final tapped = controller.selectionAtWord(local);
-      _applySelection(tapped);
-      return;
-    }
-    if (anchor == null) return;
-
-    final drag = (local - anchor).distance;
-    final selection = drag < 6
-        // A tap selects the word under it.
-        ? controller.selectionAtWord(local)
-        : controller.selectionBetween(anchor, local);
-    _applySelection(selection);
-  }
-
   /// Emits [RendererAnnotationSelected] when a tap lands on a painted
   /// annotation, mirroring the WebView renderer's clickable `<mark>`.
   ///
@@ -1528,27 +2090,6 @@ final class _CanvasPageState extends State<_CanvasPage> {
       return true;
     }
     return false;
-  }
-
-  /// Paints the highlight for [selection] and hands it to the host.
-  void _applySelection(RendererTextSelected? selection) {
-    final displayed = _paintedSize;
-    if (selection == null || selection.selectionRects.isEmpty) {
-      setState(() => _selectionHighlights = const []);
-      return;
-    }
-    setState(() {
-      _selectionHighlights = [
-        for (final r in selection.selectionRects)
-          Rect.fromLTWH(
-            r.x * displayed.width,
-            r.y * displayed.height,
-            r.width * displayed.width,
-            r.height * displayed.height,
-          ),
-      ];
-    });
-    widget.onSelection(selection);
   }
 }
 
@@ -1658,6 +2199,9 @@ final class _SelectablePage extends StatefulWidget {
     required this.onUpdate,
     required this.onEnd,
     required this.onTap,
+    required this.onLongPressStart,
+    required this.onLongPressMove,
+    required this.onLongPressEnd,
     super.key,
   });
 
@@ -1674,6 +2218,9 @@ final class _SelectablePage extends StatefulWidget {
   final void Function(Offset local) onUpdate;
   final void Function(Offset local, Offset globalOrigin) onEnd;
   final void Function(Offset globalPosition) onTap;
+  final void Function(LongPressStartDetails details) onLongPressStart;
+  final void Function(LongPressMoveUpdateDetails details) onLongPressMove;
+  final void Function(LongPressEndDetails details) onLongPressEnd;
 
   @override
   State<_SelectablePage> createState() => _SelectablePageState();
@@ -1705,10 +2252,10 @@ final class _SelectablePageState extends State<_SelectablePage> {
         return RawGestureDetector(
           behavior: HitTestBehavior.opaque,
           gestures: <Type, GestureRecognizerFactory>{
-            // Selection is a mouse gesture, like a desktop PDF viewer. Touch
-            // drags are rejected here so the page-level scale recognizer can
-            // pan a zoomed page and pinch to zoom; mobile word selection
-            // arrives with long-press handles in S3.
+            // Desktop drag-selection. Touch drags are rejected here so the
+            // page-level scale recognizer can pan a zoomed page and pinch to
+            // zoom; touch selection is the long-press path below, which only
+            // wins after the platform's hold timer so a swipe still scrolls.
             _MousePanGestureRecognizer:
                 GestureRecognizerFactoryWithHandlers<
                   _MousePanGestureRecognizer
@@ -1738,13 +2285,24 @@ final class _SelectablePageState extends State<_SelectablePage> {
                   (recognizer) {
                     recognizer.onTapUp = (details) {
                       widget.onTap(details.globalPosition);
-                      widget.onEnd(
-                        _toLocal(details.globalPosition),
-                        _globalOrigin,
-                      );
                     };
                   },
                 ),
+            // Long-press selects a word on touch; the subsequent drag before
+            // release extends it. `dragStartBehavior` is irrelevant here: the
+            // recognizer is armed at press-down and wins only after ~500 ms,
+            // so a quick swipe never reaches it.
+            LongPressGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  LongPressGestureRecognizer
+                >(() => LongPressGestureRecognizer(debugOwner: this), (
+                  recognizer,
+                ) {
+                  recognizer
+                    ..onLongPressStart = widget.onLongPressStart
+                    ..onLongPressMoveUpdate = widget.onLongPressMove
+                    ..onLongPressEnd = widget.onLongPressEnd;
+                }),
           },
           child: CustomPaint(
             key: _key,
@@ -1798,6 +2356,110 @@ final class _TouchScaleGestureRecognizer extends ScaleGestureRecognizer {
     if (event.kind == PointerDeviceKind.mouse) return false;
     return super.isPointerAllowed(event);
   }
+}
+
+/// A draggable touch handle at one end of the selection.
+///
+/// The visible knob is small so it does not cover text, but the gesture area
+/// is inflated to the 44 px touch minimum. Dragging a handle extends the
+/// selection from that end; the page reports pointer positions, and the view
+/// decides which caret they mean.
+final class _SelectionHandle extends StatelessWidget {
+  const _SelectionHandle({
+    required this.anchor,
+    required this.above,
+    required this.onDrag,
+    required this.onDragEnd,
+    super.key,
+  });
+
+  /// The point the handle points at, in the page's view coordinates.
+  final Offset anchor;
+
+  /// Whether the knob hangs above the anchor (start) or below it (end).
+  final bool above;
+
+  /// Called with the global pointer position while dragging.
+  final ValueChanged<Offset> onDrag;
+  final VoidCallback onDragEnd;
+
+  static const _touchSize = 44.0;
+  static const _knob = 12.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+    return Positioned(
+      left: anchor.dx - _touchSize / 2,
+      top: (above ? anchor.dy - _touchSize : anchor.dy) + _knob / 2,
+      width: _touchSize,
+      height: _touchSize,
+      child: RawGestureDetector(
+        behavior: HitTestBehavior.opaque,
+        gestures: <Type, GestureRecognizerFactory>{
+          _HandleDragRecognizer:
+              GestureRecognizerFactoryWithHandlers<_HandleDragRecognizer>(
+                () => _HandleDragRecognizer(debugOwner: this),
+                (recognizer) {
+                  recognizer.dragStartBehavior = DragStartBehavior.down;
+                  recognizer.onStart = (details) =>
+                      onDrag(details.globalPosition);
+                  recognizer.onUpdate = (details) =>
+                      onDrag(details.globalPosition);
+                  recognizer.onEnd = (_) => onDragEnd();
+                  recognizer.onCancel = onDragEnd;
+                },
+              ),
+        },
+        child: Center(
+          child: CustomPaint(
+            size: const Size(_knob, _knob),
+            painter: _HandlePainter(color: accent),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Claims a handle drag before the reading list does.
+///
+/// A plain pan recognizer loses the arena to the continuous list's vertical
+/// drag, so dragging a handle scrolled the page and never extended the
+/// selection. Accepting at pointer-down — the handle is the innermost
+/// recognizer, so it wins outright — makes a 44 px handle box behave like a
+/// native selection grip: it owns the pointer for the whole drag.
+final class _HandleDragRecognizer extends PanGestureRecognizer {
+  _HandleDragRecognizer({super.debugOwner});
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
+  }
+}
+
+final class _HandlePainter extends CustomPainter {
+  const _HandlePainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    canvas.drawCircle(center, size.shortestSide / 2, Paint()..color = color);
+    canvas.drawCircle(
+      center,
+      size.shortestSide / 2 - 2,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = const Color(0xFFFFFFFF),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_HandlePainter old) => old.color != color;
 }
 
 /// A stored annotation projected into view coordinates.
