@@ -97,21 +97,27 @@ final class PdfSelectionController {
     final b = toPagePoint(currentWidget);
     if (a == null || b == null) return null;
 
-    final rect = PdfRect(
-      math.min(a.x, b.x),
-      math.min(a.y, b.y),
-      math.max(a.x, b.x),
-      math.max(a.y, b.y),
-    );
-    final text = _text.textIn(rect).trim();
+    // Select from caret to caret rather than by rectangle containment.
+    // Rectangle selection needs a non-zero height (a horizontal drag along one
+    // line has none) and, worse, `textIn` + `indexOf` resolves repeated text
+    // to its first occurrence. Caret positions have neither problem and give
+    // the same multi-line range a browser selection would.
+    var start = _text.positionNear(a.x, a.y);
+    var end = _text.positionNear(b.x, b.y);
+    if (start < 0 || end < 0) return null;
+    if (start > end) {
+      final swap = start;
+      start = end;
+      end = swap;
+    }
+    if (end <= start) {
+      // A tap inside a character still means that character; fall back to the
+      // word under the pointer, matching `selectionAtWord`.
+      return selectionAtWord(anchorWidget);
+    }
+    final text = _text.text.substring(start, end).trim();
     if (text.isEmpty) return null;
-
-    // textIn returns the runs inside the rect; locate that substring so the
-    // highlight geometry lines up with what was selected.
-    final start = _text.text.indexOf(text);
-    if (start < 0) return null;
-
-    return _buildEvent(start, start + text.length, text);
+    return _buildEvent(start, end, text);
   }
 
   /// Word-sized selection at a tap, matching desktop reader behaviour.

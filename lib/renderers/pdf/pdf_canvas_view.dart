@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
@@ -395,6 +396,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   ? widget.ocrOverlayBlocks
                   : const [],
               onSelection: widget.onEvent,
+              onAnnotationSelected: widget.onEvent,
               onLayoutScaleChanged: index == _currentPage
                   ? (scale) {
                       _layoutScale = scale;
@@ -434,6 +436,7 @@ final class _CanvasPage extends StatefulWidget {
     required this.annotations,
     required this.ocrBlocks,
     required this.onSelection,
+    required this.onAnnotationSelected,
     this.onLayoutScaleChanged,
   });
 
@@ -446,6 +449,7 @@ final class _CanvasPage extends StatefulWidget {
   final List<Annotation> annotations;
   final List<Map<String, Object?>> ocrBlocks;
   final ValueChanged<RendererTextSelected> onSelection;
+  final ValueChanged<RendererAnnotationSelected> onAnnotationSelected;
 
   /// Reports the page's logical-pixels-per-point after layout, for
   /// `locator.zoom`. Only the current page passes a callback.
@@ -594,6 +598,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
         final height = rect.height > 0.055 ? 0.022 : rect.height;
         out.add(
           _AnnotationBox(
+            annotationId: annotation.id,
             rect: Rect.fromLTWH(
               rect.x * viewSize.width,
               rect.y * viewSize.height,
@@ -716,11 +721,23 @@ final class _CanvasPageState extends State<_CanvasPage> {
     BoxConstraints constraints,
     Offset globalOrigin,
   ) {
-    if (!_dragSelecting) return;
-    setState(() => _dragSelecting = false);
-
     final controller = _selectionFor(constraints, globalOrigin);
     final anchor = _dragAnchor;
+    final wasDragging = _dragSelecting;
+    _dragAnchor = null;
+    if (wasDragging) {
+      setState(() => _dragSelecting = false);
+    }
+    if (!wasDragging) {
+      // A tap never sets _dragSelecting, so bailing out here made tap-to-select
+      // a no-op. A tap on a painted annotation opens its actions menu; a tap
+      // anywhere else selects the word under the pointer. The drag threshold
+      // only exists to tell the two gestures apart when a pan did start.
+      if (_emitAnnotationTap(local, constraints, globalOrigin)) return;
+      final tapped = controller.selectionAtWord(local);
+      _applySelection(tapped, constraints);
+      return;
+    }
     if (anchor == null) return;
 
     final drag = (local - anchor).distance;
@@ -728,7 +745,46 @@ final class _CanvasPageState extends State<_CanvasPage> {
         // A tap selects the word under it.
         ? controller.selectionAtWord(local)
         : controller.selectionBetween(anchor, local);
+    _applySelection(selection, constraints);
+  }
 
+  /// Emits [RendererAnnotationSelected] when a tap lands on a painted
+  /// annotation, mirroring the WebView renderer's clickable `<mark>`.
+  ///
+  /// `sourceRect` is the annotation's band in global logical pixels — the
+  /// same units `RendererTextSelected.sourceRect` uses, because the host
+  /// places both menus with `_toOverlayLocalRect`.
+  bool _emitAnnotationTap(
+    Offset local,
+    BoxConstraints constraints,
+    Offset globalOrigin,
+  ) {
+    final displayed = _displayedSize(constraints, _pageSize);
+    // Topmost first: later boxes paint over earlier ones.
+    for (final box in _annotationBoxes(displayed).reversed) {
+      if (!box.rect.contains(local)) continue;
+      widget.onAnnotationSelected(
+        RendererAnnotationSelected(
+          box.annotationId,
+          sourceRect: ReaderRect(
+            page: widget.pageIndex + 1,
+            x: globalOrigin.dx + box.rect.left,
+            y: globalOrigin.dy + box.rect.top,
+            width: box.rect.width,
+            height: box.rect.height,
+          ),
+        ),
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /// Paints the highlight for [selection] and hands it to the host.
+  void _applySelection(
+    RendererTextSelected? selection,
+    BoxConstraints constraints,
+  ) {
     final displayed = _displayedSize(constraints, _pageSize);
     if (selection == null || selection.selectionRects.isEmpty) {
       setState(() => _selectionHighlights = const []);
@@ -943,6 +999,11 @@ final class _SelectablePageState extends State<_SelectablePage> {
         final size = Size(constraints.maxWidth, constraints.maxHeight);
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
+          // Browsers anchor a drag-selection at the pointer-down position.
+          // With the default `start`, the anchor is wherever the pointer was
+          // when the pan was recognised (past the slop), so the first word
+          // under the press is silently dropped.
+          dragStartBehavior: DragStartBehavior.down,
           onPanStart: (d) =>
               widget.onStart(_toLocal(d.globalPosition), constraints),
           onPanUpdate: (d) =>
@@ -980,11 +1041,13 @@ final class _SelectablePageState extends State<_SelectablePage> {
 /// A stored annotation projected into view coordinates.
 final class _AnnotationBox {
   const _AnnotationBox({
+    required this.annotationId,
     required this.rect,
     required this.color,
     required this.underline,
   });
 
+  final String annotationId;
   final Rect rect;
   final AnnotationColor color;
   final bool underline;

@@ -30,6 +30,7 @@ void main() {
     WidgetTester tester,
     String sample, {
     ReadingLocator? savedLocator,
+    int session = 0,
   }) async {
     final events = <RendererEvent>[];
     final book = bookFor(sample);
@@ -40,8 +41,9 @@ void main() {
             home: Scaffold(
               body: PdfCanvasView(
                 // A fresh key per sample: without it the previous test's state
-                // is reused and no new open happens.
-                key: ValueKey(sample),
+                // is reused and no new open happens. `session` does the same
+                // for a deliberate reopen of the same sample.
+                key: ValueKey('$sample#$session'),
                 book: book,
                 settings: const ReaderSettings(),
                 initialProgress: savedLocator == null
@@ -92,6 +94,43 @@ void main() {
     // And the PageView itself must actually be on page 3.
     final pager = find.text('第 3 / 3 页');
     expect(pager, findsOneWidget);
+  });
+
+  testWidgets('keeps page 40 of an 80-page book after reopening', (
+    tester,
+  ) async {
+    // The plan's S0 regression point: stop at page 40, reopen, exit without
+    // touching anything. Progress must still read page 40 — otherwise the
+    // first location tick overwrites it with page 1.
+    final saved = ReadingLocator.pdf(page: 40, progress: 39 / 79);
+    final first = await pumpReader(
+      tester,
+      'large-text.pdf',
+      savedLocator: saved,
+    );
+    expect(first.events.whereType<RendererReady>(), isNotEmpty);
+    expect(find.text('第 40 / 80 页'), findsOneWidget);
+    expect(
+      first.events.whereType<RendererLocationChanged>().last.pageNumber,
+      40,
+    );
+
+    // Reopen from exactly what the first session reported.
+    final reopened = await pumpReader(
+      tester,
+      'large-text.pdf',
+      savedLocator: first.events
+          .whereType<RendererLocationChanged>()
+          .last
+          .locator,
+      session: 1,
+    );
+    expect(reopened.events.whereType<RendererReady>(), isNotEmpty);
+    expect(find.text('第 40 / 80 页'), findsOneWidget);
+    expect(
+      reopened.events.whereType<RendererLocationChanged>().last.pageNumber,
+      40,
+    );
   });
 
   testWidgets('reports no text layer for a scanned PDF', (tester) async {
