@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/app/theme/app_theme.dart';
 import 'package:pagesage/core/database/app_database.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/domain/books/book.dart';
@@ -94,6 +95,11 @@ final class ReaderHarness {
         child: ProviderScope(
           overrides: [appDatabaseProvider.overrideWithValue(database)],
           child: MaterialApp(
+            // Use the production theme: without it the harness renders in
+            // Flutter's default purple scheme, so captures would not show
+            // what the app actually looks like.
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
             home: ReaderPage(bookId: bookId, initialLocator: initialLocator),
           ),
         ),

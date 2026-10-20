@@ -1,7 +1,7 @@
 # PageSage 设计系统
 
-版本：0.2  
-日期：2026-07-16  
+版本：0.3  
+日期：2026-10-20  
 状态：与 `lib/app/theme/app_tokens.dart` 对齐的冻结稿  
 
 ## 1. 设计语言
@@ -17,7 +17,7 @@ PageSage 的设计语言是：安静、清晰、专业、耐用。界面应像�
 - 桌面高效。
 - 移动沉浸。
 - AI 克制。
-- 冷黑 + 电蓝品牌色（2026-07 定稿）。
+- 中性灰阶 + 电蓝点缀（2026-10 修订）：壳层保持中性，电蓝只用于选中、主按钮和链接。
 
 ## 2. Token 命名
 
@@ -37,19 +37,22 @@ Token 层级：
 
 | Token | 亮色 | 暗色 | 用途 |
 | --- | --- | --- | --- |
-| `background` | `#F3F6FC` | `#05070D` | 页面底色 |
-| `surface` | `#FFFFFF` | `#0C111B` | 面板、菜单、主容器 |
-| `surfaceSubtle` | `#E8EEF9` | `#151C2C` | 次级背景 |
-| `border` | `#D0DBEF` | `#273247` | 分割线 |
-| `borderStrong` | `#A9BBDA` | `#3F4F6C` | 强边界 |
-| `textPrimary` | `#0B1220` | `#EAF0FF` | 主文字 |
-| `textSecondary` | `#475569` | `#A5B4CF` | 次级文字 |
-| `accent` / `seed` | `#1E40AF` | `#93C5FD` | 主要动作 |
-| `accentSubtle` | `#E8F0FF` | `#102A56` | 选中背景 |
-| `info` | `#1E40AF` | `#93C5FD` | 信息 |
-| `warning` | `#9A6700` | `#E7BC62` | 警告 |
-| `danger` | `#B33A3A` | `#F09090` | 删除、失败 |
-| `ai` | `#6D5AE6` | `#B8AEFF` | AI 标识，低频使用 |
+| `background` | `#F7F8FA` | `#111316` | 页面底色 |
+| `surface` | `#FFFFFF` | `#1A1D21` | 面板、菜单、主容器 |
+| `surfaceSubtle` | `#F0F2F5` | `#24282D` | 次级背景 |
+| `border` | `#DDE1E6` | `#33383F` | 分割线 |
+| `borderStrong` | `#BFC6CF` | `#4A515B` | 强边界 |
+| `textPrimary` | `#1A1D21` | `#E9EBEE` | 主文字 |
+| `textSecondary` | `#5B6470` | `#A2AAB4` | 次级文字 |
+| `textMuted` | `#8A939E` | `#7B838D` | 弱文字 |
+| `accent` / `seed` | `#1E40AF` | `#8FB4FF` | 主要动作 |
+| `accentSubtle` | `#E8EEFB` | `#1E2A44` | 选中背景 |
+| `info` | `#1E40AF` | `#8FB4FF` | 信息 |
+| `warning` | `#8A6100` | `#E6B95C` | 警告 |
+| `danger` | `#B03030` | `#F09191` | 删除、失败 |
+| `ai` | `#6152D0` | `#B3A9FF` | AI 标识，低频使用 |
+
+实现约束：`ColorScheme` 在 `AppTheme._scheme` 中逐项显式构造，**不要换回 `ColorScheme.fromSeed`**。种子派生会把 surface 系列染上蓝紫灰，在大面积壳层上显脏，而品牌色只需要出现在选中、主按钮和链接。
 
 规则：
 

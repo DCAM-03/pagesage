@@ -5,21 +5,18 @@ import 'app_tokens.dart';
 final class AppTheme {
   static ThemeData light() {
     return _build(
-      ColorScheme.fromSeed(
-        seedColor: AppColors.seed,
+      _scheme(
         brightness: Brightness.light,
-      ).copyWith(
         primary: AppColors.seed,
         onPrimary: Colors.white,
+        background: AppColors.lightBackground,
         surface: AppColors.lightSurface,
-        surfaceContainerLowest: AppColors.lightBackground,
-        surfaceContainerHighest: AppColors.lightSurfaceSubtle,
-        outline: AppColors.lightBorderStrong,
-        outlineVariant: AppColors.lightBorder,
-        onSurface: AppColors.lightTextPrimary,
-        onSurfaceVariant: AppColors.lightTextSecondary,
-        secondaryContainer: AppColors.lightAccentSubtle,
-        onSecondaryContainer: AppColors.seed,
+        surfaceSubtle: AppColors.lightSurfaceSubtle,
+        border: AppColors.lightBorder,
+        borderStrong: AppColors.lightBorderStrong,
+        textPrimary: AppColors.lightTextPrimary,
+        textSecondary: AppColors.lightTextSecondary,
+        accentSubtle: AppColors.lightAccentSubtle,
         error: AppColors.danger,
       ),
     );
@@ -27,21 +24,18 @@ final class AppTheme {
 
   static ThemeData dark() {
     return _build(
-      ColorScheme.fromSeed(
-        seedColor: AppColors.seedDark,
+      _scheme(
         brightness: Brightness.dark,
-      ).copyWith(
         primary: AppColors.seedDark,
-        onPrimary: const Color(0xFF0A0C10),
+        onPrimary: const Color(0xFF0B1220),
+        background: AppColors.darkBackground,
         surface: AppColors.darkSurface,
-        surfaceContainerLowest: AppColors.darkBackground,
-        surfaceContainerHighest: AppColors.darkSurfaceSubtle,
-        outline: AppColors.darkBorderStrong,
-        outlineVariant: AppColors.darkBorder,
-        onSurface: AppColors.darkTextPrimary,
-        onSurfaceVariant: AppColors.darkTextSecondary,
-        secondaryContainer: AppColors.darkAccentSubtle,
-        onSecondaryContainer: AppColors.seedDark,
+        surfaceSubtle: AppColors.darkSurfaceSubtle,
+        border: AppColors.darkBorder,
+        borderStrong: AppColors.darkBorderStrong,
+        textPrimary: AppColors.darkTextPrimary,
+        textSecondary: AppColors.darkTextSecondary,
+        accentSubtle: AppColors.darkAccentSubtle,
         error: AppColors.dangerDark,
       ),
     );
@@ -49,21 +43,18 @@ final class AppTheme {
 
   static ThemeData eyeCare() {
     return _build(
-      ColorScheme.fromSeed(
-        seedColor: AppColors.seed,
+      _scheme(
         brightness: Brightness.light,
-      ).copyWith(
         primary: AppColors.seed,
         onPrimary: Colors.white,
+        background: AppColors.eyeCareBackground,
         surface: AppColors.eyeCareSurface,
-        surfaceContainerLowest: AppColors.eyeCareBackground,
-        surfaceContainerHighest: AppColors.eyeCareSurfaceSubtle,
-        outline: AppColors.eyeCareBorderStrong,
-        outlineVariant: AppColors.eyeCareBorder,
-        onSurface: AppColors.eyeCareTextPrimary,
-        onSurfaceVariant: AppColors.eyeCareTextSecondary,
-        secondaryContainer: AppColors.eyeCareAccentSubtle,
-        onSecondaryContainer: AppColors.seed,
+        surfaceSubtle: AppColors.eyeCareSurfaceSubtle,
+        border: AppColors.eyeCareBorder,
+        borderStrong: AppColors.eyeCareBorderStrong,
+        textPrimary: AppColors.eyeCareTextPrimary,
+        textSecondary: AppColors.eyeCareTextSecondary,
+        accentSubtle: AppColors.eyeCareAccentSubtle,
         error: AppColors.danger,
       ),
     );
@@ -71,22 +62,87 @@ final class AppTheme {
 
   static ThemeData highContrast() {
     return _build(
-      ColorScheme.fromSeed(
-        seedColor: AppColors.highContrastAccent,
+      _scheme(
         brightness: Brightness.light,
-      ).copyWith(
         primary: AppColors.highContrastAccent,
+        onPrimary: Colors.white,
+        background: AppColors.highContrastBackground,
         surface: AppColors.highContrastSurface,
-        surfaceContainerLowest: AppColors.highContrastBackground,
-        surfaceContainerHighest: AppColors.highContrastSurfaceSubtle,
-        outline: AppColors.highContrastBorderStrong,
-        outlineVariant: AppColors.highContrastBorder,
-        onSurface: AppColors.highContrastTextPrimary,
-        onSurfaceVariant: AppColors.highContrastTextSecondary,
-        secondaryContainer: AppColors.highContrastAccentSubtle,
+        surfaceSubtle: AppColors.highContrastSurfaceSubtle,
+        border: AppColors.highContrastBorder,
+        borderStrong: AppColors.highContrastBorderStrong,
+        textPrimary: AppColors.highContrastTextPrimary,
+        textSecondary: AppColors.highContrastTextSecondary,
+        accentSubtle: AppColors.highContrastAccentSubtle,
         error: AppColors.danger,
       ),
       highContrast: true,
+    );
+  }
+
+  /// Explicit Material 3 scheme.
+  ///
+  /// Every role the app paints is named here instead of being derived by
+  /// [ColorScheme.fromSeed]: the seed-derived tones carry a blue-violet cast
+  /// that reads as dirty next to the neutral surfaces.
+  static ColorScheme _scheme({
+    required Brightness brightness,
+    required Color primary,
+    required Color onPrimary,
+    required Color background,
+    required Color surface,
+    required Color surfaceSubtle,
+    required Color border,
+    required Color borderStrong,
+    required Color textPrimary,
+    required Color textSecondary,
+    required Color accentSubtle,
+    required Color error,
+  }) {
+    return ColorScheme(
+      brightness: brightness,
+      primary: primary,
+      onPrimary: onPrimary,
+      primaryContainer: accentSubtle,
+      onPrimaryContainer: primary,
+      secondary: primary,
+      onSecondary: onPrimary,
+      secondaryContainer: accentSubtle,
+      onSecondaryContainer: primary,
+      tertiary: AppColors.ai,
+      onTertiary: Colors.white,
+      tertiaryContainer: accentSubtle,
+      onTertiaryContainer: primary,
+      error: error,
+      onError: Colors.white,
+      errorContainer: brightness == Brightness.dark
+          ? const Color(0xFF3A1E1E)
+          : const Color(0xFFFDE7E7),
+      onErrorContainer: error,
+      surface: surface,
+      onSurface: textPrimary,
+      onSurfaceVariant: textSecondary,
+      surfaceDim: background,
+      surfaceBright: surface,
+      surfaceContainerLowest: background,
+      surfaceContainerLow: surface,
+      surfaceContainer: surface,
+      surfaceContainerHigh: surfaceSubtle,
+      surfaceContainerHighest: surfaceSubtle,
+      outline: borderStrong,
+      outlineVariant: border,
+      shadow: Colors.black,
+      scrim: Colors.black,
+      inverseSurface: brightness == Brightness.dark
+          ? AppColors.darkInverseSurface
+          : AppColors.lightInverseSurface,
+      onInverseSurface: brightness == Brightness.dark
+          ? AppColors.lightTextPrimary
+          : AppColors.darkTextPrimary,
+      inversePrimary: brightness == Brightness.dark
+          ? AppColors.seed
+          : AppColors.seedDark,
+      surfaceTint: Colors.transparent,
     );
   }
 
@@ -297,12 +353,8 @@ final class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         elevation: 2,
-        backgroundColor: isDark
-            ? AppColors.darkSurfaceSubtle
-            : AppColors.lightTextPrimary,
-        contentTextStyle: TextStyle(
-          color: isDark ? AppColors.darkTextPrimary : AppColors.lightSurface,
-        ),
+        backgroundColor: colorScheme.inverseSurface,
+        contentTextStyle: TextStyle(color: colorScheme.onInverseSurface),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.lg),
         ),
@@ -319,10 +371,10 @@ final class AppTheme {
       tooltipTheme: TooltipThemeData(
         waitDuration: const Duration(milliseconds: 400),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A2F2C) : const Color(0xFF2A2E2B),
+          color: colorScheme.inverseSurface,
           borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
-        textStyle: const TextStyle(color: Colors.white, fontSize: 12),
+        textStyle: TextStyle(color: colorScheme.onInverseSurface, fontSize: 12),
       ),
       focusColor: colorScheme.primary.withValues(alpha: 0.14),
       hoverColor: colorScheme.primary.withValues(
