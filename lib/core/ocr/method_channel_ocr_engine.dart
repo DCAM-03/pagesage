@@ -5,9 +5,8 @@ import '../../domain/ocr/ocr_models.dart';
 import '../../domain/ocr/pdf_page_rasterizer.dart';
 
 final class MethodChannelOcrEngine implements OcrEngine {
-  MethodChannelOcrEngine({MethodChannel? channel, String id = 'platform'})
-    : _channel = channel ?? const MethodChannel('pagesage/ocr'),
-      _id = id;
+  MethodChannelOcrEngine({MethodChannel? channel, this._id = 'platform'})
+    : _channel = channel ?? const MethodChannel('pagesage/ocr');
 
   final MethodChannel _channel;
   final String _id;

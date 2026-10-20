@@ -48,6 +48,12 @@ Future<void> main(List<String> args) async {
       final formatValue = row['format'] as String? ?? '';
       final libraryPath = row['library_file_path'] as String? ?? '';
       final format = BookFormat.fromValue(formatValue);
+      if (format == null) {
+        stdout.writeln('→ $title ($formatValue)');
+        stdout.writeln('  跳过：未知格式 $formatValue');
+        skip += 1;
+        continue;
+      }
       final file = File(libraryPath);
 
       stdout.writeln('→ $title ($formatValue)');
@@ -84,7 +90,7 @@ Future<void> main(List<String> args) async {
 
     stdout.writeln('\n完成：成功 $ok，未找到/失败 $fail，跳过 $skip');
   } finally {
-    db.dispose();
+    db.close();
   }
 }
 

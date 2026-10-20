@@ -10,14 +10,11 @@ import 'ocr_session_cache.dart';
 
 final class OcrCurrentPageUseCase {
   OcrCurrentPageUseCase({
-    required PdfPageRasterizer rasterizer,
-    required OcrEngine engine,
-    required OcrSessionCache cache,
-    OcrPageStore? store,
-  }) : _rasterizer = rasterizer,
-       _engine = engine,
-       _cache = cache,
-       _store = store;
+    required this._rasterizer,
+    required this._engine,
+    required this._cache,
+    this._store,
+  });
 
   final PdfPageRasterizer _rasterizer;
   final OcrEngine _engine;

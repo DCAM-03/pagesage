@@ -36,6 +36,9 @@ dev_dependencies:
   drift_dev: ^2.34.0
   build_runner: ^2.15.0
   path_provider_platform_interface: ^2.1.3
+  # tool/refresh_covers.dart opens the library database directly. Declaring it
+  # here (dev only) keeps the tool out of the app's dependency graph.
+  sqlite3: ^3.5.2
 
 flutter:
   uses-material-design: true

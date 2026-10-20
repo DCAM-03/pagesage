@@ -61,13 +61,24 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
   @override
   Future<List<PickedPlatformFile>> pickFiles(FilePickerRequest request) async {
     // file_picker 12 returns the list directly instead of a FilePickerResult.
-    final files = await FilePicker.pickFiles(
-      allowMultiple: request.allowMultiple,
-      type: FileType.custom,
-      allowedExtensions: request.allowedExtensions,
-      dialogTitle: request.dialogTitle,
-      lockParentWindow: true,
-    );
+    // pickFiles always allows multiple; single-file callers use pickFile.
+    final files = request.allowMultiple
+        ? await FilePicker.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: request.allowedExtensions,
+            dialogTitle: request.dialogTitle,
+            windowsOptions: const WindowsOptions(lockParentWindow: true),
+            linuxOptions: const LinuxOptions(lockParentWindow: true),
+          )
+        : [
+            ?await FilePicker.pickFile(
+              type: FileType.custom,
+              allowedExtensions: request.allowedExtensions,
+              dialogTitle: request.dialogTitle,
+              windowsOptions: const WindowsOptions(lockParentWindow: true),
+              linuxOptions: const LinuxOptions(lockParentWindow: true),
+            ),
+          ];
 
     return files
         .where((file) => file.path != null)
@@ -85,7 +96,8 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
       bytes: Uint8List.fromList(request.bytes),
       type: FileType.custom,
       allowedExtensions: request.allowedExtensions,
-      lockParentWindow: true,
+      windowsOptions: const WindowsOptions(lockParentWindow: true),
+      linuxOptions: const LinuxOptions(lockParentWindow: true),
     );
     if (uri == null) return null;
 
@@ -100,7 +112,8 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
   Future<String?> pickDirectory({required String dialogTitle}) {
     return FilePicker.getDirectoryPath(
       dialogTitle: dialogTitle,
-      lockParentWindow: true,
+      windowsOptions: const WindowsOptions(lockParentWindow: true),
+      linuxOptions: const LinuxOptions(lockParentWindow: true),
     );
   }
 }

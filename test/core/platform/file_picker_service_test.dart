@@ -74,11 +74,10 @@ void main() {
 }
 
 final class _FakeFilePickerAdapter implements FilePickerAdapter {
-  _FakeFilePickerAdapter(this.files, {this.savePath, this.directoryPath});
+  _FakeFilePickerAdapter(this.files, {this.savePath});
 
   final List<PickedPlatformFile> files;
   final String? savePath;
-  final String? directoryPath;
   final List<FilePickerRequest> requests = [];
   final List<FileSaveRequest> saveRequests = [];
 
@@ -95,6 +94,5 @@ final class _FakeFilePickerAdapter implements FilePickerAdapter {
   }
 
   @override
-  Future<String?> pickDirectory({required String dialogTitle}) async =>
-      directoryPath;
+  Future<String?> pickDirectory({required String dialogTitle}) async => null;
 }
