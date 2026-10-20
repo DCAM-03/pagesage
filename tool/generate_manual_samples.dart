@@ -189,6 +189,11 @@ Future<List<GeneratedSample>> generateManualSamples({
       ),
     ),
     GeneratedSample(
+      fileName: 'outline-link.pdf',
+      description: '目录与链接 PDF：3 页，/Outlines 两层，含页内跳转与外部 URI。',
+      write: (file) => file.writeAsBytes(buildOutlineLinkPdf(), flush: true),
+    ),
+    GeneratedSample(
       fileName: 'image-only.pdf',
       description: '无文本层 PDF：只有矢量图形，用于搜索/划词禁用状态。',
       write: (file) => file.writeAsBytes(buildImageOnlyPdf(), flush: true),
@@ -357,6 +362,102 @@ ET''';
       _objectBody(contentObjects[i]),
     ],
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]);
+}
+
+/// A three-page PDF with a two-level outline and link annotations.
+///
+/// Built by hand like the other samples: the point is the `/Outlines` tree and
+/// two kinds of `/Link`, so the renderer's outline flattening and link tap can
+/// be tested against a real document rather than a stub. Page 1's link jumps
+/// to page 3, and page 2 carries an external URI plus a hidden link that must
+/// be ignored.
+Uint8List buildOutlineLinkPdf() {
+  const pages = [
+    'Outline link sample page one.',
+    'Outline link sample page two.',
+    'Outline link sample page three.',
+  ];
+  const pageCount = 3;
+  final pageObjects = <String>[];
+  final contentObjects = <String>[];
+
+  // Object layout: 1 catalog, 2 page tree, then two objects per page, then the
+  // two page-2 link objects (one of them hidden), the font, the outline
+  // dictionary and its three items.
+  const annotOne = 3 + pageCount * 2;
+  const annotTwo = annotOne + 1;
+  const annotHidden = annotTwo + 1;
+  final fontObject = annotHidden + 1;
+  // The outline root is the object *after* the font; its /First is the next.
+  final outlineRoot = fontObject + 1;
+  final firstItem = outlineRoot + 1;
+
+  for (var i = 0; i < pageCount; i += 1) {
+    final pageObject = 3 + i * 2;
+    final contentObject = pageObject + 1;
+    final annotations = switch (i) {
+      0 => ' /Annots [$annotOne 0 R]',
+      1 => ' /Annots [$annotTwo 0 R $annotHidden 0 R]',
+      _ => '',
+    };
+    final operations =
+        '''
+BT
+/F1 13 Tf
+72 730 Td
+(${_escapePdfText(pages[i])}) Tj
+0 -28 Td
+(PageSage outline and link sample.) Tj
+ET''';
+    pageObjects.add(
+      '$pageObject 0 obj\n'
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]$annotations '
+      '/Contents $contentObject 0 R '
+      '/Resources << /Font << /F1 $fontObject 0 R >> >> >>\n'
+      'endobj\n',
+    );
+    contentObjects.add(
+      '$contentObject 0 obj\n'
+      '<< /Length ${ascii.encode(operations).length} >>\n'
+      'stream\n$operations\nendstream\n'
+      'endobj\n',
+    );
+  }
+
+  // Outline items: top level "Chapter One" -> page 1, "Chapter Two" -> page 2
+  // with one child. /Top puts the destination near the heading at y = 730.
+  final itemOne = firstItem;
+  final itemTwo = firstItem + 1;
+  final itemThree = firstItem + 2;
+  final kids = [
+    for (var i = 0; i < pageCount; i += 1) '${3 + i * 2} 0 R',
+  ].join(' ');
+
+  return _writePdfObjects([
+    '<< /Type /Catalog /Pages 2 0 R /Outlines $outlineRoot 0 R >>',
+    '<< /Type /Pages /Kids [$kids] /Count $pageCount >>',
+    for (var i = 0; i < pageCount; i += 1) ...[
+      _objectBody(pageObjects[i]),
+      _objectBody(contentObjects[i]),
+    ],
+    // Page 1: a link that jumps to page 3.
+    '<< /Type /Annot /Subtype /Link /Rect [70 725 260 750] '
+        '/Border [0 0 0] /A << /S /GoTo /D [${3 + 2 * 2} 0 R /XYZ 72 730 0] >> >>',
+    // Page 2: an external URI, plus one hidden link that a reader must ignore.
+    '<< /Type /Annot /Subtype /Link /Rect [70 725 260 750] '
+        '/Border [0 0 0] /A << /S /URI /URI (https://example.com/pagesage) >> >>',
+    '<< /Type /Annot /Subtype /Link /Rect [70 600 260 625] /F 2 '
+        '/Border [0 0 0] /A << /S /URI /URI (https://example.com/hidden) >> >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Outlines /First $itemOne 0 R /Last $itemTwo 0 R /Count 3 >>',
+    '<< /Title (Chapter One) /Parent $outlineRoot 0 R '
+        '/Next $itemTwo 0 R /Dest [3 0 R /XYZ 72 730 0] >>',
+    '<< /Title (Chapter Two) /Parent $outlineRoot 0 R '
+        '/Prev $itemOne 0 R /First $itemThree 0 R /Last $itemThree 0 R '
+        '/Count 1 /Dest [5 0 R /XYZ 72 730 0] >>',
+    '<< /Title (Section 2.1) /Parent $itemTwo 0 R '
+        '/Dest [5 0 R /XYZ 72 500 0] >>',
   ]);
 }
 

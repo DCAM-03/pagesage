@@ -26,6 +26,11 @@ dependencies:
   pdf_document: ^5.1.1
   pdf_graphics: ^5.1.1
   sqlite3_flutter_libs: ^0.6.0+eol
+  # Opening a PDF's /URI links in the user's browser. It was already in the
+  # tree as a transitive dependency of dart_pdf_editor, so the platform
+  # plugins (android/linux/web/windows) are registered either way; declaring it
+  # here makes the direct import legal and pins the version we call.
+  url_launcher: ^6.3.2
   uuid: ^4.5.3
   xml: ^6.6.1
 

@@ -57,6 +57,7 @@ final class ReaderSessionController {
       case RendererTextSelected():
       case RendererSearchResults():
       case RendererOutlineChanged():
+      case RendererExternalLinkRequested():
       case RendererBookmarkRequested():
       case RendererCapabilityChanged():
       case RendererNotice():

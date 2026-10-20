@@ -27,6 +27,29 @@ Future<void> nextSpread(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// A painted page box for [sample], found by its aspect ratio.
+///
+/// Matches the page's `CustomPaint` rather than a widget type: the page is
+/// painted by a painter whose non-null painter and aspect ratio identify it
+/// among the reader's chrome.
+Rect pageBox(WidgetTester tester, {double aspect = 612 / 792}) {
+  Rect? best;
+  for (final element in find.byType(CustomPaint).evaluate()) {
+    final widget = element.widget as CustomPaint;
+    if (widget.painter == null) continue;
+    final box = element.renderObject;
+    if (box is! RenderBox || !box.hasSize) continue;
+    if (box.size.width < 100 || box.size.height < 100) continue;
+    final ratio = box.size.width / box.size.height;
+    if ((ratio - aspect).abs() > 0.01) continue;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    if (best == null || rect.width * rect.height > best.width * best.height) {
+      best = rect;
+    }
+  }
+  return best!;
+}
+
 void main() {
   Book bookFor(String sample) => Book(
     id: 'test',
@@ -51,6 +74,7 @@ void main() {
     Size? viewport,
     PdfZoomChanged? onZoomChanged,
     int clearSelectionVersion = 0,
+    String? searchQuery,
   }) async {
     final events = <RendererEvent>[];
     // The host clears the paint by bumping this; exposed so tests can do the
@@ -88,6 +112,7 @@ void main() {
                   onEvent: events.add,
                   onZoomChanged: onZoomChanged,
                   clearSelectionVersion: clearVersion,
+                  searchQuery: searchQuery,
                 ),
               ),
             ),
@@ -534,26 +559,6 @@ void main() {
   });
 
   group('S3 selection', () {
-    /// A painted page box for [sample], found by its aspect ratio.
-    Rect pageBox(WidgetTester tester, {double aspect = 612 / 792}) {
-      Rect? best;
-      for (final element in find.byType(CustomPaint).evaluate()) {
-        final widget = element.widget as CustomPaint;
-        if (widget.painter == null) continue;
-        final box = element.renderObject;
-        if (box is! RenderBox || !box.hasSize) continue;
-        if (box.size.width < 100 || box.size.height < 100) continue;
-        final ratio = box.size.width / box.size.height;
-        if ((ratio - aspect).abs() > 0.01) continue;
-        final rect = box.localToGlobal(Offset.zero) & box.size;
-        if (best == null ||
-            rect.width * rect.height > best.width * best.height) {
-          best = rect;
-        }
-      }
-      return best!;
-    }
-
     /// Drags with a mouse pointer from [from] by [delta], in steps.
     Future<void> dragBy(
       WidgetTester tester,
@@ -882,6 +887,177 @@ void main() {
       expect(location.pageNumber, 2);
       // A paged layout has no sub-page position to restore.
       expect(location.locator.scrollOffset, 0);
+    });
+  });
+
+  group('S4 outline, search and links', () {
+    testWidgets('reports the document outline after opening', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'outline-link.pdf',
+        viewport: const Size(1000, 900),
+      );
+
+      final outline = result.events
+          .whereType<RendererOutlineChanged>()
+          .last
+          .items;
+      expect(outline.map((i) => i.title), [
+        'Chapter One',
+        'Chapter Two',
+        'Section 2.1',
+      ]);
+      expect(outline.map((i) => i.page), [1, 2, 2]);
+      expect(outline.last.level, 1);
+      // The destination names a y position, so the TOC can land on the
+      // heading rather than the top of the page.
+      expect(outline.first.offsetFraction, isNotNull);
+    });
+
+    testWidgets('a PDF without an outline reports an empty list', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+      );
+
+      final outline = result.events
+          .whereType<RendererOutlineChanged>()
+          .last
+          .items;
+      // Empty — not absent: the host has to clear a previous book's outline,
+      // and then falls back to its page-number list.
+      expect(outline, isEmpty);
+    });
+
+    testWidgets('search reports every hit in the document', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        searchQuery: 'PageSage',
+      );
+
+      final results = result.events
+          .whereType<RendererSearchResults>()
+          .last
+          .results;
+      // Every page starts with "PageSage PDF sample page N"; the phrase also
+      // appears in the second line, so each page contributes two hits.
+      expect(results.map((r) => r.locator.page).toSet(), {1, 2, 3});
+      expect(results, hasLength(6));
+      expect(results.first.snippet, contains('PageSage'));
+      // The locator names the scale the result was found at, so reopening the
+      // hit does not need to guess a zoom.
+      expect(results.first.locator.zoom, isNotNull);
+    });
+
+    testWidgets('dropping the query clears the painted hits', (tester) async {
+      // The host clears highlights by dropping the query on the same view;
+      // the renderer must answer with an empty list, or the page stays tinted
+      // after the search panel closes.
+      final events = <RendererEvent>[];
+      final query = ValueNotifier<String?>('PageSage');
+      addTearDown(query.dispose);
+      tester.view.physicalSize =
+          const Size(1000, 900) * tester.view.devicePixelRatio;
+      addTearDown(tester.view.reset);
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: Scaffold(
+                body: ValueListenableBuilder<String?>(
+                  valueListenable: query,
+                  builder: (context, value, _) => PdfCanvasView(
+                    book: bookFor('standard-text.pdf'),
+                    settings: const ReaderSettings(),
+                    initialProgress: null,
+                    annotations: const [],
+                    onEvent: events.add,
+                    searchQuery: value,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        for (var i = 0; i < 30; i++) {
+          await tester.pump(const Duration(milliseconds: 25));
+          await Future<void>.delayed(const Duration(milliseconds: 25));
+        }
+        expect(
+          events.whereType<RendererSearchResults>().last.results,
+          isNotEmpty,
+        );
+
+        query.value = null;
+        for (var i = 0; i < 20; i++) {
+          await tester.pump(const Duration(milliseconds: 25));
+          await Future<void>.delayed(const Duration(milliseconds: 25));
+        }
+      });
+
+      expect(events.whereType<RendererSearchResults>().last.results, isEmpty);
+    });
+
+    testWidgets('tapping a GoTo link jumps to its page', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'outline-link.pdf',
+        viewport: const Size(1000, 900),
+        savedLocator: ReadingLocator.pdf(page: 1, progress: 0),
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      // The link covers x 70..260, y 725..750 in page space.
+      await tester.runAsync(() async {
+        await tester.tapAt(
+          Offset(rect.left + 150 * scale, rect.top + (792 - 737) * scale),
+        );
+        for (var i = 0; i < 16; i++) {
+          await tester.pump(const Duration(milliseconds: 60));
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+
+      final locations = result.events
+          .whereType<RendererLocationChanged>()
+          .toList();
+      expect(locations.last.pageNumber, 3);
+    });
+
+    testWidgets('tapping a URI link asks the host instead of opening it', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'outline-link.pdf',
+        viewport: const Size(1000, 900),
+        savedLocator: ReadingLocator.pdf(page: 2, progress: 0.5),
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      await tester.runAsync(() async {
+        await tester.tapAt(
+          Offset(rect.left + 150 * scale, rect.top + (792 - 737) * scale),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+
+      final links = result.events.whereType<RendererExternalLinkRequested>();
+      expect(links, isNotEmpty);
+      expect(links.last.uri, 'https://example.com/pagesage');
+      // The renderer itself must not navigate away from the book.
+      expect(
+        result.events.whereType<RendererLocationChanged>().last.pageNumber,
+        2,
+      );
     });
   });
 }

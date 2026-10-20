@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/responsive/app_breakpoints.dart';
 import '../../../app/theme/app_tokens.dart';
@@ -1207,6 +1208,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         }
       case RendererAnnotationSelected(:final annotationId, :final sourceRect):
         _showAnnotationActionsById(annotationId, sourceRect: sourceRect);
+      case RendererExternalLinkRequested(:final uri):
+        unawaited(_confirmOpenExternalLink(uri));
       case RendererFailed(:final message):
         _statusClearTimer?.cancel();
         setState(() {
@@ -1222,6 +1225,45 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       _rendererVersion += 1;
     });
     _setTransientStatus('正在重新打开', clearAfter: const Duration(seconds: 4));
+  }
+
+  /// Asks before leaving PageSage for the user's browser.
+  ///
+  /// The link comes from the document, not from the user, so the address is
+  /// shown in full and nothing opens until it is confirmed. `externalApplication`
+  /// keeps the launch out of any in-app web surface, which also means the page
+  /// cannot see the reader.
+  Future<void> _confirmOpenExternalLink(String uri) async {
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('打开外部链接'),
+        content: SelectableText(
+          uri,
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('打开'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final launched = await launchUrl(
+      Uri.parse(uri),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!mounted || launched) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('无法打开链接，请检查系统浏览器设置')));
   }
 
   Future<void> _showRenderErrorDetails(
@@ -5998,6 +6040,9 @@ final class _PdfTocSheet extends StatelessWidget {
               ReadingLocator.pdf(
                 page: item.page,
                 progress: _pageProgress(item.page),
+                // A destination that names a position lands on the heading
+                // instead of the page's top edge.
+                pageOffsetFraction: item.offsetFraction,
               ),
             ),
           );
@@ -6498,6 +6543,7 @@ final class _DesktopTocPaneState extends State<_DesktopTocPane> {
                   ReadingLocator.pdf(
                     page: item.page,
                     progress: _pdfPageProgress(item.page, totalPages),
+                    pageOffsetFraction: item.offsetFraction,
                   ),
                 );
               },

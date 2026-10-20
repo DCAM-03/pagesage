@@ -30,6 +30,7 @@ final class ReadingLocator {
     this.chapterEndOffset,
     this.page,
     this.scrollOffset,
+    this.pageOffsetFraction,
     this.zoom,
     this.progress = 0,
     this.excerpt,
@@ -62,6 +63,7 @@ final class ReadingLocator {
   factory ReadingLocator.pdf({
     int page = 1,
     double scrollOffset = 0,
+    double? pageOffsetFraction,
     double zoom = 1,
     double progress = 0,
     String? excerpt,
@@ -71,6 +73,7 @@ final class ReadingLocator {
       type: ReadingLocatorType.pdf,
       page: page,
       scrollOffset: scrollOffset,
+      pageOffsetFraction: pageOffsetFraction,
       zoom: zoom,
       progress: progress,
       excerpt: excerpt,
@@ -85,6 +88,7 @@ final class ReadingLocator {
       return ReadingLocator.pdf(
         page: _asInt(json['page']) ?? 1,
         scrollOffset: _asDouble(json['scrollOffset']) ?? 0,
+        pageOffsetFraction: _asDouble(json['pageOffsetFraction']),
         zoom: _asDouble(json['zoom']) ?? 1,
         progress: _asDouble(json['progress']) ?? 0,
         excerpt: json['excerpt'] as String?,
@@ -124,6 +128,16 @@ final class ReadingLocator {
   final int? chapterEndOffset;
   final int? page;
   final double? scrollOffset;
+
+  /// Where in the page a target sits, 0..1 from its top edge.
+  ///
+  /// PDF outline destinations usually name a y coordinate inside the page
+  /// (`/XYZ`, `/FitH`). `scrollOffset` cannot carry it: that is measured in
+  /// logical pixels, which change with zoom and window size, while an outline
+  /// is read once from the document. Keeping the position as a fraction of the
+  /// page keeps a TOC jump on the heading at any scale, and leaves
+  /// `scrollOffset` meaning what progress reporting writes into it.
+  final double? pageOffsetFraction;
   final double? zoom;
   final double progress;
   final String? excerpt;
@@ -139,6 +153,7 @@ final class ReadingLocator {
       if (chapterEndOffset != null) 'chapterEndOffset': chapterEndOffset,
       if (page != null) 'page': page,
       if (scrollOffset != null) 'scrollOffset': scrollOffset,
+      if (pageOffsetFraction != null) 'pageOffsetFraction': pageOffsetFraction,
       if (zoom != null) 'zoom': zoom,
       'progress': progress.clamp(0, 1),
       if (excerpt != null) 'excerpt': excerpt,

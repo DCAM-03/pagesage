@@ -1,0 +1,100 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Outlines 13 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [9 0 R] /Contents 4 0 R /Resources << /Font << /F1 12 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 108 >>
+stream
+BT
+/F1 13 Tf
+72 730 Td
+(Outline link sample page one.) Tj
+0 -28 Td
+(PageSage outline and link sample.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [10 0 R 11 0 R] /Contents 6 0 R /Resources << /Font << /F1 12 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 108 >>
+stream
+BT
+/F1 13 Tf
+72 730 Td
+(Outline link sample page two.) Tj
+0 -28 Td
+(PageSage outline and link sample.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 12 0 R >> >> >>
+endobj
+8 0 obj
+<< /Length 110 >>
+stream
+BT
+/F1 13 Tf
+72 730 Td
+(Outline link sample page three.) Tj
+0 -28 Td
+(PageSage outline and link sample.) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Annot /Subtype /Link /Rect [70 725 260 750] /Border [0 0 0] /A << /S /GoTo /D [7 0 R /XYZ 72 730 0] >> >>
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /Link /Rect [70 725 260 750] /Border [0 0 0] /A << /S /URI /URI (https://example.com/pagesage) >> >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Link /Rect [70 600 260 625] /F 2 /Border [0 0 0] /A << /S /URI /URI (https://example.com/hidden) >> >>
+endobj
+12 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+13 0 obj
+<< /Type /Outlines /First 14 0 R /Last 15 0 R /Count 3 >>
+endobj
+14 0 obj
+<< /Title (Chapter One) /Parent 13 0 R /Next 15 0 R /Dest [3 0 R /XYZ 72 730 0] >>
+endobj
+15 0 obj
+<< /Title (Chapter Two) /Parent 13 0 R /Prev 14 0 R /First 16 0 R /Last 16 0 R /Count 1 /Dest [5 0 R /XYZ 72 730 0] >>
+endobj
+16 0 obj
+<< /Title (Section 2.1) /Parent 15 0 R /Dest [5 0 R /XYZ 72 500 0] >>
+endobj
+xref
+0 17
+0000000000 65535 f 
+0000000009 00000 n 
+0000000075 00000 n 
+0000000144 00000 n 
+0000000287 00000 n 
+0000000446 00000 n 
+0000000597 00000 n 
+0000000756 00000 n 
+0000000883 00000 n 
+0000001044 00000 n 
+0000001175 00000 n 
+0000001317 00000 n 
+0000001462 00000 n 
+0000001533 00000 n 
+0000001607 00000 n 
+0000001706 00000 n 
+0000001841 00000 n 
+trailer
+<< /Size 17 /Root 1 0 R >>
+startxref
+1927
+%%EOF

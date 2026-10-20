@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
 import '../../domain/annotations/annotation.dart';
@@ -18,6 +19,8 @@ import '../common/renderer_event.dart';
 import '../epub/epub_jump.dart';
 import 'pdf_canvas_renderer.dart';
 import 'pdf_layout.dart';
+import 'pdf_links.dart';
+import 'pdf_outline.dart';
 import 'pdf_selection.dart';
 import 'pdf_selection_controller.dart';
 import 'pdf_zoom.dart';
@@ -126,6 +129,17 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// Page index -> quads in page space; each page widget converts these
   /// to widget coordinates using its own painted box.
   final Map<int, List<PdfTextQuad>> _searchHighlights = {};
+
+  /// Page index -> the hit the reader just jumped to, as page-space quads.
+  ///
+  /// Painted in a stronger colour for a couple of seconds so choosing a search
+  /// result shows *where* on the page the phrase sits. All hits stay in a
+  /// faint tint, so the flash is a focus cue rather than the only highlight.
+  final Map<int, List<PdfTextQuad>> _focusQuads = {};
+
+  /// Whether the current search was triggered from the reader, which decides
+  /// whether a hit may scroll the page into view.
+  Timer? _focusClearTimer;
 
   /// Layout scale of the current page, in logical pixels per PDF point.
   ///
@@ -269,6 +283,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       );
       widget.onEvent(RendererReady());
       _reportLocation(doc.pageCount);
+      _emitOutline(doc);
       unawaited(_detectCapabilities(renderer));
 
       // The scroll surface only exists once the build above has run, so a
@@ -289,6 +304,32 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       // reader with a dead page and no recovery path.
       widget.onEvent(RendererFailed(message));
     }
+  }
+
+  /// Reads the document's `/Outlines` and hands the reader a flat list.
+  ///
+  /// Emitted once per open: the tree is a document property, and re-reading it
+  /// on every rebuild would re-resolve the whole COS tree for nothing. An
+  /// empty list is still reported so a host that kept a previous document's
+  /// outline clears it.
+  void _emitOutline(PdfDocument doc) {
+    List<RendererOutlineItem> items;
+    try {
+      final outline = PdfOutline.of(doc);
+      final entries = pdfOutlineEntries(
+        outline,
+        pageHeight: (page) {
+          if (page < 1 || page > doc.pageCount) return 0;
+          return PdfPageRenderer.pageSize(doc.page(page - 1)).height;
+        },
+      );
+      items = [for (final entry in entries) entry.toRendererItem()];
+    } on Object {
+      // A malformed outline must not stop the book from opening; the host
+      // falls back to its page-number list when the outline is empty.
+      items = const [];
+    }
+    widget.onEvent(RendererOutlineChanged(items));
   }
 
   /// Probes the text layer, then reports what the renderer can actually do.
@@ -341,6 +382,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
 
   void _reportLocation(int pageCount) {
     if (pageCount <= 0) return;
+    // A jump can finish after the reader closed (the scroll animation outlives
+    // the widget); reading MediaQuery from a defunct context throws.
+    if (!mounted) return;
     // The WebView renderer skipped excerpts on phones: scanning the text layer
     // is a layout-heavy pass and the excerpt is only used to flash a phrase
     // after a jump. Capture the width now; reading MediaQuery from the timer
@@ -425,9 +469,12 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     }
   }
 
-  /// Upper bound on reported hits, matching the EPUB renderer. Without it a
-  /// query common to a large document would walk every page synchronously.
-  static const _maxSearchResults = 100;
+  /// Upper bound on reported hits.
+  ///
+  /// Rendered a page at a time into the highlight map, so the ceiling protects
+  /// a scan of a large book rather than the list itself; 200 matches the plan
+  /// and is well past what the reader can pick from a side panel.
+  static const _maxSearchResults = 200;
 
   Future<void> _runSearch() async {
     final renderer = _renderer;
@@ -503,13 +550,72 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     final page = locator.page;
     if (page == null || page < 1 || page > renderer.pageCount) return;
 
-    await _scrollToPage(
-      page - 1,
-      offset: locator.scrollOffset ?? 0,
-      animate: true,
-    );
+    // An outline destination names a fraction of the page, which survives a
+    // zoom; a search hit carries pixels for the scale in force when the search
+    // ran. Prefer the fraction, then the pixel offset.
+    final fraction = locator.pageOffsetFraction;
+    final offset = fraction == null
+        ? (locator.scrollOffset ?? 0)
+        : fraction * renderer.displaySizeOf(page - 1).height * _layoutScale;
+
+    await _scrollToPage(page - 1, offset: offset, animate: true);
     if (mounted) setState(() => _currentPage = page - 1);
     _reportLocation(renderer.pageCount);
+    unawaited(_flashFocusHit(page - 1, locator.excerpt));
+  }
+
+  /// Lights up the phrase a jump aimed at, then fades it.
+  ///
+  /// The host sets `excerpt` whenever the target can be described by text — a
+  /// search hit, a saved note, a TOC entry that quotes its heading. Locating
+  /// the phrase gives the reader the same cue the WebView got from its
+  /// `focusHit` spans: the page scrolls to the result, and the words inside it
+  /// are marked for a moment instead of leaving the reader to scan the page.
+  Future<void> _flashFocusHit(int pageIndex, String? excerpt) async {
+    final renderer = _renderer;
+    final needle = excerpt?.trim();
+    if (renderer == null || needle == null || needle.isEmpty) {
+      _clearFocusHit();
+      return;
+    }
+    // The excerpt is a compacted snippet: repeated whitespace in the page text
+    // is what most often stops a literal match, so search for the longest
+    // whitespace-free prefix too.
+    final probe = needle.length > 48 ? needle.substring(0, 48) : needle;
+    List<PdfTextQuad> quads;
+    try {
+      final text = await renderer.textOfAsync(pageIndex);
+      if (text == null || text.text.isEmpty) return;
+      var matches = text.findAll(probe);
+      if (matches.isEmpty) {
+        final compact = probe.split(RegExp(r'\s+')).first;
+        if (compact.length >= 2) matches = text.findAll(compact);
+      }
+      if (matches.isEmpty) {
+        _clearFocusHit();
+        return;
+      }
+      quads = [for (final match in matches.take(4)) ...match.quads];
+    } on Object {
+      return; // Best-effort: a flash must never break navigation.
+    }
+    if (!mounted) return;
+    _focusClearTimer?.cancel();
+    setState(() => _focusQuads[pageIndex] = quads);
+    _focusClearTimer = Timer(const Duration(milliseconds: 2200), () {
+      if (mounted) _clearFocusHit();
+    });
+  }
+
+  void _jumpToPageFromLink(int page) {
+    unawaited(_jumpToLocator(ReadingLocator.pdf(page: page)));
+  }
+
+  void _clearFocusHit() {
+    _focusClearTimer?.cancel();
+    _focusClearTimer = null;
+    if (_focusQuads.isEmpty || !mounted) return;
+    setState(_focusQuads.clear);
   }
 
   /// Forwards a zoom the user performed on the page to the host.
@@ -716,6 +822,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               layoutPageSize: pageSize,
               turnOnWheel: false,
               searchQuads: _searchHighlights[index] ?? const [],
+              focusQuads: _focusQuads[index] ?? const [],
               annotations: widget.annotations,
               ocrBlocks: widget.ocrOverlayPage == index + 1
                   ? widget.ocrOverlayBlocks
@@ -731,6 +838,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               onSelectionHandleDragEnd: _endSelectionHandleDrag,
               onPaintedRect: _recordPaintedRect,
               onAnnotationSelected: widget.onEvent,
+              onExternalLink: widget.onEvent,
+              onJumpToPage: _jumpToPageFromLink,
               onZoomChanged: _handleZoomChanged,
               onPageTurn: _turnPage,
             ),
@@ -787,6 +896,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   layoutPageSize: pageSize,
                   turnOnWheel: true,
                   searchQuads: _searchHighlights[indices[i]] ?? const [],
+                  focusQuads: _focusQuads[indices[i]] ?? const [],
                   annotations: widget.annotations,
                   ocrBlocks: widget.ocrOverlayPage == indices[i] + 1
                       ? widget.ocrOverlayBlocks
@@ -802,6 +912,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   onSelectionHandleDragEnd: _endSelectionHandleDrag,
                   onPaintedRect: _recordPaintedRect,
                   onAnnotationSelected: widget.onEvent,
+                  onExternalLink: widget.onEvent,
+                  onJumpToPage: _jumpToPageFromLink,
                   onZoomChanged: _handleZoomChanged,
                   onPageTurn: _turnPage,
                 ),
@@ -1441,6 +1553,7 @@ final class _CanvasPage extends StatefulWidget {
     required this.layoutPageSize,
     required this.turnOnWheel,
     required this.searchQuads,
+    required this.focusQuads,
     required this.annotations,
     required this.ocrBlocks,
     required this.selectionRange,
@@ -1454,6 +1567,8 @@ final class _CanvasPage extends StatefulWidget {
     required this.onSelectionHandleDragEnd,
     required this.onPaintedRect,
     required this.onAnnotationSelected,
+    required this.onExternalLink,
+    required this.onJumpToPage,
     required this.onZoomChanged,
     required this.onPageTurn,
     super.key,
@@ -1483,6 +1598,10 @@ final class _CanvasPage extends StatefulWidget {
   /// list, so swallowing it here would stop the reader from scrolling.
   final bool turnOnWheel;
   final List<PdfTextQuad> searchQuads;
+
+  /// Quads of the one hit the reader just jumped to, painted brighter than the
+  /// rest for a couple of seconds.
+  final List<PdfTextQuad> focusQuads;
   final List<Annotation> annotations;
   final List<Map<String, Object?>> ocrBlocks;
 
@@ -1522,6 +1641,12 @@ final class _CanvasPage extends StatefulWidget {
   /// Reports where this page painted itself, in global coordinates.
   final void Function(int pageIndex, Rect rect) onPaintedRect;
   final ValueChanged<RendererAnnotationSelected> onAnnotationSelected;
+
+  /// An external `/URI` link was tapped; the host confirms and opens it.
+  final ValueChanged<RendererExternalLinkRequested> onExternalLink;
+
+  /// An in-document link to [page] (1-based) was tapped.
+  final ValueChanged<int> onJumpToPage;
   final PdfZoomChanged onZoomChanged;
   final ValueChanged<int> onPageTurn;
 
@@ -1680,6 +1805,9 @@ final class _CanvasPageState extends State<_CanvasPage> {
       highlightedRects: [
         for (final q in widget.searchQuads) _quadToRect(q, _pageSize),
         ..._selectionHighlights,
+      ],
+      focusedRects: [
+        for (final q in widget.focusQuads) _quadToRect(q, _pageSize),
       ],
       annotations: _annotationBoxes(_paintedSize),
       ocrBoxes: _ocrBoxes(_paintedSize),
@@ -2032,10 +2160,11 @@ final class _CanvasPageState extends State<_CanvasPage> {
     widget.onSelectionEnd(details.globalPosition, PointerDeviceKind.touch);
   }
 
-  /// Tap on the page: an annotation under the pointer wins, then the view
-  /// decides between selecting a word and double-click zoom.
+  /// Tap on the page: a link or an annotation under the pointer wins, then the
+  /// view decides between selecting a word and double-click zoom.
   void _handleTap(Offset globalPosition) {
     final local = globalPosition - _globalOrigin;
+    if (_emitLinkTap(local, _paintedSize)) return;
     if (_emitAnnotationTap(local, _paintedSize, _globalOrigin)) return;
 
     final now = DateTime.now();
@@ -2179,6 +2308,63 @@ final class _CanvasPageState extends State<_CanvasPage> {
     return rect;
   }
 
+  /// Handles a tap on a `/Link` annotation.
+  ///
+  /// An in-document `/GoTo` jumps immediately, the way a page-internal
+  /// reference works in any reader. An external URI leaves the decision to the
+  /// host: opening a browser is visible outside PageSage, and the interaction
+  /// spec asks the user to confirm the address first.
+  bool _emitLinkTap(Offset local, Size displayed) {
+    final links = _linksFor(displayed);
+    // Last drawn wins, matching the annotation hit test.
+    for (final link in links.reversed) {
+      if (!link.rect.contains(local)) continue;
+      final page = link.target.destinationPage;
+      final uri = link.target.uri;
+      if (page != null) {
+        widget.onJumpToPage(page);
+      } else if (uri != null) {
+        widget.onExternalLink(RendererExternalLinkRequested(uri));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// This page's actionable links, projected into view coordinates.
+  ///
+  /// Read once per page and cached: hitting `/Annots` on every tap would
+  /// re-resolve the array, and a link layer is a document property that does
+  /// not change while the page is open.
+  List<_LinkBox> _linksFor(Size viewSize) {
+    final links = _linkQuads.putIfAbsent(
+      widget.pageIndex,
+      () => PdfDocumentLink.of(widget.renderer.pageAt(widget.pageIndex)),
+    );
+    if (links.isEmpty) return const [];
+    final geometry = _geometryFor(viewSize);
+    return [
+      for (final link in links)
+        _LinkBox(
+          target: link,
+          // A link's /Rect often wraps just the glyphs, which at fit-width is
+          // a couple of millimetres tall; inflate it to a comfortable target
+          // so a tap on the words hits the link and not the selection word.
+          rect: geometry
+              .toViewRect(link.rect)
+              .inflate(_linkTouchSlop)
+              .intersect(Offset.zero & viewSize),
+        ),
+    ];
+  }
+
+  /// Vertical and horizontal slack around a link's rectangle, in logical
+  /// pixels.
+  static const _linkTouchSlop = 3.0;
+
+  /// Page-space links per page, read on first tap.
+  final Map<int, List<PdfDocumentLink>> _linkQuads = {};
+
   /// Emits [RendererAnnotationSelected] when a tap lands on a painted
   /// annotation, mirroring the WebView renderer's clickable `<mark>`.
   ///
@@ -2211,6 +2397,7 @@ final class _PicturePainter extends CustomPainter {
   _PicturePainter(
     this.page, {
     this.highlights = const [],
+    this.focusHighlights = const [],
     this.annotations = const [],
     this.ocrBoxes = const [],
     this.pxPerPoint = 1,
@@ -2218,6 +2405,7 @@ final class _PicturePainter extends CustomPainter {
 
   final PdfRenderedPage page;
   final List<Rect> highlights;
+  final List<Rect> focusHighlights;
   final List<_AnnotationBox> annotations;
   final List<_OcrBox> ocrBoxes;
 
@@ -2245,6 +2433,12 @@ final class _PicturePainter extends CustomPainter {
     final searchFill = Paint()..color = const Color(0x553F8CFF);
     for (final rect in highlights) {
       canvas.drawRect(rect, searchFill);
+    }
+    // The jumped-to hit gets the amber the WebView used for `focusHit`, so the
+    // reader can tell which of the tinted hits the jump landed on.
+    final focusFill = Paint()..color = const Color(0x8CFFB300);
+    for (final rect in focusHighlights) {
+      canvas.drawRect(rect, focusFill);
     }
     for (final box in annotations) {
       final fill = Paint()..color = _annotationColor(box.color);
@@ -2292,6 +2486,7 @@ final class _PicturePainter extends CustomPainter {
   bool shouldRepaint(_PicturePainter old) =>
       old.page != page ||
       old.highlights != highlights ||
+      old.focusHighlights != focusHighlights ||
       old.annotations != annotations ||
       old.ocrBoxes != ocrBoxes ||
       old.pxPerPoint != pxPerPoint;
@@ -2307,6 +2502,7 @@ final class _SelectablePage extends StatefulWidget {
     required this.page,
     required this.pageSize,
     required this.highlightedRects,
+    required this.focusedRects,
     required this.annotations,
     required this.ocrBoxes,
     required this.onStart,
@@ -2325,6 +2521,9 @@ final class _SelectablePage extends StatefulWidget {
   /// this space, so it is what the raster is scaled from.
   final Size pageSize;
   final List<Rect> highlightedRects;
+
+  /// The jumped-to hit, drawn in a stronger colour than [highlightedRects].
+  final List<Rect> focusedRects;
   final List<_AnnotationBox> annotations;
   final List<_OcrBox> ocrBoxes;
 
@@ -2424,6 +2623,7 @@ final class _SelectablePageState extends State<_SelectablePage> {
             painter: _PicturePainter(
               widget.page,
               highlights: widget.highlightedRects,
+              focusHighlights: widget.focusedRects,
               annotations: widget.annotations,
               ocrBoxes: widget.ocrBoxes,
               pxPerPoint: widget.pageSize.width <= 0
@@ -2574,6 +2774,16 @@ final class _HandlePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_HandlePainter old) => old.color != color;
+}
+
+/// A document link projected into view coordinates.
+final class _LinkBox {
+  const _LinkBox({required this.target, required this.rect});
+
+  final PdfDocumentLink target;
+
+  /// The link's clickable area in view coordinates.
+  final Rect rect;
 }
 
 /// A stored annotation projected into view coordinates.

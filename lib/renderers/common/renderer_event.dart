@@ -61,17 +61,37 @@ final class RendererOutlineItem {
     required this.title,
     required this.page,
     this.level = 0,
+    this.offsetFraction,
   });
 
   final String title;
   final int page;
   final int level;
+
+  /// Where in the page the heading sits, as 0..1 from the page's top edge.
+  ///
+  /// A PDF outline destination commonly names a y coordinate (`/XYZ`,
+  /// `/FitH`); without it a chapter with several sections on one page always
+  /// lands at the page top. Null for fits that name no position (`/Fit`).
+  final double? offsetFraction;
 }
 
 final class RendererOutlineChanged extends RendererEvent {
   const RendererOutlineChanged(this.items);
 
   final List<RendererOutlineItem> items;
+}
+
+/// A `/URI` link in the document was clicked.
+///
+/// The renderer does not open anything itself: opening a browser is a visible
+/// side effect on the user's machine, and the interaction spec requires the
+/// user to confirm the address first. The host owns that dialog and the
+/// launch; the destination is passed here.
+final class RendererExternalLinkRequested extends RendererEvent {
+  const RendererExternalLinkRequested(this.uri);
+
+  final String uri;
 }
 
 final class RendererBookmarkRequested extends RendererEvent {

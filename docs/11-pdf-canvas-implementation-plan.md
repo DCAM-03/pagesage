@@ -2,7 +2,7 @@
 
 版本：0.2（经五轮复审；修订记录见 §12–§14）
 日期：2026-10-20
-状态：执行中（S0–S3 已完成，另含用户反馈修复，施工记录见 §15–§20）
+状态：执行中（S0–S4 已完成，另含用户反馈修复，施工记录见 §15–§21）
 前置文档：`docs/10-pdf-renderer-migration.md`（技术决策）、`docs/02-feature-spec.md` §5、`docs/03-interaction-spec.md` §8、`docs/v1-experience-freeze.md`
 适用范围：`lib/renderers/pdf/`、`lib/features/reader/`、`lib/features/ocr/`、平台资源与依赖
 
@@ -784,3 +784,90 @@ pkill -f "kwin_wayland --virtual --socket pagesage-test"
 - 封面只取第 1 页。若某本书第 1 页是版权页/空白页（少数扫描版 PDF 会这样），封面仍不理想；要识别真正封面需要按前 N 页启发式挑选，本次未做。
 - 渲染首页在超大页面（A0 图纸等）上会按 600 px 目标宽度缩小，细节不可见——对书架缩略图而言可接受。
 - 已有书库不会自动重算封面；需要覆盖时用书库条目菜单里的「重新提取封面」，或对整库跑一次脚本。
+
+## 21. S4 施工记录：搜索 / 大纲 / 链接（2026-10-21）
+
+### 21.1 施工前状态
+
+S4 三项的起点并不一致，先说清楚，否则容易把「已存在」当成「已完成」：
+
+| 项 | 施工前状态 |
+| --- | --- |
+| 搜索 | `pdf_canvas_view.dart` 已有实现：逐页 `textOfAsync`、命中 quads 存 `_searchHighlights`、发 `RendererSearchResults`。缺**结果跳转后的定位反馈**，上限是 100（计划为 200），**零测试** |
+| 大纲 | **完全缺失**。`grep RendererOutlineChanged lib/renderers/pdf/` 无命中，所以 `reader_page.dart` 的 `_pdfOutline` 对 PDF 恒为空，桌面目录栏与底部目录永远退化成「第 N 页」列表 |
+| 链接 | **完全缺失**。`lib/` 内无 `PdfLinkAnnotation`、无 `launchUrl`，PDF 里的链接点了等于点了正文 |
+
+### 21.2 改动
+
+**1. 大纲**。新增 `lib/renderers/pdf/pdf_outline.dart`：`PdfOutline.of(doc)` 递归展平，输出 `PdfOutlineEntry(title, page, level, offsetFraction)`。
+
+- 层级来自递归深度，直接对应宿主 TOC 的 `level` 缩进（桌面 14 px/级、底部 18 px/级）。
+- **落点用比例，不用像素**。`/XYZ`、`/FitH` 的 y 坐标是 PDF 用户空间、y 轴向上，而 `scrollOffset` 是逻辑像素且随缩放下变。因此新增 `ReadingLocator.pageOffsetFraction`（0..1，从页顶算），由 `RendererOutlineItem.offsetFraction` 一路带过来，`PdfCanvasView._jumpToLocator` 再乘当前页高与 `_layoutScale` 还原成像素。这样同一份大纲在 100% 与 250% 缩放、在 Windows 与 Android 上都落在同一个标题上。
+- 无 destination、或 destination 解析不出来的条目**丢弃**：宿主把每一行都渲染成跳转控件，留下的会是一个点了没反应的死按钮。
+- 整棵树读取包在 try/catch 里，损坏的大纲不得阻止书籍打开；空列表仍会发出，宿主据此清掉上一本书的目录。
+- 发出时机：`_open()` 内一次，文档属性不随重建变化。
+
+**2. 链接**。新增 `lib/renderers/pdf/pdf_links.dart`：`PdfDocumentLink.of(page)` 只收 `/Link` 注释里两种可执行目标。
+
+- `/GoTo`：直接跳页，与任何阅读器的页内引用行为一致，不弹确认。
+- `/URI`：只放行 `http` / `https` / `mailto`。其余 scheme（`file`、应用自定义 scheme 等）来自不可信文档，一律丢弃——WebView 版本没有做这个过滤，这次补上。
+- `/Launch`、`/GoToR`、JavaScript **一律丢弃**：canvas 侧没有能安全执行它们的路径，摆一个点了没反应的链接比不画更糟。
+- `/F` 的 hidden（bit 2）与 no-view（bit 6）跳过，与 PDF 规范一致。
+- 几何走 `PdfPageGeometry.toViewRect`，因此 `/Rotate 90` 的页面上链接框与文字仍然对齐；`/Rect` 外扩 3 px 容差，避免细长链接必须精确点到字上。
+- 命中顺序：**链接 → 标注 → 划词**。单击命中链接，长按/拖选仍然是划词，与计划 §S4-4 一致。
+- 渲染器自己**不打开浏览器**：只发 `RendererExternalLinkRequested(uri)`，宿主弹确认框（完整显示地址）后再 `launchUrl(..., LaunchMode.externalApplication)`。打开外部浏览器是离开 App 的可见副作用，且地址来自文档而非用户。
+
+**3. 搜索**。上限 100 → 200（计划值）。新增命中定位闪烁：
+
+- `_jumpToLocator` 跳到页后调用 `_flashFocusHit`，用 locator 的 `excerpt` 在目标页 `findAll` 出 quads，存 `_focusQuads`，2.2 s 后清除。
+- 绘制用琥珀色（`0x8CFFB300`），区别于普通命中的蓝色（`0x553F8CFF`），对齐 WebView 的 `focusHit` 配色。
+- 匹配策略：先按摘录前 48 字符整段找，找不到再退到第一个无空白词。摘录是压缩过的（连续空白被折叠），逐字匹配常因空白差异失败，这是 WebView `shareToken` 那段的等价做法。
+- 闪烁是尽力而为：任何异常都吞掉，绝不阻断导航。
+
+**4. 依赖**。`url_launcher` 从传递依赖（`dart_pdf_editor` → `^6.3.0`）改为**直接依赖** `^6.3.2`。平台影响面复核：
+
+| 平台 | 结论 |
+| --- | --- |
+| Linux | `generated_plugin_registrant.cc` 与 `generated_plugins.cmake` **本来就已注册** `url_launcher_linux`（作为传递依赖时即已生成），本次 `pub get` 未改动这两份文件 |
+| Windows | 同上，`url_launcher_windows` 已在 `generated_plugin_registrant.cc` / `.cmake` 中 |
+| Android | `GeneratedPluginRegistrant.java` 已注册 `UrlLauncherPlugin`。打开第三方浏览器用隐式 `ACTION_VIEW`，**不需要** `QUERY_ALL_PACKAGES`；manifest 现有 `<queries>` 只声明 `PROCESS_TEXT`，保持不动 |
+| Web | `url_launcher_web` 走 `window.open`，无额外配置 |
+
+即：包体与平台配置均无增量，本次改动只是把已存在的传递依赖提为直接依赖，让 `package:url_launcher` 的 import 合法并锁住版本。
+
+### 21.3 样本与测试
+
+新增样本 `poc_pdf_canvas/samples/outline-link.pdf`（3 页，由 `tool/generate_manual_samples.dart` 的 `buildOutlineLinkPdf()` 生成）：
+
+- `/Outlines` 两层：Chapter One(p1) / Chapter Two(p2) → Section 2.1(p2)，均带 `/XYZ` 落点。
+- 第 1 页一个 `/GoTo` 链接指向第 3 页。
+- 第 2 页一个 `https` 外部链接 + 一个 `/F 2` 隐藏的 `https` 链接（必须被忽略）。
+
+新增 `test/renderers/pdf/pdf_outline_links_test.dart`（11 项，纯函数，直接读样本）覆盖：层级/页码展平、比例落点、空标题回退页码、无 destination 丢弃、`/Fit` 无落点、GoTo 目标、URI 读取、隐藏链接忽略、无注释页、scheme 白名单。
+
+`test/renderers/pdf/pdf_canvas_view_test.dart` 新增 S4 组（5 项）：
+
+| 用例 | 断言 |
+| --- | --- |
+| 有目录的 PDF | 打开后发 `RendererOutlineChanged`，标题/页码/层级/落点比例正确 |
+| 无目录的 PDF | 发**空**列表（宿主据此清掉上一本的书目） |
+| 搜索 | 「PageSage」在 3 页各命中 2 处，共 6 条；locator 带页码与 zoom |
+| 撤掉查询 | 同一个 View 上把 `searchQuery` 置空，最后一条 `RendererSearchResults` 为空 |
+| 点 GoTo 链接 | 位置事件落到第 3 页 |
+| 点 URI 链接 | 发 `RendererExternalLinkRequested('https://example.com/pagesage')`，且阅读位置**不**离开第 2 页 |
+
+### 21.4 验证结果
+
+- `flutter analyze`：0 error、0 warning；3 条 info 全在 `poc_pdf_canvas/`（S7 删除该目录后消失）。
+- `flutter test`：**302 项通过、2 项跳过、0 失败**（S4 前 285 通过；新增 11 项纯函数 + 6 项组件，共 17 项）。
+
+### 21.5 施工中发现并修掉的缺陷
+
+- **卸载后读 `context`**：`_reportLocation` 在 `Timer` 里调 `MediaQuery.sizeOf(context)`。点击链接触发跳转后若阅读器已经关闭（测试里就是这种情况），滚动动画结束仍会调用它，抛 "This widget has been unmounted"。加了 `if (!mounted) return;`。这是 S0–S3 就存在的路径，只是链接跳转让它变得容易触发。
+
+### 21.6 已知限制
+
+- 大纲只在打开时读取一次。文档在阅读期间不会变，故未监听增量更新。
+- 闪烁只标出**第一个**命中词（最多取 4 个 quad）。若摘录跨行且跨页，只闪当前页那一部分。
+- 链接只识别 `/Link`；表单域（`/Widget`）与 `Highlight` 等标注仍不参与点击。
+- `mailto:` 已放行但未在 Linux 上实测（本机未配置邮件客户端），失败时走「无法打开链接」提示。

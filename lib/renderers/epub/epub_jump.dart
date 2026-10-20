@@ -243,6 +243,7 @@ ReadingLocator enrichLocatorForJump(
     ReadingLocatorType.pdf => ReadingLocator.pdf(
       page: locator.page ?? 1,
       scrollOffset: locator.scrollOffset ?? 0,
+      pageOffsetFraction: locator.pageOffsetFraction,
       zoom: locator.zoom ?? 1,
       progress: locator.progress,
       excerpt: excerpt,
