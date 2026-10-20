@@ -17,6 +17,7 @@ import '../../domain/books/reading_position.dart';
 import '../common/renderer_event.dart';
 import '../epub/epub_jump.dart';
 import 'pdf_canvas_renderer.dart';
+import 'pdf_layout.dart';
 import 'pdf_selection_controller.dart';
 import 'pdf_zoom.dart';
 
@@ -36,6 +37,11 @@ typedef PdfZoomChanged = void Function(double scale, PdfZoomMode mode);
 /// S1 makes zoom a single resolved scale: the page slot, the picture transform
 /// and `locator.zoom` all derive from [resolvePdfZoom], so a page is never
 /// fitted twice and a rotated page is laid out at its rotated size.
+///
+/// S2 replaces the horizontal `PageView` with a continuous vertical list and
+/// adds paged single/double display, both driven by the shared `readerMode`
+/// setting through [preferredPdfDisplayMode]. Position reporting, restoring a
+/// saved `scrollOffset` and spread pairing all go through [pdf_layout.dart].
 final class PdfCanvasView extends ConsumerStatefulWidget {
   const PdfCanvasView({
     required this.book,
@@ -87,8 +93,20 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
 }
 
 final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
-  final _pageController = PageController();
+  /// Drives the continuous list.
+  final _scrollController = ScrollController();
+
+  /// Drives the horizontal paged layout. Rebuilt when the display mode or the
+  /// page count changes, because `initialPage` is only honoured on creation.
+  PageController? _pageController;
+
   Timer? _locationTimer;
+
+  /// Whether the first frame has restored the saved scroll position.
+  ///
+  /// Restoring is a post-frame job: before the first layout there is no
+  /// viewport to scroll, so a jump issued from `_open` would be dropped.
+  bool _restored = false;
 
   PdfCanvasRenderer? _renderer;
   String? _error;
@@ -106,6 +124,15 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// must carry this value (what the WebView renderer exposed as
   /// `dataset.scale`), not the raw `pdfScale` setting.
   double _layoutScale = 1;
+
+  /// How far into the current page the reader is, as a fraction of that
+  /// page's height (continuous display only).
+  ///
+  /// A zoom or a window resize changes every page's height in the list, so
+  /// holding the raw scroll position would slide the reader through the
+  /// document. Re-anchoring on this ratio keeps the same line under the same
+  /// place on screen, which is what plan step 3 asks for.
+  double? _anchorRatio;
 
   /// Result of the text-layer probe, or null while it is still running.
   bool? _nativeTextLayer;
@@ -149,7 +176,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   @override
   void dispose() {
     _locationTimer?.cancel();
-    _pageController.dispose();
+    _scrollController.dispose();
+    _pageController?.dispose();
     super.dispose();
   }
 
@@ -184,15 +212,14 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       _reportLocation(doc.pageCount);
       unawaited(_detectCapabilities(renderer));
 
-      // PageView only exists once the build above has run, so a jump issued
-      // here has no clients and is silently dropped. Restore on the first
-      // frame instead; without it the reader opens on page 1 while reporting
-      // the saved page, and the first swipe rewrites progress to page 2.
+      // The scroll surface only exists once the build above has run, so a
+      // jump issued here has no clients and is silently dropped. Restore on
+      // the first frame instead; without it the reader opens on page 1 while
+      // reporting the saved page, and the first scroll rewrites progress to
+      // page 2.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_pageController.hasClients) return;
-        if ((_pageController.page ?? 0).round() != _currentPage) {
-          _pageController.jumpToPage(_currentPage);
-        }
+        if (!mounted) return;
+        _restoreSavedPosition();
       });
       unawaited(_runSearch());
     } on Object catch (error) {
@@ -255,18 +282,28 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
 
   void _reportLocation(int pageCount) {
     if (pageCount <= 0) return;
-    final page = _currentPage + 1;
-    // progress is page-based; the WebView renderer used the same convention.
-    final progress = pageCount <= 1 ? 1.0 : (page - 1) / (pageCount - 1);
     // The WebView renderer skipped excerpts on phones: scanning the text layer
     // is a layout-heavy pass and the excerpt is only used to flash a phrase
     // after a jump. Capture the width now; reading MediaQuery from the timer
     // would register an inherited-widget dependency outside build.
-    final includeExcerpt = MediaQuery.sizeOf(context).width >= 900;
+    final viewportWidth = MediaQuery.sizeOf(context).width;
+    final includeExcerpt = viewportWidth >= pdfNarrowViewportWidth;
+    // The bridge throttles phone scroll reporting at 420 ms and desktop at
+    // 120 ms (`bridge.js:296`); continuous scrolling fires far more often than
+    // page turns, and every report writes progress.
+    final delay = Duration(
+      milliseconds: viewportWidth < pdfNarrowViewportWidth ? 420 : 120,
+    );
 
     _locationTimer?.cancel();
-    _locationTimer = Timer(const Duration(milliseconds: 120), () {
+    _locationTimer = Timer(delay, () {
       if (!mounted) return;
+      // Resolve the page and offset when the timer fires, not when it was
+      // scheduled: a burst of scroll events must report where the reader
+      // ended up, and the state may have advanced since.
+      final page = _currentPage + 1;
+      final progress = pageCount <= 1 ? 1.0 : (page - 1) / (pageCount - 1);
+      final offset = _scrollOffsetForCurrentPage();
       String? excerpt;
       if (includeExcerpt) {
         try {
@@ -282,7 +319,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
         RendererLocationChanged(
           locator: ReadingLocator.pdf(
             page: page,
-            // scrollOffset stays 0 until continuous scrolling lands (S2).
+            // Zero outside continuous display, matching the bridge: a paged
+            // layout has no meaningful sub-page position to restore into.
+            scrollOffset: offset,
             zoom: _layoutScale,
             progress: progress.clamp(0.0, 1.0),
             excerpt: excerpt,
@@ -371,17 +410,12 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     final page = locator.page;
     if (page == null || page < 1 || page > renderer.pageCount) return;
 
-    final target = page - 1;
-    if (_pageController.hasClients) {
-      await _pageController.animateToPage(
-        target,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    }
-    if (mounted && target != _currentPage) {
-      setState(() => _currentPage = target);
-    }
+    await _scrollToPage(
+      page - 1,
+      offset: locator.scrollOffset ?? 0,
+      animate: true,
+    );
+    if (mounted) setState(() => _currentPage = page - 1);
     _reportLocation(renderer.pageCount);
   }
 
@@ -397,11 +431,46 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   void _turnPage(int delta) {
     final renderer = _renderer;
     if (renderer == null) return;
-    final target = _currentPage + delta;
+    final mode = _displayMode(renderer.pageCount);
+    if (mode == PdfDisplayMode.continuous) {
+      // A wheel notch means "scroll a screenful" here, like the bridge: in a
+      // continuous list the user reads past a page instead of turning it.
+      final position = _scrollController.hasClients
+          ? _scrollController.position
+          : null;
+      if (position == null) return;
+      final viewport = position.viewportDimension;
+      final target = (position.pixels + delta * viewport * 0.9).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      unawaited(
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        ),
+      );
+      return;
+    }
+
+    // Paged: turn by whole spreads so the left/right page stays in the pair.
+    final target = mode == PdfDisplayMode.double
+        ? pdfSpreadStart(
+            pageIndex: _currentPage + delta * 2,
+            pageCount: renderer.pageCount,
+          )
+        : _currentPage + delta;
     if (target < 0 || target >= renderer.pageCount) return;
+    final controller = _pageController;
+    if (controller == null || !controller.hasClients) {
+      setState(() => _currentPage = target);
+      _reportLocation(renderer.pageCount);
+      return;
+    }
     unawaited(
-      _pageController.animateToPage(
-        target,
+      controller.animateToPage(
+        _spreadIndexFor(target, renderer.pageCount),
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       ),
@@ -429,23 +498,130 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       narrow: narrow,
       userAdjustedScale: _userAdjustedScale,
     );
+    final mode = _displayMode(renderer.pageCount);
 
-    return Column(
-      children: [
-        Expanded(
-          child: PageView.builder(
-            controller: _pageController,
-            itemCount: renderer.pageCount,
-            onPageChanged: (index) {
-              setState(() => _currentPage = index);
-              _reportLocation(renderer.pageCount);
-            },
-            itemBuilder: (context, index) => _CanvasPage(
+    return CallbackShortcuts(
+      bindings: _shortcutsFor(mode),
+      child: Focus(
+        autofocus: true,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final viewport = Size(constraints.maxWidth, constraints.maxHeight);
+            final pageSize = _layoutPageSize(renderer, mode, viewport);
+            // Resolve this here rather than inside each page so continuous
+            // page heights (and therefore the saved scrollOffset) agree with
+            // what the pages actually paint.
+            final scale = _scaleFor(renderer, mode, viewport, zoomMode, narrow);
+            final previousScale = _layoutScale;
+            _layoutScale = scale;
+            if (mode == PdfDisplayMode.continuous &&
+                previousScale != scale &&
+                _scrollController.hasClients) {
+              _reanchorAfterScaleChange(renderer, pageSize, scale);
+            }
+            return switch (mode) {
+              PdfDisplayMode.continuous => _buildContinuous(
+                renderer,
+                viewport,
+                pageSize: pageSize,
+                scale: scale,
+              ),
+              PdfDisplayMode.single || PdfDisplayMode.double => _buildPaged(
+                renderer,
+                viewport,
+                pageSize: pageSize,
+                scale: scale,
+                mode: mode,
+              ),
+            };
+          },
+        ),
+      ),
+    );
+  }
+
+  // --- layout -----------------------------------------------------------
+
+  PdfDisplayMode _displayMode(int pageCount) {
+    final wide = MediaQuery.sizeOf(context).width >= pdfNarrowViewportWidth;
+    return preferredPdfDisplayMode(
+      readerMode: widget.settings.readerMode,
+      narrow: !wide,
+    );
+  }
+
+  /// The point size a page is laid out from.
+  ///
+  /// Every page must share one scale in continuous mode or the page tops drift
+  /// from where the pages paint. Pages therefore resolve against the document's
+  /// first page (or, in double mode, the left page of the spread), exactly like
+  /// the bridge, which sizes every page from `resolveZoomForPage(first)`
+  /// (`bridge.js:670`).
+  Size _layoutPageSize(
+    PdfCanvasRenderer renderer,
+    PdfDisplayMode mode,
+    Size viewport,
+  ) => renderer.displaySizeOf(0);
+
+  double _scaleFor(
+    PdfCanvasRenderer renderer,
+    PdfDisplayMode mode,
+    Size viewport,
+    PdfZoomMode zoomMode,
+    bool narrow,
+  ) {
+    final columns = mode == PdfDisplayMode.double ? 2 : 1;
+    final gap = mode == PdfDisplayMode.double ? _spreadGap : 0.0;
+    return resolvePdfZoom(
+      mode: zoomMode,
+      customScale: widget.settings.pdfScale,
+      pageSize: _layoutPageSize(renderer, mode, viewport),
+      viewport: viewport,
+      narrow: narrow,
+      pageMargin: widget.settings.pageMargin,
+      columns: columns,
+      columnGap: gap,
+    ).scale;
+  }
+
+  static const _gap = 12.0;
+  static const _spreadGap = 16.0;
+
+  /// Continuous layout: one vertical list, no page turns.
+  Widget _buildContinuous(
+    PdfCanvasRenderer renderer,
+    Size viewport, {
+    required Size pageSize,
+    required double scale,
+  }) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification ||
+            notification is ScrollUpdateNotification) {
+          _syncPageFromScroll(renderer, pageSize, scale, viewport);
+        }
+        return false;
+      },
+      child: ListView.builder(
+        controller: _scrollController,
+        // Never let the list bounce past a page top on overscroll: the
+        // reported scrollOffset would then jump to the next page.
+        physics: const ClampingScrollPhysics(),
+        itemCount: renderer.pageCount,
+        // The gap is part of the item extent, so the tops used for position
+        // reporting and the painted positions cannot disagree.
+        itemExtentBuilder: (index, _) => pageSize.height * scale + _gap,
+        itemBuilder: (context, index) {
+          return Padding(
+            key: ValueKey('pdf-page-$index'),
+            padding: EdgeInsets.only(top: _gap),
+            child: _CanvasPage(
               renderer: renderer,
               pageIndex: index,
               settings: widget.settings,
-              zoomMode: zoomMode,
-              narrow: narrow,
+              scale: scale,
+              layoutPageSize: pageSize,
+              turnOnWheel: false,
               searchQuads: _searchHighlights[index] ?? const [],
               annotations: widget.annotations,
               ocrBlocks: widget.ocrOverlayPage == index + 1
@@ -455,32 +631,326 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               onAnnotationSelected: widget.onEvent,
               onZoomChanged: _handleZoomChanged,
               onPageTurn: _turnPage,
-              onLayoutScaleChanged: index == _currentPage
-                  ? (scale) {
-                      _layoutScale = scale;
-                    }
-                  : null,
             ),
-          ),
-        ),
-        _PdfCanvasPager(
-          page: _currentPage + 1,
-          total: renderer.pageCount,
-          onPrev: _currentPage > 0
-              ? () => _pageController.previousPage(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOut,
-                )
-              : null,
-          onNext: _currentPage < renderer.pageCount - 1
-              ? () => _pageController.nextPage(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOut,
-                )
-              : null,
-        ),
-      ],
+          );
+        },
+      ),
     );
+  }
+
+  /// Paged layout: one spread per horizontal page.
+  Widget _buildPaged(
+    PdfCanvasRenderer renderer,
+    Size viewport, {
+    required Size pageSize,
+    required double scale,
+    required PdfDisplayMode mode,
+  }) {
+    final doubleMode = mode == PdfDisplayMode.double;
+    final spreads = doubleMode
+        ? ((renderer.pageCount - 1) ~/ 2 + 1)
+        : renderer.pageCount;
+    final controller = _ensurePageController(renderer, mode);
+    return PageView.builder(
+      controller: controller,
+      itemCount: spreads,
+      onPageChanged: (index) {
+        final pageIndex = doubleMode ? _pageForSpread(index) : index;
+        if (pageIndex == _currentPage) return;
+        setState(() => _currentPage = pageIndex);
+        _reportLocation(renderer.pageCount);
+      },
+      itemBuilder: (context, spread) {
+        final start = doubleMode ? _pageForSpread(spread) : spread;
+        final end = doubleMode
+            ? pdfSpreadFor(
+                pageIndex: start,
+                pageCount: renderer.pageCount,
+                mode: PdfDisplayMode.double,
+              ).end
+            : start;
+        final indices = [for (var i = start; i <= end; i++) i];
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var i = 0; i < indices.length; i++) ...[
+              if (i > 0) const SizedBox(width: _spreadGap),
+              Flexible(
+                child: _CanvasPage(
+                  key: ValueKey('pdf-page-${indices[i]}'),
+                  renderer: renderer,
+                  pageIndex: indices[i],
+                  settings: widget.settings,
+                  scale: scale,
+                  layoutPageSize: pageSize,
+                  turnOnWheel: true,
+                  searchQuads: _searchHighlights[indices[i]] ?? const [],
+                  annotations: widget.annotations,
+                  ocrBlocks: widget.ocrOverlayPage == indices[i] + 1
+                      ? widget.ocrOverlayBlocks
+                      : const [],
+                  onSelection: widget.onEvent,
+                  onAnnotationSelected: widget.onEvent,
+                  onZoomChanged: _handleZoomChanged,
+                  onPageTurn: _turnPage,
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  /// The `PageController` for the current paged layout.
+  ///
+  /// `PageController.initialPage` is only honoured on creation, so it is
+  /// rebuilt whenever the mode or the page count changes; otherwise switching
+  /// modes would reopen the PDF at the start.
+  PageController _ensurePageController(
+    PdfCanvasRenderer renderer,
+    PdfDisplayMode mode,
+  ) {
+    final initial = _spreadIndexFor(_currentPage, renderer.pageCount);
+    final existing = _pageController;
+    if (existing != null && _pageControllerMode == mode) return existing;
+    existing?.dispose();
+    _pageControllerMode = mode;
+    return _pageController = PageController(initialPage: initial);
+  }
+
+  PdfDisplayMode? _pageControllerMode;
+
+  /// Spread index that shows [pageIndex].
+  int _spreadIndexFor(int pageIndex, int pageCount) {
+    if (_displayMode(pageCount) != PdfDisplayMode.double) return pageIndex;
+    if (pageIndex <= 0) return 0;
+    return (pdfSpreadStart(pageIndex: pageIndex, pageCount: pageCount) + 1) ~/
+        2;
+  }
+
+  /// First page of the spread at [spread].
+  int _pageForSpread(int spread) {
+    if (spread <= 0) return 0;
+    return spread * 2 - 1;
+  }
+
+  // --- scrolling --------------------------------------------------------
+
+  /// Scrolls so that [pageIndex] is at [offset] inside the page.
+  Future<void> _scrollToPage(
+    int pageIndex, {
+    double offset = 0,
+    bool animate = true,
+  }) async {
+    final renderer = _renderer;
+    if (renderer == null) return;
+    final mode = _displayMode(renderer.pageCount);
+
+    if (mode != PdfDisplayMode.continuous) {
+      final controller = _pageController;
+      final target = _spreadIndexFor(pageIndex, renderer.pageCount);
+      if (controller != null && controller.hasClients) {
+        if (animate) {
+          await controller.animateToPage(
+            target,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+          );
+        } else {
+          controller.jumpToPage(target);
+        }
+      }
+      return;
+    }
+
+    if (!_scrollController.hasClients) return;
+    final viewport = _scrollController.position.viewportDimension;
+    final pageSize = renderer.displaySizeOf(0);
+    // Use the scale the last build actually laid the pages out at. Resolving
+    // it again here would need the layout's width, which the scroll position
+    // does not expose, and a mismatched scale lands the jump on the wrong page.
+    final height = pageSize.height * _layoutScale;
+    final tops = pdfPageTops(
+      pageHeights: List.filled(renderer.pageCount, height),
+      gap: _gap,
+    );
+    final target = pdfScrollTarget(
+      pageTops: tops,
+      pageHeights: List.filled(renderer.pageCount, height),
+      pageIndex: pageIndex,
+      offset: offset,
+      viewportHeight: viewport,
+    );
+    if (animate) {
+      await _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _scrollController.jumpTo(target);
+    }
+  }
+
+  /// Re-anchors the reader after every page's height changed.
+  ///
+  /// A zoom or a window resize changes the list's item extent, so a fixed
+  /// `pixels` value would land on a different line. Restoring `pageTop +
+  /// ratio * height` keeps the same fraction of the same page on screen.
+  void _reanchorAfterScaleChange(
+    PdfCanvasRenderer renderer,
+    Size pageSize,
+    double scale,
+  ) {
+    final ratio = _anchorRatio;
+    final controller = _scrollController;
+    if (ratio == null) return;
+    final page = _currentPage;
+    final height = pageSize.height * scale;
+    // The list still has the previous extent during this frame, so the jump
+    // must wait for the layout that uses the new scale. A second scale change
+    // before then supersedes this one.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !controller.hasClients || _layoutScale != scale) return;
+      final heights = List.filled(renderer.pageCount, height);
+      final tops = pdfPageTops(pageHeights: heights, gap: _gap);
+      final position = controller.position;
+      final target = pdfScrollTarget(
+        pageTops: tops,
+        pageHeights: heights,
+        pageIndex: page,
+        offset: ratio * height,
+        viewportHeight: position.viewportDimension,
+      ).clamp(position.minScrollExtent, position.maxScrollExtent);
+      controller.jumpTo(target.toDouble());
+    });
+  }
+
+  /// Recomputes the page and offset from the scroll position.
+  void _syncPageFromScroll(
+    PdfCanvasRenderer renderer,
+    Size pageSize,
+    double scale,
+    Size viewport,
+  ) {
+    if (!_scrollController.hasClients) return;
+    final height = pageSize.height * scale;
+    final tops = pdfPageTops(
+      pageHeights: List.filled(renderer.pageCount, height),
+      gap: _gap,
+    );
+    final scrollY = _scrollController.position.pixels;
+    final page = pdfPageAtScroll(
+      scrollY: scrollY,
+      pageTops: tops,
+      pageHeights: List.filled(renderer.pageCount, height),
+      viewportHeight: viewport.height,
+    );
+    if (page != _currentPage) {
+      setState(() => _currentPage = page);
+    }
+    // Remember how far into the page the reader is; a later zoom uses it to
+    // stay on the same line instead of the same raw pixels.
+    _anchorRatio = height <= 0
+        ? null
+        : ((scrollY - tops[page]) / height).clamp(0.0, 1.0);
+    // Report on every scroll, not only on a page change: the locator's
+    // scrollOffset is what makes reopening land mid-page. The 120/420 ms
+    // debounce inside `_reportLocation` keeps this off the scroll hot path.
+    _reportLocation(renderer.pageCount);
+  }
+
+  double _scrollOffsetForCurrentPage() {
+    final renderer = _renderer;
+    if (renderer == null) return 0;
+    final mode = _displayMode(renderer.pageCount);
+    if (mode != PdfDisplayMode.continuous) return 0;
+    if (!_scrollController.hasClients) return 0;
+    final pageSize = renderer.displaySizeOf(0);
+    final tops = pdfPageTops(
+      pageHeights: List.filled(
+        renderer.pageCount,
+        pageSize.height * _layoutScale,
+      ),
+      gap: _gap,
+    );
+    return pdfScrollOffset(
+      scrollY: _scrollController.position.pixels,
+      pageTops: tops,
+      pageIndex: _currentPage,
+      mode: mode,
+    );
+  }
+
+  /// Restores the saved position once the layout exists.
+  void _restoreSavedPosition() {
+    final renderer = _renderer;
+    if (renderer == null || _restored) return;
+    if (!_scrollController.hasClients && _pageController == null) return;
+    _restored = true;
+    final locator = widget.initialProgress?.locator;
+    if (locator == null) return;
+    unawaited(
+      _scrollToPage(
+        _initialPage(renderer.pageCount),
+        offset: locator.scrollOffset ?? 0,
+        animate: false,
+      ),
+    );
+  }
+
+  /// Keyboard paging, mirroring the EPUB renderer plus the bridge's
+  /// PageUp/PageDown handling. Continuous mode scrolls, paged mode turns.
+  Map<ShortcutActivator, VoidCallback> _shortcutsFor(PdfDisplayMode mode) {
+    void scrollBy(double screens) {
+      final position = _scrollController.hasClients
+          ? _scrollController.position
+          : null;
+      if (position == null) return;
+      final target = (position.pixels + screens * position.viewportDimension)
+          .clamp(position.minScrollExtent, position.maxScrollExtent);
+      unawaited(
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        ),
+      );
+    }
+
+    if (mode == PdfDisplayMode.continuous) {
+      return {
+        const SingleActivator(LogicalKeyboardKey.pageDown): () => scrollBy(0.9),
+        const SingleActivator(LogicalKeyboardKey.pageUp): () => scrollBy(-0.9),
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+            scrollBy(0.12),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+            scrollBy(-0.12),
+        const SingleActivator(LogicalKeyboardKey.space): () => scrollBy(0.9),
+        const SingleActivator(LogicalKeyboardKey.home): () {
+          if (_scrollController.hasClients) {
+            _scrollController.jumpTo(
+              _scrollController.position.minScrollExtent,
+            );
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.end): () {
+          if (_scrollController.hasClients) {
+            _scrollController.jumpTo(
+              _scrollController.position.maxScrollExtent,
+            );
+          }
+        },
+      };
+    }
+    return {
+      const SingleActivator(LogicalKeyboardKey.arrowRight): () => _turnPage(1),
+      const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _turnPage(-1),
+      const SingleActivator(LogicalKeyboardKey.pageDown): () => _turnPage(1),
+      const SingleActivator(LogicalKeyboardKey.pageUp): () => _turnPage(-1),
+      const SingleActivator(LogicalKeyboardKey.space): () => _turnPage(1),
+    };
   }
 }
 
@@ -490,8 +960,9 @@ final class _CanvasPage extends StatefulWidget {
     required this.renderer,
     required this.pageIndex,
     required this.settings,
-    required this.zoomMode,
-    required this.narrow,
+    required this.scale,
+    required this.layoutPageSize,
+    required this.turnOnWheel,
     required this.searchQuads,
     required this.annotations,
     required this.ocrBlocks,
@@ -499,16 +970,32 @@ final class _CanvasPage extends StatefulWidget {
     required this.onAnnotationSelected,
     required this.onZoomChanged,
     required this.onPageTurn,
-    this.onLayoutScaleChanged,
+    super.key,
   });
 
   final PdfCanvasRenderer renderer;
   final int pageIndex;
   final ReaderSettings settings;
 
-  /// Already coerced for narrow viewports by [effectivePdfZoomMode].
-  final PdfZoomMode zoomMode;
-  final bool narrow;
+  /// Logical pixels per PDF point, resolved once for the whole layout.
+  ///
+  /// Pages must not resolve their own zoom: in continuous mode the list gives
+  /// each item an extent derived from the scale, so a page that re-resolved
+  /// against its own constraints would feed back into that extent.
+  final double scale;
+
+  /// Point size every page in the layout resolves its scale from.
+  ///
+  /// Sharing one basis across pages keeps the continuous page tops identical
+  /// to where the pages actually paint; resolving per page would drift on a
+  /// document with mixed page sizes.
+  final Size layoutPageSize;
+
+  /// Whether a plain wheel notch turns a page.
+  ///
+  /// True in the paged layouts. Continuous scrolling leaves the notch to the
+  /// list, so swallowing it here would stop the reader from scrolling.
+  final bool turnOnWheel;
   final List<PdfTextQuad> searchQuads;
   final List<Annotation> annotations;
   final List<Map<String, Object?>> ocrBlocks;
@@ -516,10 +1003,6 @@ final class _CanvasPage extends StatefulWidget {
   final ValueChanged<RendererAnnotationSelected> onAnnotationSelected;
   final PdfZoomChanged onZoomChanged;
   final ValueChanged<int> onPageTurn;
-
-  /// Reports the page's logical-pixels-per-point after layout, for
-  /// `locator.zoom`. Only the current page passes a callback.
-  final ValueChanged<double>? onLayoutScaleChanged;
 
   @override
   State<_CanvasPage> createState() => _CanvasPageState();
@@ -556,24 +1039,11 @@ final class _CanvasPageState extends State<_CanvasPage> {
   ///
   /// `PdfPageRenderer.pageSize` applies /Rotate, so a 90° page lays out and
   /// paints as landscape instead of being cropped to its unrotated box.
-  Size get _pageSize => widget.renderer.displaySizeOf(widget.pageIndex);
+  Size get _pageSize => widget.layoutPageSize;
 
   int get _rotation => widget.renderer.pageAt(widget.pageIndex).rotation;
 
-  PdfZoomGeometry? get _geometry =>
-      _viewport.isEmpty ? null : _resolveGeometry(_viewport);
-
-  PdfZoomGeometry _resolveGeometry(Size viewport) => resolvePdfZoom(
-    mode: widget.zoomMode,
-    customScale: widget.settings.pdfScale,
-    pageSize: _pageSize,
-    viewport: viewport,
-    narrow: widget.narrow,
-    pageMargin: widget.settings.pageMargin,
-  );
-
-  double get _displayScale =>
-      _transientScale ?? _geometry?.scale ?? widget.settings.pdfScale;
+  double get _displayScale => _transientScale ?? widget.scale;
 
   /// Size the page occupies on screen at the current scale.
   Size get _paintedSize =>
@@ -618,8 +1088,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         _viewport = viewport;
-        final geometry = _resolveGeometry(viewport);
-        final scale = _transientScale ?? geometry.scale;
+        final scale = _transientScale ?? widget.scale;
         final content = Size(_pageSize.width * scale, _pageSize.height * scale);
         final pan = _clampPan(_pan, content, viewport);
         // Centre when the page fits; anchor to the top-left when it does not.
@@ -632,30 +1101,29 @@ final class _CanvasPageState extends State<_CanvasPage> {
             ) +
             pan;
 
-        // Report the layout scale once per frame; the parent stores it for
-        // `locator.zoom`. Doing it in the builder (not in a post-frame hook)
-        // keeps the value in sync with what the user is actually looking at.
-        final onScale = widget.onLayoutScaleChanged;
-        if (onScale != null && _pageSize.width > 0) {
-          onScale(scale);
-        }
-
+        // Only an overflowing page has to manage dragging itself; a page that
+        // fits leaves the drag to the list or pager, otherwise it would
+        // swallow scrolling and horizontal swipes. The wheel listener is
+        // always attached because Ctrl+wheel zooms at any scale.
+        final ownsGestures = _overflows(content, viewport);
         return Listener(
           onPointerSignal: _handlePointerSignal,
           child: RawGestureDetector(
             behavior: HitTestBehavior.opaque,
-            gestures: <Type, GestureRecognizerFactory>{
-              _TouchScaleGestureRecognizer:
-                  GestureRecognizerFactoryWithHandlers<
-                    _TouchScaleGestureRecognizer
-                  >(
-                    () => _TouchScaleGestureRecognizer(debugOwner: this),
-                    (recognizer) => recognizer
-                      ..onStart = _onScaleStart
-                      ..onUpdate = _onScaleUpdate
-                      ..onEnd = _onScaleEnd,
-                  ),
-            },
+            gestures: ownsGestures
+                ? <Type, GestureRecognizerFactory>{
+                    _TouchScaleGestureRecognizer:
+                        GestureRecognizerFactoryWithHandlers<
+                          _TouchScaleGestureRecognizer
+                        >(
+                          () => _TouchScaleGestureRecognizer(debugOwner: this),
+                          (recognizer) => recognizer
+                            ..onStart = _onScaleStart
+                            ..onUpdate = _onScaleUpdate
+                            ..onEnd = _onScaleEnd,
+                        ),
+                  }
+                : const <Type, GestureRecognizerFactory>{},
             child: ClipRect(
               child: Stack(
                 children: [
@@ -701,6 +1169,11 @@ final class _CanvasPageState extends State<_CanvasPage> {
     );
   }
 
+  /// Whether the page is larger than the box it sits in on either axis.
+  bool _overflows(Size content, Size viewport) =>
+      content.width > viewport.width + 0.5 ||
+      content.height > viewport.height + 0.5;
+
   /// Keeps the content from being dragged away from the viewport edges.
   Offset _clampPan(Offset pan, Size content, Size viewport) {
     final maxX = math.max(0.0, (content.width - viewport.width) / 2);
@@ -713,8 +1186,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
   void _onScaleStart(ScaleStartDetails details) {
     final viewport = _viewport;
     if (viewport.isEmpty) return;
-    final geometry = _resolveGeometry(viewport);
-    final scale = _transientScale ?? geometry.scale;
+    final scale = _transientScale ?? widget.scale;
     final content = Size(_pageSize.width * scale, _pageSize.height * scale);
     final pan = _clampPan(_pan, content, viewport);
     final center = Offset(viewport.width / 2, viewport.height / 2);
@@ -772,17 +1244,19 @@ final class _CanvasPageState extends State<_CanvasPage> {
       final notches = event.scrollDelta.dy;
       if (notches == 0) return;
       // One notch is one 10% step, like the bridge's Ctrl+wheel handler.
+      // Zoom is ours wherever it happens, so claim the signal before an
+      // ancestor Scrollable scrolls on it too.
+      _claimSignal(event);
       _applyZoom(_displayScale + (notches < 0 ? pdfZoomStep : -pdfZoomStep));
       return;
     }
 
     final content = _paintedSize;
-    // A page wider than the viewport can only happen past fit-width, and
-    // there the wheel has to pan or the page would be unreachable: mouse
-    // drags select text, so the wheel is the only pointer way to move it.
-    // A page that is only taller (fit-width on a portrait page) still turns
-    // pages, matching the bridge's single/double display behaviour.
+    // A page wider than its box can only happen past fit-width. There the
+    // wheel has to pan or the page would be unreachable: mouse drags select
+    // text, so the wheel is the only pointer way to move it.
     if (content.width > viewport.width + 0.5) {
+      _claimSignal(event);
       // Shift maps the vertical wheel to horizontal, since a mouse has no
       // horizontal wheel.
       final delta = keyboard.isShiftPressed
@@ -794,8 +1268,9 @@ final class _CanvasPageState extends State<_CanvasPage> {
       return;
     }
 
-    // Bridge behaviour for single/double display: the wheel turns pages.
-    // S2 replaces this with real scrolling in continuous mode.
+    // Nothing to pan. In continuous mode the list owns the notch, so stop
+    // here; in the paged layouts a notch turns a spread, as the bridge did.
+    if (!widget.turnOnWheel) return;
     final vertical = event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
         ? event.scrollDelta.dy
         : event.scrollDelta.dx;
@@ -805,7 +1280,16 @@ final class _CanvasPageState extends State<_CanvasPage> {
       return;
     }
     _lastWheelTurn = now;
+    _claimSignal(event);
     widget.onPageTurn(vertical > 0 ? 1 : -1);
+  }
+
+  /// Stops the signal from reaching an ancestor Scrollable.
+  ///
+  /// Pointer signals travel to every hit-test entry; the resolver lets the
+  /// deepest interested widget claim one and drop the rest.
+  void _claimSignal(PointerScrollEvent event) {
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {});
   }
 
   /// Sets the zoom for the session and hands it to the host to persist.
@@ -830,7 +1314,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
     }
     _lastTapAt = null;
     _lastTapGlobal = null;
-    if (widget.zoomMode == PdfZoomMode.fitWidth) {
+    if (widget.settings.pdfZoomMode == PdfZoomMode.fitWidth) {
       _applyZoom(2.0);
     } else {
       // Fit-width is a mode, not a scale; the host resolves it from the
@@ -1156,43 +1640,6 @@ final class _PicturePainter extends CustomPainter {
       old.annotations != annotations ||
       old.ocrBoxes != ocrBoxes ||
       old.pxPerPoint != pxPerPoint;
-}
-
-final class _PdfCanvasPager extends StatelessWidget {
-  const _PdfCanvasPager({
-    required this.page,
-    required this.total,
-    this.onPrev,
-    this.onNext,
-  });
-
-  final int page;
-  final int total;
-  final VoidCallback? onPrev;
-  final VoidCallback? onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            tooltip: '上一页',
-            onPressed: onPrev,
-          ),
-          Text('第 $page / $total 页'),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            tooltip: '下一页',
-            onPressed: onNext,
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// Paints the rasterised page and turns pointer gestures into selection events.

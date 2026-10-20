@@ -343,4 +343,49 @@ void main() {
     await harness.capture('09-rotated-page');
     await harness.closeReader(tester);
   });
+
+  testWidgets('continuous scrolling restores the place inside a page', (
+    tester,
+  ) async {
+    final harness = await harnessFor();
+    await harness.pumpReader(tester, 'standard', size: const Size(1280, 800));
+
+    // Several Scrollables exist in the reader chrome (the TOC, side panels),
+    // and the first one is horizontal. Resolve the canvas list through the
+    // page widget itself: its nearest scrollable ancestor can only be the
+    // continuous list.
+    ScrollPosition listPosition() {
+      final page = find.byKey(const ValueKey('pdf-page-0'));
+      expect(page, findsOneWidget);
+      final scrollable = Scrollable.maybeOf(tester.element(page));
+      expect(scrollable, isNotNull, reason: 'page must sit in the list');
+      return scrollable!.position;
+    }
+
+    final first = listPosition();
+    expect(first.axis, Axis.vertical);
+    // The sample is 3 letter pages at fit-width, taller than the window.
+    expect(first.maxScrollExtent, greaterThan(0));
+
+    // Drag the page itself, the way a reader scrolls: the page is taller than
+    // the viewport, so the list scrolls within one page.
+    await tester.drag(
+      find.byKey(const ValueKey('pdf-page-0')),
+      const Offset(0, -160),
+    );
+    await harness.settle(tester);
+    final scrolled = listPosition().pixels;
+    expect(scrolled, greaterThan(0), reason: 'the drag must scroll the list');
+    await harness.capture('10-continuous-scroll');
+
+    // Reopen: the stored scrollOffset must put the reader back at the same
+    // position, which is S2's acceptance criterion.
+    await harness.closeReader(tester);
+    await harness.pumpReader(tester, 'standard', size: const Size(1280, 800));
+    final reopened = listPosition().pixels;
+    // One text line at fit-width is roughly 20–30 logical pixels.
+    expect(reopened, closeTo(scrolled, 30));
+    await harness.capture('11-continuous-restored');
+    await harness.closeReader(tester);
+  });
 }

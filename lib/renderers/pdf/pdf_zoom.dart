@@ -95,6 +95,8 @@ PdfZoomGeometry resolvePdfZoom({
   required Size viewport,
   required bool narrow,
   double pageMargin = 24,
+  int columns = 1,
+  double columnGap = 0,
 }) {
   final margin = pdfPageMargin(pageMargin, narrow: narrow);
   if (pageSize.width <= 0 || pageSize.height <= 0) {
@@ -108,8 +110,14 @@ PdfZoomGeometry resolvePdfZoom({
   }
 
   // The bridge floors the box so a collapsed window still yields a usable
-  // scale instead of a degenerate one.
-  final availableWidth = math.max(viewport.width - margin * 2, 120.0);
+  // scale instead of a degenerate one. A double-page spread splits the width
+  // between the columns and reserves the gutter, exactly like
+  // `availablePageBox()` (`bridge.js:348`).
+  final gap = columns > 1 ? columnGap : 0.0;
+  final availableWidth = math.max(
+    (viewport.width - margin * 2 - gap) / math.max(columns, 1),
+    120.0,
+  );
   final availableHeight = math.max(viewport.height - margin * 2, 180.0);
   final widthScale = availableWidth / pageSize.width;
   final heightScale = availableHeight / pageSize.height;

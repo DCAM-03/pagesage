@@ -334,11 +334,11 @@ Canvas 当前把下划线画成 `box.rect.height * 0.15`（`:672`），而 `box.
 
 逐条对应 `docs/tasks/pdf-reader.md` 未勾选项与 v1 冻结项：
 
-- [ ] 常规 PDF 可打开并连续滚动（S2）
-- [ ] 退出后恢复到对应页与页内位置（S2）
+- [x] 常规 PDF 可打开并连续滚动（S2）
+- [x] 退出后恢复到对应页与页内位置（S2）
 - [ ] 缩放与适合宽度无错位/裁切（S1）
 - [ ] 页码跳转可靠（S0）
-- [ ] 单页/双页模式可用（S2，共用 `ReaderSettings.readerMode`）
+- [x] 单页/双页模式可用（S2，共用 `ReaderSettings.readerMode`）
 - [ ] outline 跳转 + 无 outline 页码回退（S4）
 - [ ] 文本层检测如实上报，扫描件禁用划词/搜索并给出原因（S0）
 - [ ] 桌面拖选、移动长按选词 + 手柄、跨页选择（S3）
@@ -593,3 +593,49 @@ pkill -f "kwin_wayland --virtual --socket pagesage-test"
 ```
 
 注意只清理带 `--socket pagesage-test` 的进程，不要误杀桌面自己的 kwin。
+
+## 17. S2 施工记录（2026-10-20）
+
+按 §5 S2 完成：连续滚动、页内位置（`scrollOffset`）与恢复、单页/双页显示、删除自绘 pager（F-01 单 chrome）。布局算术全部收敛到 `lib/renderers/pdf/pdf_layout.dart`（纯函数），视图只负责把它接到 Flutter 的滚动/翻页控件上。
+
+### 17.1 与计划的偏差
+
+| # | 计划 | 实际 | 原因 |
+| --- | --- | --- | --- |
+| 1 | 步骤 2：滚动停止 120 ms 后上报 | 每次滚动都调用 `_reportLocation`，节流仍在定时器内部（桌面 120 ms / 窄屏 420 ms）；并且页码与 `scrollOffset` 在**定时器触发时**才计算 | 只在"页码变化"时上报会让页内滚动永远不落库；在调度时计算则会在快速滚动后上报中途位置。定时器触发时读取，一次连续滚动只落最后位置 |
+| 2 | 步骤 1：横向放大时外层 `SingleChildScrollView` | 未实现；放大后仍由页面自身平移（S1 已有的 `_CanvasPage` 平移手势） | S1 的点空间 Picture 回放让页面在任意缩放下直接按内容尺寸布局，页面内部已有平移；再套一层外层滚动会与列表滚动冲突，且双击/Ctrl+滚轮都能回到适配比例 |
+| 3 | 步骤 3：缩放变化时按「当前页 + 页内比例」重定位 | 已实现：滚动时记录 `_anchorRatio = (scrollY - pageTop) / pageHeight`，缩放后在新布局的后帧用 `pdfScrollTarget(page, ratio * 新页高)` 跳回 | 缩放会改变列表的 item extent，固定 `pixels` 会滑到别的行；实测 fit-width(1.556) → 自定义 1.4 时，页内位置从 120 px 变为 108 px（120/1124 ≈ 108/1013），仍是同一行 |
+| 4 | 步骤 4：双页默认 `fitPage` | 没有按模式改默认缩放；双页沿用用户设置的 `zoomMode`，只在宽度上按两栏 + 16 px 书脊重新分配 | 缩放是用户的持久设置，按显示模式偷偷改掉会让"切回连续"时也变成 fitPage。两栏宽度分配已保证双页放得下 |
+| 5 | 步骤 5：方向键/PageUp/PageDown 翻页 | 连续模式：方向键/PageUp/PageDown 滚动约 90% 视口；分页模式：方向键/PageUp/PageDown/空格翻页 | 连续模式没有"翻页"语义，方向键应当滚动，与浏览器一致；分页模式补上空格翻页，与 EPUB 渲染器一致 |
+| 6 | 恢复用 `jumpTo(pageTop + scrollOffset)` | `_scrollToPage` 统一处理连续与分页两种模式；连续模式用**构建时实际使用的** `_layoutScale` 计算页面高度 | 在 `_scrollToPage` 里重新 `resolvePdfZoom` 需要布局宽度，而滚动位置只有高度；重新解析会把高度当宽度，落到错误的页 |
+
+### 17.2 计划外发现（已修，各有回归测试）
+
+| # | 现象 | 根因 | 覆盖 |
+| --- | --- | --- | --- |
+| A | 连续模式下滚轮/拖拽完全不滚动 | 页面即使小于视口也挂着 `ScaleGestureRecognizer`，手势竞技场里赢过 `ListView` 的拖拽 | `_CanvasPage` 只在 `_overflows(content, viewport)` 时注册拖拽手势；`turnOnWheel` 区分"滚轮归列表"与"滚轮翻页" |
+| B | 分页模式触摸拖动不翻页（测试中） | 桌面划词用的 `_MousePanGestureRecognizer` 吞掉了鼠标拖拽 | 产品行为正确（桌面用键盘/滚轮翻页）；测试改走 `arrowRight` 桌面路径，同时覆盖步骤 5 的快捷键 |
+| C | 恢复位置落到第 2 页而不是第 3 页 | `_scrollToPage` 用滚动视口**高度**当宽度重新解析缩放 | 改用构建期记录的 `_layoutScale`（见 17.1 #6） |
+| D | 双页跨页配对错位（封面与第 2 页一组） | 索引从 0 开始（封面是 0），配对起点应为奇数 | `pdfSpreadFor` 用 `isOdd`：封面单独，之后 (1,2)、(3,4)……；`pdf_layout_test.dart` 覆盖十页文档的尾页单独情形 |
+| E | 恢复时页内偏移被压成 0 | `maxOffset` 取 `height - min(viewport, height)`，比视口矮的页永远偏移 0 | 改为页面自身高度：偏移可以到页尾，但不会越进下一页 |
+| G | 缩放后读者滑到别的行（计划步骤 3 的验收点） | 列表 `pixels` 不变，但每页高度随缩放变化 | 新增 `_anchorRatio` + `_reanchorAfterScaleChange`（后帧跳转，若期间又缩放则放弃本次）；测试断言 fit-width → 1.4 后页内位置为 108 而非 120 |
+| F | 集成测试里 `find.byType(Scrollable).first` 是横向的、且 `maxScrollExtent == 0` | 阅读器侧栏/TOC 也是 `Scrollable`，`first` 不是画布列表 | 测试改为从 `pdf-page-0` 元素用 `Scrollable.maybeOf` 取最近的滚动祖先，再断言 `axis == Axis.vertical` |
+
+### 17.3 验证结果
+
+- `dart format`：仅触及文件被重排；`flutter analyze`：3 条 info，全部在 `poc_pdf_canvas/`（S7 删除该目录后消失），仓库自身代码 0 error。
+- 纯函数测试 `test/renderers/pdf/pdf_layout_test.dart` 17 项：模式映射（含窄屏不允许 double）、跨页配对（封面单独、2-3/4-5、尾页单独、单页文档）、连续模式总高度与 page tops、滚动锚点（28% / 48 px 下限）、非连续模式 `scrollOffset` 恒 0、恢复目标（页内偏移、页高上限、越界页码）。
+- 组件测试 `test/renderers/pdf/` 共 62 项全过，其中 S2 新增：
+  - 保存 `scrollOffset: 120` 重开后仍在第 2 页且偏移 120；
+  - 拖动后上报的 `pageNumber` 与 `scrollOffset` 都正确；
+  - 连续模式下滚轮滚动而不翻页；
+  - 宽窗分页显示跨页（封面 → 2-3）、窄窗降级为单页、分页 `scrollOffset` 为 0；
+  - S1 的适配/自定义/fit-page/旋转页预期随"删除自绘 pager"更新（fit-page 由 396 变为 452）。
+  - 缩放后按页内比例重定位：fit-width → 自定义 1.4 时，页内偏移由 120 变为 108，页码不变。
+- 真实窗口集成测试（`integration_test/reader_s0_test.dart`，10 项全过）：新增"连续滚动后重开回到页内同一位置"（`scrollOffset` 误差 < 30 px），并保留 S0/S1 的 9 项（选字菜单、标注、跳页、扫描件、第 40 页重开、Ctrl+滚轮缩放、旋转页）。
+- `flutter test`：248 项通过、2 项跳过；仍为 4 项 `widget_test.dart` 失败（移动端分类弹层、短窗口阅读控制条、设置弹层与页面标题），与 S2 改动前一致。
+- 视觉取证：`build/integration-captures/10-continuous-scroll.png`、`11-continuous-restored.png` 覆盖连续滚动与恢复位置。
+
+### 17.4 已知限制
+
+- 混合页面尺寸的文档仍以第 1 页尺寸统一布局（与 bridge 的 `resolveZoomForPage(first)` 一致），页面本身按其真实显示尺寸绘制并居中，因此不同高度页之间会有额外留白，但不影响位置换算。

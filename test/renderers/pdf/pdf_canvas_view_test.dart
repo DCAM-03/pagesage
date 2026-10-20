@@ -17,6 +17,15 @@ import 'support/canvas_test_helpers.dart';
 /// These run against the real sample PDFs, so they exercise the actual
 /// renderer rather than a stand-in. Rasterising needs a frame per page, so
 /// every test pumps until the ready event arrives.
+/// Turns to the next spread the way a desktop reader does.
+///
+/// A touch drag would also work on a tablet, but a PDF page owns mouse drags
+/// for text selection, and the arrow key is the reliable desktop path.
+Future<void> nextSpread(WidgetTester tester) async {
+  await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   Book bookFor(String sample) => Book(
     id: 'test',
@@ -102,9 +111,9 @@ void main() {
         .toList();
     expect(locations, isNotEmpty);
     expect(locations.last.pageNumber, 3);
-    // And the PageView itself must actually be on page 3.
-    final pager = find.text('第 3 / 3 页');
-    expect(pager, findsOneWidget);
+    // And the layout itself must actually be showing page 3: S2 removed the
+    // renderer's own pager, so check the page widget rather than its label.
+    expect(find.byKey(const ValueKey('pdf-page-2')), findsOneWidget);
   });
 
   testWidgets('keeps page 40 of an 80-page book after reopening', (
@@ -120,7 +129,7 @@ void main() {
       savedLocator: saved,
     );
     expect(first.events.whereType<RendererReady>(), isNotEmpty);
-    expect(find.text('第 40 / 80 页'), findsOneWidget);
+    expect(find.byKey(const ValueKey('pdf-page-39')), findsOneWidget);
     expect(
       first.events.whereType<RendererLocationChanged>().last.pageNumber,
       40,
@@ -137,7 +146,7 @@ void main() {
       session: 1,
     );
     expect(reopened.events.whereType<RendererReady>(), isNotEmpty);
-    expect(find.text('第 40 / 80 页'), findsOneWidget);
+    expect(find.byKey(const ValueKey('pdf-page-39')), findsOneWidget);
     expect(
       reopened.events.whereType<RendererLocationChanged>().last.pageNumber,
       40,
@@ -263,9 +272,9 @@ void main() {
       );
       final page = paintedPageRect(tester);
       expect(page, isNotNull);
-      // The page box inside the reader is 500 tall minus the bottom pager
-      // (~44) and the 24px margins.
-      expect(page!.height, closeTo(396, 1));
+      // The page box is 500 tall minus the 24px margins. S2 removed the
+      // renderer's own bottom pager, so nothing else is subtracted.
+      expect(page!.height, closeTo(452, 1));
     });
 
     testWidgets('a rotated page is laid out landscape', (tester) async {
@@ -307,20 +316,21 @@ void main() {
       expect(paintedPageRect(tester)!.width, closeTo(612 * 1.6, 1));
     });
 
-    testWidgets('plain wheel turns pages in a single-page layout', (
-      tester,
-    ) async {
+    testWidgets('plain wheel turns pages in paged mode', (tester) async {
+      // 1000px is wide enough for a spread, so pin the display to single by
+      // narrowing the window.
       await pumpReader(
         tester,
         'standard-text.pdf',
-        viewport: const Size(1000, 900),
+        viewport: const Size(800, 900),
+        settings: const ReaderSettings(readerMode: ReaderMode.paged),
         savedLocator: ReadingLocator.pdf(page: 1, progress: 0),
       );
-      expect(find.text('第 1 / 3 页'), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-page-0')), findsOneWidget);
       await simulateWheel(tester, const Offset(0, 60));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(milliseconds: 250));
-      expect(find.text('第 2 / 3 页'), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-page-1')), findsOneWidget);
     });
 
     testWidgets('a page wider than the viewport pans instead of turning', (
@@ -344,7 +354,6 @@ void main() {
       expect(before, isNotNull);
       expect(after, isNotNull);
       expect(after!.left, lessThan(before!.left));
-      expect(find.text('第 1 / 3 页'), findsOneWidget);
     });
 
     testWidgets('remembers the zoom in the reported locator', (tester) async {
@@ -359,6 +368,203 @@ void main() {
       );
       final location = result.events.whereType<RendererLocationChanged>().last;
       expect(location.locator.zoom, closeTo(1.6, 0.001));
+    });
+  });
+
+  group('S2 continuous scrolling', () {
+    testWidgets('a saved scrollOffset reopens at the same place', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        // Page 2 with 120 logical pixels scrolled into it.
+        savedLocator: ReadingLocator.pdf(
+          page: 2,
+          progress: 0.5,
+          scrollOffset: 120,
+        ),
+      );
+      final location = result.events.whereType<RendererLocationChanged>().last;
+      expect(location.pageNumber, 2);
+      expect(location.locator.scrollOffset, closeTo(120, 1));
+      expect(find.byKey(const ValueKey('pdf-page-1')), findsOneWidget);
+    });
+
+    testWidgets('scrolling reports the page and its within-page offset', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        savedLocator: ReadingLocator.pdf(page: 1, progress: 0),
+      );
+
+      // The page is taller than the 900px viewport at fit-width, so the list
+      // scrolls within page 1 before it reaches page 2.
+      await tester.drag(
+        find.byKey(const ValueKey('pdf-page-0')),
+        const Offset(0, -300),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final location = result.events.whereType<RendererLocationChanged>().last;
+      expect(location.pageNumber, 1);
+      expect(location.locator.scrollOffset, greaterThan(0));
+    });
+
+    testWidgets('a wheel notch scrolls instead of turning a page', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        savedLocator: ReadingLocator.pdf(page: 1, progress: 0),
+      );
+      // A page wider than the viewport closes the wheel as pan for S1; at
+      // fit-width it becomes a scroll in continuous mode.
+      await simulateWheel(tester, const Offset(0, 80));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final locations = result.events
+          .whereType<RendererLocationChanged>()
+          .toList();
+      // Still on page 1, and the reported offset moved.
+      expect(locations.last.pageNumber, 1);
+      expect(locations.last.locator.scrollOffset, greaterThan(0));
+      expect(find.byKey(const ValueKey('pdf-page-0')), findsOneWidget);
+    });
+
+    testWidgets('zooming keeps the same fraction of the page in view', (
+      tester,
+    ) async {
+      // Plan step 3: a scale change re-anchors on page + within-page ratio.
+      // Without it the list keeps the raw scroll pixels while every page's
+      // height changes, and the reader slides to another line.
+      final events = <RendererEvent>[];
+      final book = bookFor('standard-text.pdf');
+      tester.view.physicalSize =
+          const Size(1000, 900) * tester.view.devicePixelRatio;
+      addTearDown(tester.view.reset);
+
+      Widget app(ReaderSettings settings) => ProviderScope(
+        child: MaterialApp(
+          home: Scaffold(
+            body: PdfCanvasView(
+              // Same key both times: this is a settings change, not a reopen,
+              // so the reader must keep its place across the rebuild.
+              key: const ValueKey('zoom-anchor'),
+              book: book,
+              settings: settings,
+              initialProgress: ReadingProgressSnapshot(
+                bookId: book.id,
+                locator: ReadingLocator.pdf(
+                  page: 2,
+                  progress: 0.5,
+                  scrollOffset: 120,
+                ),
+                progress: 0.5,
+                updatedAt: 0,
+              ),
+              annotations: const [],
+              onEvent: events.add,
+            ),
+          ),
+        ),
+      );
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(app(const ReaderSettings()));
+        for (var i = 0; i < 40; i++) {
+          await tester.pump(const Duration(milliseconds: 25));
+          await Future<void>.delayed(const Duration(milliseconds: 25));
+          if (events.whereType<RendererReady>().isNotEmpty) break;
+        }
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 40));
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+        }
+
+        final page = find.byKey(const ValueKey('pdf-page-1'));
+        final beforeTop = tester.getRect(page).top;
+        // The page top sits above the viewport, so `-top` is how far into the
+        // page the reader has scrolled.
+        expect(beforeTop, closeTo(-120, 2));
+
+        await tester.pumpWidget(
+          app(
+            const ReaderSettings(
+              pdfScale: 1.4,
+              pdfZoomMode: PdfZoomMode.custom,
+            ),
+          ),
+        );
+        for (var i = 0; i < 10; i++) {
+          await tester.pump(const Duration(milliseconds: 40));
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+        }
+
+        // Page height went from 1124 to 1013 at the smaller scale; keeping the
+        // ratio 120/1124 puts the same line at about 108 px into the page.
+        final after = tester.getRect(find.byKey(const ValueKey('pdf-page-1')));
+        expect(-after.top, closeTo(108, 2));
+        final location = events.whereType<RendererLocationChanged>().last;
+        expect(location.locator.scrollOffset, closeTo(108, 2));
+        expect(location.pageNumber, 2);
+      });
+    });
+  });
+
+  group('S2 paged modes', () {
+    testWidgets('a wide window in paged mode shows a spread', (tester) async {
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1200, 900),
+        settings: const ReaderSettings(readerMode: ReaderMode.paged),
+      );
+      // Cover alone, then pages 2 and 3 together.
+      expect(find.byKey(const ValueKey('pdf-page-0')), findsOneWidget);
+      await nextSpread(tester);
+      expect(find.byKey(const ValueKey('pdf-page-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-page-2')), findsOneWidget);
+    });
+
+    testWidgets('a narrow window degrades a spread to a single page', (
+      tester,
+    ) async {
+      await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(800, 900),
+        settings: const ReaderSettings(readerMode: ReaderMode.paged),
+      );
+      await nextSpread(tester);
+      expect(find.byKey(const ValueKey('pdf-page-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-page-2')), findsNothing);
+    });
+
+    testWidgets('a spread reports a zero scrollOffset', (tester) async {
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1200, 900),
+        settings: const ReaderSettings(readerMode: ReaderMode.paged),
+        savedLocator: ReadingLocator.pdf(
+          page: 2,
+          progress: 0.5,
+          scrollOffset: 200,
+        ),
+      );
+      final location = result.events.whereType<RendererLocationChanged>().last;
+      expect(location.pageNumber, 2);
+      // A paged layout has no sub-page position to restore.
+      expect(location.locator.scrollOffset, 0);
     });
   });
 }
