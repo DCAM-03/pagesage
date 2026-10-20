@@ -384,6 +384,7 @@ final class _MemoryTaskRepository implements TaskRepository {
     String? bookId,
     String? message,
     String? error,
+    bool clearError = false,
   }) async {
     final index = tasks.indexWhere((task) => task.id == id);
     final previous = tasks[index];
@@ -396,7 +397,7 @@ final class _MemoryTaskRepository implements TaskRepository {
       bookId: bookId ?? previous.bookId,
       progress: progress ?? previous.progress,
       message: message ?? previous.message,
-      error: error ?? previous.error,
+      error: error ?? (clearError ? null : previous.error),
       createdAt: previous.createdAt,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );

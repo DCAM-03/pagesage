@@ -11,6 +11,14 @@ import '../../domain/books/book.dart';
 import '../tasks/task_cancellation.dart';
 import 'app_paths.dart';
 
+/// Paints a PDF's first page into a PNG, or returns null when it cannot.
+///
+/// Injected rather than imported so this file — and the `dart run` tools built
+/// on it — stay free of `dart:ui`. The app passes `PdfCoverRenderer`, which
+/// renders the page the reader would see; a headless caller passes nothing and
+/// gets the embedded-JPEG fallback.
+typedef PdfCoverPainter = Future<Uint8List?> Function(Uint8List bytes);
+
 final class BookMetadata {
   const BookMetadata({
     this.title,
@@ -28,11 +36,17 @@ final class BookMetadata {
 }
 
 final class MetadataExtractor {
-  const MetadataExtractor({required AppPaths appPaths}) : this._(appPaths);
+  const MetadataExtractor({
+    required AppPaths appPaths,
+    PdfCoverPainter? pdfCoverPainter,
+  }) : this._(appPaths, pdfCoverPainter);
 
-  const MetadataExtractor._(this._appPaths);
+  const MetadataExtractor._(this._appPaths, this._pdfCoverPainter);
 
   final AppPaths _appPaths;
+
+  /// Optional page painter for PDF covers; null falls back to embedded images.
+  final PdfCoverPainter? _pdfCoverPainter;
 
   Future<BookMetadata> extract({
     required File file,
@@ -244,15 +258,11 @@ final class MetadataExtractor {
       // Keep going — cover heuristic can still succeed on imperfect PDFs.
     }
 
-    // Cover heuristic scans embedded JPEG markers; cap work on huge files.
-    String? coverPath;
-    if (bytes.lengthInBytes <= 80 * 1024 * 1024) {
-      coverPath = await _extractPdfCover(
-        bytes: bytes,
-        bookId: bookId,
-        cancelToken: cancelToken,
-      );
-    }
+    final coverPath = await _extractPdfCover(
+      bytes: bytes,
+      bookId: bookId,
+      cancelToken: cancelToken,
+    );
     return BookMetadata(
       title: title,
       author: author,
@@ -261,20 +271,45 @@ final class MetadataExtractor {
     );
   }
 
-  /// Heuristic PDF cover: pick the largest embedded JPEG stream.
-  /// Many publisher PDFs store the first-page art as DCTDecode images.
+  /// Cover for a PDF: page 1, painted.
+  ///
+  /// A PDF has no cover manifest — page 1 is the only thing every book agrees
+  /// on, and it is what opening the book shows. The previous heuristic scanned
+  /// the file for embedded JPEG streams and kept the largest cover-sized one,
+  /// which surfaced whatever photograph the body happened to contain (in
+  /// practice: screenshots of code) and produced nothing at all for a
+  /// vector-only first page. Rendering is a few hundred milliseconds on a
+  /// dense page and happens once, during import.
+  ///
+  /// Falls back to the embedded-image scan when no painter is supplied or the
+  /// page cannot be rasterized: a headless caller (a unit test without a
+  /// renderer, the CLI refresh tool) has no platform rasterizer but can still
+  /// pick a stream.
   Future<String?> _extractPdfCover({
     required Uint8List bytes,
     required String bookId,
     TaskCancelToken? cancelToken,
   }) async {
     cancelToken?.throwIfCancelled();
+    final painter = _pdfCoverPainter;
+    final rendered = painter == null ? null : await painter(bytes);
+    cancelToken?.throwIfCancelled();
+    if (rendered != null && rendered.length > 128) {
+      final targetPath = await _appPaths.coverPath(
+        bookId: bookId,
+        extension: 'png',
+      );
+      await File(targetPath).writeAsBytes(rendered, flush: true);
+      return targetPath;
+    }
     final jpegs = _extractEmbeddedJpegs(bytes);
     if (jpegs.isEmpty) {
       return null;
     }
+    // Largest first: the cover art of a scanned book is its biggest image, and
+    // the common failure — a screenshot of body content — is now only reached
+    // when page 1 itself could not be painted.
     jpegs.sort((a, b) => b.length.compareTo(a.length));
-    // Prefer a "cover-sized" image: not tiny icons, not multi-MB scans first.
     Uint8List? chosen;
     for (final jpeg in jpegs) {
       if (!_looksLikeValidJpeg(jpeg)) {

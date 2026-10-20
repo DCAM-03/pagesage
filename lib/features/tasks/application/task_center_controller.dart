@@ -55,10 +55,19 @@ final class TaskCenterController {
   final SearchIndexer _searchIndexer;
   final TaskCancellationRegistry _taskCancellationRegistry;
 
+  /// Marks tasks left running by a previous session as failed.
+  ///
+  /// This runs whenever the task center mounts, which is also *while* an
+  /// import from this session may still be running. A task with a live cancel
+  /// token is this process's own work, not an interrupted run, so it is left
+  /// alone (the task used to flip to 失败 mid-import until it finished).
   Future<void> recoverInterruptedTasks() async {
     final tasks = await _taskRepository.getTasks();
     for (final task in tasks) {
       if (!_isActive(task.status)) {
+        continue;
+      }
+      if (_taskCancellationRegistry.isLive(task.id)) {
         continue;
       }
       await _taskRepository.updateStatus(
@@ -164,6 +173,8 @@ final class TaskCenterController {
         status: PageSageTaskStatus.done,
         progress: 1,
         message: '索引已重建',
+        // Recovering from a failed index: the stored error is stale now.
+        clearError: true,
       );
       _taskCancellationRegistry.complete(task.id);
     } on TaskCancelledException {

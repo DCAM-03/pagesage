@@ -991,6 +991,7 @@ final class _FakeTaskRepository implements TaskRepository {
     String? bookId,
     String? message,
     String? error,
+    bool clearError = false,
   }) async {}
 
   @override

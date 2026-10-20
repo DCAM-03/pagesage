@@ -45,4 +45,36 @@ void main() {
     expect(saved.single.bookId, 'book-1');
     expect(saved.single.message, '正在建立索引');
   });
+
+  test('clears a stored error only when asked to', () async {
+    final task = await repository.saveTask(
+      id: 'task-1',
+      type: PageSageTaskType.importBook,
+      status: PageSageTaskStatus.failed,
+      progress: 0.5,
+      message: '失败',
+      error: '上次运行中断',
+    );
+
+    // Progress updates must not drop the failure details by accident.
+    await repository.updateStatus(
+      id: task.id,
+      status: PageSageTaskStatus.running,
+      progress: 0.7,
+      message: '正在导入',
+    );
+    expect((await repository.getTasks()).single.error, '上次运行中断');
+
+    // A successful retry removes them explicitly.
+    await repository.updateStatus(
+      id: task.id,
+      status: PageSageTaskStatus.done,
+      progress: 1,
+      message: '导入完成',
+      clearError: true,
+    );
+    final saved = (await repository.getTasks()).single;
+    expect(saved.status, PageSageTaskStatus.done);
+    expect(saved.error, isNull);
+  });
 }

@@ -462,6 +462,10 @@ final class ImportUseCase {
       bookId: book.id,
       targetPath: book.libraryFilePath,
       message: '导入完成',
+      // A previous run may have failed and recorded an error (an interrupted
+      // import, or a failed index that this retry recovered from). Leaving it
+      // set made a finished task still show 失败 details.
+      clearError: true,
     );
     _taskCancellationRegistry.complete(taskId);
   }

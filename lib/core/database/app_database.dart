@@ -1168,6 +1168,7 @@ class TaskDao extends DatabaseAccessor<AppDatabase> with _$TaskDaoMixin {
     String? bookId,
     String? message,
     String? error,
+    bool clearError = false,
   }) {
     return (update(importTasks)..where((row) => row.id.equals(id))).write(
       ImportTasksCompanion(
@@ -1178,7 +1179,14 @@ class TaskDao extends DatabaseAccessor<AppDatabase> with _$TaskDaoMixin {
             : Value(targetPath),
         bookId: bookId == null ? const Value.absent() : Value(bookId),
         message: message == null ? const Value.absent() : Value(message),
-        error: error == null ? const Value.absent() : Value(error),
+        // Passing no error keeps the stored one; a retry that succeeds has to
+        // remove it explicitly, or the details sheet keeps showing the failure
+        // that was already recovered from.
+        error: error != null
+            ? Value(error)
+            : clearError
+            ? const Value(null)
+            : const Value.absent(),
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );

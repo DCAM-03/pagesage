@@ -69,4 +69,14 @@ final class TaskCancellationRegistry {
     return _cancelledIds.contains(taskId) ||
         (_tokens[taskId]?.isCancelled ?? false);
   }
+
+  /// Whether [taskId]'s work is running in this process right now.
+  ///
+  /// Startup recovery uses this to tell a task left over from a previous run
+  /// (no token at all) from one this session is still executing. A task whose
+  /// token was registered but then cancelled is not live either.
+  bool isLive(String taskId) {
+    final token = _tokens[taskId];
+    return token != null && !token.isCancelled;
+  }
 }

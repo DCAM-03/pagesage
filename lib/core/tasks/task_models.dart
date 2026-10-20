@@ -92,6 +92,7 @@ abstract interface class TaskRepository {
     String? bookId,
     String? message,
     String? error,
+    bool clearError = false,
   });
 
   Future<void> clearCompleted();

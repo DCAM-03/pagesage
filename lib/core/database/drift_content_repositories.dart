@@ -979,6 +979,7 @@ final class DriftTaskRepository implements domain.TaskRepository {
     String? bookId,
     String? message,
     String? error,
+    bool clearError = false,
   }) {
     return _dao.updateStatus(
       id: id,
@@ -988,6 +989,7 @@ final class DriftTaskRepository implements domain.TaskRepository {
       bookId: bookId,
       message: message,
       error: error,
+      clearError: clearError,
     );
   }
 

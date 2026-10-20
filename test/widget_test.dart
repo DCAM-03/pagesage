@@ -146,6 +146,63 @@ void main() {
     expect(adapter.pickRequests.last.dialogTitle, '导入 EPUB/PDF');
   });
 
+  testWidgets(
+    'navigating back to 书库 after an import does not reopen the picker',
+    (tester) async {
+      // The import intent lives in a provider that outlives the library page;
+      // `ShellRoute` remounts the page on every navigation. A page-local
+      // "handled" counter reset to 0 on remount and replayed the last request,
+      // so clicking 书库 opened the file picker long after the import was done.
+      await tester.binding.setSurfaceSize(const Size(1280, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final adapter = _RecordingFilePickerAdapter();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(_FakeBookRepository()),
+            settingsRepositoryProvider.overrideWithValue(
+              _FakeSettingsRepository(),
+            ),
+            taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+            categoryRepositoryProvider.overrideWithValue(
+              const _FakeCategoryRepository(),
+            ),
+            tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+            bookmarkRepositoryProvider.overrideWithValue(
+              const _FakeBookmarkRepository(),
+            ),
+            filePickerServiceProvider.overrideWithValue(
+              FilePickerService(adapter: adapter),
+            ),
+          ],
+          child: const PageSageApp(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // One intentional import, cancelled in the picker.
+      await tester.tap(
+        find.byKey(const ValueKey('header-import-books-button')),
+      );
+      await tester.pumpAndSettle();
+      expect(adapter.pickRequests, hasLength(1));
+
+      // Leave the library, then come back through the navigation button.
+      await tester.tap(find.text('搜索').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('书库').first);
+      await tester.pumpAndSettle();
+
+      expect(
+        adapter.pickRequests,
+        hasLength(1),
+        reason: 'the completed intent must not replay on remount',
+      );
+    },
+  );
+
   testWidgets('mobile library creates a category from the filter sheet', (
     tester,
   ) async {
@@ -186,8 +243,8 @@ void main() {
     expect(find.text('分类创建入口验证'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilterChip, '筛选'));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(ActionChip, '新建分类'), findsOneWidget);
-    await tester.tap(find.widgetWithText(ActionChip, '新建分类'));
+    expect(find.widgetWithText(ActionChip, '新建书架文件夹'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ActionChip, '新建书架文件夹'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, '技术');
     await tester.tap(find.widgetWithText(FilledButton, '创建'));
@@ -195,7 +252,7 @@ void main() {
 
     expect(categoryRepository.savedNames, ['技术']);
     expect(find.text('技术'), findsWidgets);
-    expect(find.text('已创建分类“技术”'), findsOneWidget);
+    expect(find.text('已创建书架文件夹“技术”'), findsOneWidget);
   });
 
   testWidgets('shows long library titles on narrow large-text screens', (
@@ -1025,11 +1082,18 @@ void main() {
     await tester.pump();
 
     expect(tester.takeException(), isNull);
+    // The short window keeps four primary actions; notes and AI live one level
+    // down in the more sheet, and the point of this test is that neither level
+    // overflows at 1.5x text.
     expect(find.text('目录'), findsOneWidget);
-    expect(find.text('笔记'), findsOneWidget);
-    expect(find.text('AI'), findsOneWidget);
+    expect(find.text('搜索'), findsOneWidget);
+    expect(find.text('更多'), findsOneWidget);
 
-    await tester.tap(find.text('笔记'));
+    await tester.tap(find.text('更多'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('笔记与标注'));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -1038,7 +1102,9 @@ void main() {
     await tester.tap(find.byTooltip('关闭 Notebook'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('AI'));
+    await tester.tap(find.text('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI 助手'));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -1711,6 +1777,7 @@ final class _FakeTaskRepository implements TaskRepository {
     String? bookId,
     String? message,
     String? error,
+    bool clearError = false,
   }) async {}
 
   @override
@@ -2193,7 +2260,6 @@ final class _FakeSearchRepository implements SearchRepository {
       );
     }
   }
-
 }
 
 LibraryBook _libraryBook({

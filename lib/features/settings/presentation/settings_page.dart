@@ -599,6 +599,9 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         progress: 1,
         targetPath: targetPath?.call(result),
         message: successMessage,
+        // A retried action leaves the previous attempt's error behind unless
+        // it is cleared explicitly.
+        clearError: true,
       );
       cancelRegistry.complete(task.id);
       return result;
@@ -1932,47 +1935,55 @@ final class _SettingsGroup extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: colorScheme.appBorder.withValues(alpha: 0.9)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.x4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 18, color: colorScheme.primary),
-                  const SizedBox(width: AppSpacing.x2),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: AppSpacing.x1),
+      // The tint above is painted by a DecoratedBox, which sits between a
+      // ListTile's row (SwitchListTile included) and the page's Material. A
+      // ListTile paints its background and ink on the nearest Material, so
+      // that tint would hide them — and Flutter asserts on exactly that. This
+      // transparent Material is the nearest ancestor the tile needs; it paints
+      // nothing itself, so the group's tint shows through.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.x4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 18, color: colorScheme.primary),
+                    const SizedBox(width: AppSpacing.x2),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          subtitle!,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: colorScheme.textSecondary,
-                                height: 1.4,
-                              ),
+                          title,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
+                        if (subtitle != null) ...[
+                          const SizedBox(height: AppSpacing.x1),
+                          Text(
+                            subtitle!,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: colorScheme.textSecondary,
+                                  height: 1.4,
+                                ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.x4),
-            child,
-          ],
+                ],
+              ),
+              const SizedBox(height: AppSpacing.x4),
+              child,
+            ],
+          ),
         ),
       ),
     );

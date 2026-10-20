@@ -31,6 +31,64 @@ void main() {
     expect(await open(imageOnly).hasTextLayerAsync(), isFalse);
   });
 
+  group('off-thread rendering', () {
+    test('renders through the worker when it is given the bytes', () async {
+      // Reading the bytes is what lets the view hand interpretation to the
+      // render isolate; without this path every page walk blocked the UI.
+      final bytes = standard.readAsBytesSync();
+      final renderer = PdfCanvasRenderer(
+        PdfDocument.open(bytes),
+        sourceBytes: bytes,
+      );
+      addTearDown(renderer.dispose);
+
+      final page = await renderer.renderPage(0);
+
+      expect(page, isNotNull);
+      expect(page!.displaySize, renderer.displaySizeOf(0));
+      expect(page.picture.approximateBytesUsed, greaterThan(0));
+      page.dispose();
+    });
+
+    test('a cancelled page reports null instead of blocking locally', () async {
+      final bytes = standard.readAsBytesSync();
+      final renderer = PdfCanvasRenderer(
+        PdfDocument.open(bytes),
+        sourceBytes: bytes,
+      );
+      addTearDown(renderer.dispose);
+
+      final pending = renderer.renderPage(1);
+      renderer.cancelPage(1);
+
+      expect(await pending, isNull);
+    });
+
+    test('falls back to a local render without bytes', () async {
+      final renderer = open(standard);
+      final page = await renderer.renderPage(0);
+
+      expect(page, isNotNull);
+      page!.dispose();
+      // No worker was started, so there is nothing to dispose but the doc.
+      renderer.dispose();
+    });
+
+    test('textOfAsync warms text that the sync path then reuses', () async {
+      final bytes = standard.readAsBytesSync();
+      final renderer = PdfCanvasRenderer(
+        PdfDocument.open(bytes),
+        sourceBytes: bytes,
+      );
+      addTearDown(renderer.dispose);
+
+      final text = await renderer.textOfAsync(0);
+      expect(text, isNotNull);
+      expect(text!.text.trim(), isNotEmpty);
+      expect(renderer.cachedTextOf(0)?.text, text.text);
+    });
+  });
+
   test('surfaces a parse failure as CosParseException', () {
     expect(
       () => PdfDocument.open(broken.readAsBytesSync()),

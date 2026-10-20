@@ -3482,52 +3482,55 @@ final class _MobileReaderTopBar extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            height: 48,
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: '返回书库',
-                  onPressed: () => unawaited(onBack()),
-                  icon: const Icon(Icons.arrow_back),
-                ),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: colorScheme.onSurface,
-                          fontWeight: FontWeight.w600,
-                        ),
+          // The row is as tall as its tallest child, not a fixed 48 px: that
+          // figure is the icon button's height, and at large text scales the
+          // title and location lines together need more, so a hard height
+          // clipped the second line by a few pixels. The buttons hold the row
+          // at 48 px on their own, and the text block grows past it when it
+          // must.
+          Row(
+            children: [
+              IconButton(
+                tooltip: '返回书库',
+                onPressed: () => unawaited(onBack()),
+                icon: const Icon(Icons.arrow_back),
+              ),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
                       ),
-                      Text(
-                        '$locationLabel · $percentage%',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                    ),
+                    Text(
+                      '$locationLabel · $percentage%',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  tooltip: '目录',
-                  onPressed: onToc,
-                  icon: const Icon(Icons.toc),
-                ),
-                IconButton(
-                  tooltip: '更多',
-                  onPressed: onMore,
-                  icon: const Icon(Icons.more_horiz),
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                tooltip: '目录',
+                onPressed: onToc,
+                icon: const Icon(Icons.toc),
+              ),
+              IconButton(
+                tooltip: '更多',
+                onPressed: onMore,
+                icon: const Icon(Icons.more_horiz),
+              ),
+            ],
           ),
           ClipRRect(
             borderRadius: const BorderRadius.vertical(

@@ -230,6 +230,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     _locationTimer?.cancel();
     _scrollController.dispose();
     _pageController?.dispose();
+    // The renderer owns the background interpreter; leaving it alive would
+    // keep an isolate and a full copy of the document per opened book.
+    _renderer?.dispose();
     super.dispose();
   }
 
@@ -239,10 +242,14 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       if (!file.existsSync()) {
         throw StateError('文件不存在: ${widget.book.libraryFilePath}');
       }
-      final doc = PdfDocument.open(await file.readAsBytes());
+      final bytes = await file.readAsBytes();
+      final doc = PdfDocument.open(bytes);
       if (!mounted) return;
 
-      final renderer = PdfCanvasRenderer(doc);
+      // Hand the worker the same bytes the document was opened from, so page
+      // interpretation can run off the UI thread. The buffer is transferred
+      // into the isolate, which keeps its own copy.
+      final renderer = PdfCanvasRenderer(doc, sourceBytes: bytes);
       // Assign before setState: _runSearch reads _renderer synchronously, and
       // setState does not run its body synchronously, so assigning inside it
       // would make the first search see a null renderer and bail out.
@@ -356,34 +363,66 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       final page = _currentPage + 1;
       final progress = pageCount <= 1 ? 1.0 : (page - 1) / (pageCount - 1);
       final offset = _scrollOffsetForCurrentPage();
-      String? excerpt;
-      if (includeExcerpt) {
-        try {
-          excerpt = compactLocatorExcerpt(
-            _renderer?.textOf(_currentPage).text,
-            maxChars: 120,
-          );
-        } on Object {
-          excerpt = null;
-        }
-      }
-      widget.onEvent(
-        RendererLocationChanged(
-          locator: ReadingLocator.pdf(
-            page: page,
-            // Zero outside continuous display, matching the bridge: a paged
-            // layout has no meaningful sub-page position to restore into.
-            scrollOffset: offset,
-            zoom: _layoutScale,
+
+      void emit(String? excerpt) {
+        if (!mounted) return;
+        // An async excerpt can land after the reader scrolled on. A newer
+        // report is already queued for that position; emitting this older one
+        // would write a stale page back into progress.
+        if (_currentPage + 1 != page) return;
+        widget.onEvent(
+          RendererLocationChanged(
+            locator: ReadingLocator.pdf(
+              page: page,
+              // Zero outside continuous display, matching the bridge: a paged
+              // layout has no meaningful sub-page position to restore into.
+              scrollOffset: offset,
+              zoom: _layoutScale,
+              progress: progress.clamp(0.0, 1.0),
+              excerpt: excerpt,
+            ),
             progress: progress.clamp(0.0, 1.0),
-            excerpt: excerpt,
+            pageNumber: page,
+            totalPages: pageCount,
           ),
-          progress: progress.clamp(0.0, 1.0),
-          pageNumber: page,
-          totalPages: pageCount,
-        ),
+        );
+      }
+
+      if (!includeExcerpt) {
+        emit(null);
+        return;
+      }
+      // The excerpt is cosmetic (it lights up the phrase after a jump), while
+      // extracting it is a full content walk. Use the cached text when the
+      // page has already been read, and otherwise defer the report by one
+      // worker extraction instead of stalling the scroll on the UI thread.
+      final renderer = _renderer;
+      if (renderer == null) {
+        emit(null);
+        return;
+      }
+      final cached = renderer.cachedTextOf(_currentPage);
+      if (cached != null) {
+        emit(_excerptOf(cached.text));
+        return;
+      }
+      unawaited(
+        renderer
+            .textOfAsync(_currentPage)
+            .then((text) => _excerptOf(text?.text))
+            .catchError((Object _) => null)
+            .then(emit, onError: (Object _) => emit(null)),
       );
     });
+  }
+
+  String? _excerptOf(String? text) {
+    if (text == null) return null;
+    try {
+      return compactLocatorExcerpt(text, maxChars: 120);
+    } on Object {
+      return null;
+    }
   }
 
   /// Upper bound on reported hits, matching the EPUB renderer. Without it a
@@ -405,19 +444,21 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     final results = <RendererSearchResult>[];
     final highlights = <int, List<PdfTextQuad>>{};
 
-    // Text extraction is synchronous per page, so yield between pages to keep
-    // the UI responsive on long documents.
     for (var page = 0; page < renderer.pageCount; page++) {
       if (results.length >= _maxSearchResults) break;
-      if (page % 4 == 0) await Future<void>.delayed(Duration.zero);
+      // A newer query, or leaving the reader, abandons this walk: a long book
+      // would otherwise keep extracting pages for a search nobody wants.
+      if (!mounted || widget.searchQuery?.trim() != query) return;
 
-      final PdfPageText pageText;
+      final PdfPageText? pageText;
       try {
-        pageText = renderer.textOf(page);
+        // Off the UI thread when the render worker is available; the fallback
+        // extracts in-process, so this stays correct without a worker.
+        pageText = await renderer.textOfAsync(page);
       } on Object {
         continue; // A page that cannot be parsed should not abort the search.
       }
-      if (pageText.text.isEmpty) continue;
+      if (pageText == null || pageText.text.isEmpty) continue;
 
       for (final match in pageText.findAll(query)) {
         if (results.length >= _maxSearchResults) break;
@@ -1489,7 +1530,15 @@ final class _CanvasPage extends StatefulWidget {
 }
 
 final class _CanvasPageState extends State<_CanvasPage> {
-  Future<PdfRenderedPage>? _future;
+  Future<PdfRenderedPage?>? _future;
+
+  /// Set when a render came back null because the page's record was cancelled.
+  ///
+  /// Null is not an error: it means the page left the screen while it was
+  /// queued. If the widget is in fact still mounted (a cached list slot, a
+  /// paging rebuild), the page needs one more request or it would show a
+  /// spinner forever.
+  bool _retriedAfterCancel = false;
 
   /// The page box, in logical pixels, before panning.
   Size _viewport = Size.zero;
@@ -1537,11 +1586,55 @@ final class _CanvasPageState extends State<_CanvasPage> {
     // be re-rendered for a zoom change. S1 therefore has no page cache to
     // clear on `didUpdateWidget`; theme work in S6 will add one.
     _future = widget.renderer.renderPage(widget.pageIndex);
+    _prefetchNeighbours();
+  }
+
+  /// Warms the pages on either side of this one.
+  ///
+  /// Continuous scrolling touches a new page every screenful; recording the
+  /// neighbours at background priority means the page arriving under the
+  /// viewport is usually a cheap replay instead of a fresh interpretation.
+  void _prefetchNeighbours() {
+    final renderer = widget.renderer;
+    _prefetched.clear();
+    for (final page in [widget.pageIndex - 1, widget.pageIndex + 1]) {
+      if (page < 0 || page >= renderer.pageCount) continue;
+      _prefetched.add(page);
+      renderer.prefetch(page);
+    }
+  }
+
+  /// Neighbours this page asked the renderer to warm.
+  ///
+  /// Tracking them lets a recycled slot cancel the prefetch for the page it
+  /// used to be, which would otherwise decode a page nobody is near.
+  final Set<int> _prefetched = <int>{};
+
+  void _cancelPrefetches() {
+    for (final page in _prefetched) {
+      widget.renderer.cancelPrefetch(page);
+    }
+    _prefetched.clear();
   }
 
   @override
   void didUpdateWidget(covariant _CanvasPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.pageIndex != widget.pageIndex ||
+        oldWidget.renderer != widget.renderer) {
+      // A recycled list slot now shows another page: drop the request for the
+      // page that left (its result would be thrown away anyway and only delay
+      // the page arriving), release whatever it did produce, then start the
+      // new page.
+      final abandoned = _future;
+      _cancelPrefetches();
+      oldWidget.renderer.cancelPage(oldWidget.pageIndex);
+      abandoned?.then((page) => page?.dispose(), onError: (Object _) {});
+      _retriedAfterCancel = false;
+      _future = widget.renderer.renderPage(widget.pageIndex);
+      _prefetchNeighbours();
+      return;
+    }
     if (oldWidget.settings.pdfScale == widget.settings.pdfScale &&
         oldWidget.settings.pdfZoomMode == widget.settings.pdfZoomMode) {
       return;
@@ -1558,7 +1651,12 @@ final class _CanvasPageState extends State<_CanvasPage> {
 
   @override
   void dispose() {
-    _future?.then((page) => page.dispose());
+    // Tell the worker this page is no longer wanted: a queued record left
+    // behind would make the isolate interpret a page nobody is looking at
+    // while the page arriving under the viewport waits its turn.
+    _cancelPrefetches();
+    widget.renderer.cancelPage(widget.pageIndex);
+    _future?.then((page) => page?.dispose(), onError: (Object _) {});
     super.dispose();
   }
 
@@ -1645,11 +1743,27 @@ final class _CanvasPageState extends State<_CanvasPage> {
                     top: origin.dy,
                     width: content.width,
                     height: content.height,
-                    child: FutureBuilder<PdfRenderedPage>(
+                    child: FutureBuilder<PdfRenderedPage?>(
                       future: _future,
                       builder: (context, snapshot) {
                         final page = snapshot.data;
                         if (page == null) {
+                          if (snapshot.connectionState ==
+                                  ConnectionState.done &&
+                              !_retriedAfterCancel) {
+                            // The record was cancelled while the page was in
+                            // the queue. Nothing else will ask for it again,
+                            // so re-request once rather than spin forever.
+                            _retriedAfterCancel = true;
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              setState(
+                                () => _future = widget.renderer.renderPage(
+                                  widget.pageIndex,
+                                ),
+                              );
+                            });
+                          }
                           return const Center(
                             child: CircularProgressIndicator(),
                           );

@@ -80,3 +80,7 @@ app.*.map.json
 
 # Local tooling binaries
 /tools/nuget.exe
+
+# Skill script caches
+__pycache__/
+*.pyc

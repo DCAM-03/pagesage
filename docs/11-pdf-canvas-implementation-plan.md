@@ -2,7 +2,7 @@
 
 版本：0.2（经五轮复审；修订记录见 §12–§14）
 日期：2026-10-20
-状态：执行中（S0–S3 已完成，施工记录见 §16–§18）
+状态：执行中（S0–S3 已完成，另含用户反馈修复，施工记录见 §15–§20）
 前置文档：`docs/10-pdf-renderer-migration.md`（技术决策）、`docs/02-feature-spec.md` §5、`docs/03-interaction-spec.md` §8、`docs/v1-experience-freeze.md`
 适用范围：`lib/renderers/pdf/`、`lib/features/reader/`、`lib/features/ocr/`、平台资源与依赖
 
@@ -282,11 +282,13 @@ Canvas 当前把下划线画成 `box.rect.height * 0.15`（`:672`），而 `box.
 改动文件：`pdf_canvas_view.dart`、`pdf_canvas_renderer.dart`（可并入 view 的缓存层）、`reader_page.dart`（错误文案映射如需）。
 
 1. 纸色 + 夜间的 `ColorFilter`（移动端禁用滤镜）；外边距背景跟随主题。
-2. `PdfRenderWorker` 接入与回退；缓存优先调 worker 全局参数（`pdfRenderWorkerCacheBudgetBytes` / `pdfRenderWorkerCacheMaxEntries`），不自建第二层 LRU（见 §4.4）；预取相邻页（优先级 1），滚出 `cancel`。
+2. ~~`PdfRenderWorker` 接入与回退；预取相邻页（优先级 1），滚出 `cancel`。~~ **已提前完成**（见 §19）：`PdfCanvasRenderer` 走 `PdfCachingRenderWorker(PdfPooledRenderWorker(...))`，缓存直接复用库自带 LRU（§4.4），无 bytes 时回落到本地解释。S6 只需复核，不要重建。
 3. 删除 `pdf_canvas_renderer.dart` 对 `src/image_decoder.dart` 的 implementation import（改走 worker/replay 后不再需要）。
 4. 失败分级：打开失败/单页失败/密码/损坏；单页失败占位并 `RendererNotice`。
 5. **replay 路径的 rotation 检查**：确认 `PdfPageRenderPlan(rotation: null)`，页面自身 /Rotate 由库处理，不再手传 `page.rotation`（见 §4.1）。这是 90°/270° 页的最终验收点。
+   - §19 的 `pictureFromCommands(..., rotation: null)` 已满足此项；S6 只需补旋转页的标注投影验收。
 6. 性能采样：80 页首开、连续滚动帧时间、3× 放大图片页、峰值内存；把数字写回本文档。
+   - §19.2 已记录 776 页样本的单页耗时与主 isolate 停顿；S6 补 80 页首开、帧时间与峰值内存。
 
 验收：夜间模式标注不被反色；80 页滚动无长时间掉帧；损坏样本出错误页可重试；无空白页（F-04）。
 
@@ -350,6 +352,7 @@ Canvas 当前把下划线画成 `box.rect.height * 0.15`（`:672`），而 `box.
 - [ ] 加密/损坏 PDF 明确错误（S0/S6）
 - [ ] 主题纸色与夜间模式（S6）
 - [ ] 大文档滚动性能与内存基线（S6/S8）
+  - 页面解释已移出 UI 线程（§19.2）；剩余项为帧时间与峰值内存基线
 - [ ] 三端回归通过（S7/S8）
 - [ ] WebView 渲染器与 PDF.js 资源删除（S7）
 - [ ] 文档、许可、任务清单同步（S7）
@@ -685,3 +688,99 @@ pkill -f "kwin_wayland --virtual --socket pagesage-test"
 - 选区只在连续模式下手柄可见；分页模式中跨页选区仍需翻页后重新拖选，S4/S5 再评估分页模式的手柄。
 - 双击缩放（`fitWidth ↔ 2.0`）与单击选词共用 tap 路径，300 ms 内的两次点击按双击处理，因此快速连点两下会缩放而不是选中第二个词。与 WebView 渲染器的既有行为一致。
 - 手柄与菜单同屏时，手柄在菜单遮罩之下（`Stack` 顺序），所以手柄可以拖动但不会被菜单遮挡的文本仍可选。真正的浮层层级（手柄永远在菜单之上）留到 S5 和标注菜单统一处理。
+
+## 19. 用户反馈修复：任务误报失败 / 书库误弹选择器 / 滚动卡顿（2026-10-20）
+
+真实应用试用后报告三个问题，均在代码中定位并修复。前两项与 PDF 渲染无关；第三项**提前实施了 §6 S6 的第 2 条**（`PdfRenderWorker` 接入、预取与滚出取消），因为它是用户直接可感的卡顿来源。S6 剩余项（纸色/夜间、失败分级、性能采样文档、删 implementation import）仍未做，届时只需复核本节实现而不必重写。
+
+### 19.1 问题与根因
+
+| # | 现象 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| 1 | 刚选文件导入后，任务卡立刻显示「失败 / 上次运行中断，可重试」（约 20%），导入完成才恢复 | `TaskCenterPage.initState` 每次挂载都调用 `recoverInterruptedTasks()`，它把所有 `queued/running/indexing` 一律标记失败，不区分「上次运行遗留」与「本次进程仍在跑」 | 新增 `TaskCancellationRegistry.isLive()`；恢复时跳过有活跃 token 的任务。另：`updateStatus` 原先无法写回 NULL，失败后重试成功仍保留旧 `error` 文案，现加 `clearError` 参数，成功路径显式清空 |
+| 2 | 点「书库」导航按钮会弹出文件选择器 | `importIntentProvider` 的计数存在跨页面存活的 provider 里，而 `LibraryPage` 的 `_handledImportIntent` 是页面局部状态；`ShellRoute` 重新挂载页面后局部计数归零，provider 里的旧值被当作新请求重放 | 意图改为一次性：`ImportIntentController.take()` 读后清零。页面挂载与监听都只消费，不再比较局部计数；`_pickAndImport` 的 `finally` 也改为无条件尝试消费（没有待处理意图时是 no-op） |
+| 3 | 阅读时滑动页面卡顿 | 每页解释（`PdfPageRenderer.renderPicture`）在 UI isolate 同步执行。在用户的 776 页 / 345 MB 样本上实测单页 1.0–1.1 s，主 isolate 最长停顿 1098 ms | 页面解释改由 `PdfRenderWorker` isolate 完成（`record` → 主线程只做 `pictureFromCommands` 回放，10–41 ms）。新增相邻页预取（优先级 1）、滚出/回收时 `cancel`、文本提取与搜索同样走 worker；无 bytes 的调用方（单元测试、契约探针）自动回落到本地解释 |
+
+### 19.2 实测（776 页 / 345 MB 样本，Linux 桌面）
+
+| 指标 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 单页解释（UI 线程） | 1035–1124 ms | 0 ms（在 isolate 中，冷页总耗时 1.1–1.3 s） |
+| 单页渲染期间主 isolate 最长停顿 | 1098 ms | 44–116 ms |
+| 同一页第二次渲染 | ~1.1 s | 0–5 ms（worker 记录缓存命中） |
+
+主 isolate 剩余停顿来自命令回放（`pictureFromCommands` 的 canvas 调用与图片解码），这是必须在 UI 线程上做的事；它已与页数无关，只与单页绘制指令量有关。
+
+实现细节：
+
+- `PdfCanvasRenderer` 新增可选 `sourceBytes`；有字节时建立 `PdfCachingRenderWorker(PdfPooledRenderWorker(...))`。**缓存不另起一层**：直接复用库自带 LRU（§4.4 约束），并按文档大小把泳道数从默认 3 降到 `96 MB / 文件大小`，避免一本 300 MB 的书在内存里放三份。
+- `renderPage` 返回 `PdfRenderedPage?`：**仅当自派发以来发生过取消**才返回 null（页面已离开屏幕，本地解释只是白干）；worker 拒绝（内联图片等）或平台无 worker 仍回落到本地解释，保证正确性。
+- `PdfCanvasView.dispose` 现在释放 renderer 的 worker，否则每开一本书会留下一个 isolate 与一份文档副本。
+- 位置上报的摘要改为：命中缓存同步出；未命中交给 `textOfAsync` 后补发，并丢弃「补发时读者已翻到别页」的过期事件。
+- 搜索逐页 `textOfAsync`，并在翻页/换查询/卸载时中止。
+
+### 19.3 验证结果
+
+- `dart format`：仅触及本次修改的文件；`flutter analyze`：3 条 info，全部在 `poc_pdf_canvas/`（S7 删除该目录后消失），仓库自身代码 0 error。
+- 新增测试：`TaskCancellationRegistry.isLive` 语义（活跃/已取消/无 token）→ 任务恢复两条用例；`clearError` 语义一条（Drift 真实库）；「导航离开再回书库不重开选择器」一条（真实 `PageSageApp` 路由）；渲染器 worker 路径四条（走 worker、取消返回 null、无 bytes 回落、`textOfAsync` 与缓存一致）。
+- `flutter test`：280 项通过、2 项跳过，另有 4 项 `widget_test.dart` 失败，与 S3 提交前完全一致（这 4 项已在 §20.2 修复）。
+- 真实窗口集成测试（`integration_test/reader_s0_test.dart`，11 项）全部通过。
+- 临时测量脚本已删除，未留在仓库。
+
+### 19.4 已知限制
+
+- 预取只覆盖左右相邻页；快速连甩多页时，落在视口里的页仍可能等一次完整的 worker 解释（约 1 s），此时显示加载指示器而不是卡住整个界面。
+- 单泳道（大文件）时，可见页与预取共用一个队列，靠优先级抢先；预取的记录会因可见页抢占而重排队。
+- 文档 /Rotate 仍由回放路径内部的 `_applyPageTransform` 处理，调用处固定传 `rotation: null`（§4.1 的雷已按计划守住）。
+
+## 20. 用户反馈修复：PDF 封面提取与 4 项失败测试（2026-10-20）
+
+真实书库截图暴露出两个问题：两本 PDF 的封面是正文里的深色代码截图，另两本完全没有封面（只显示占位图标）；同时 `flutter test` 有 4 项失败。两项都已在代码里定位。
+
+### 20.1 PDF 封面改为渲染第一页
+
+根因在 `MetadataExtractor._extractPdfCover`：旧实现把整个文件当字节流扫 `FFD8…FFD9`，取「封面尺寸内最大的一段 JPEG」。PDF 没有封面清单，这个启发式只能猜：
+
+- 正文里恰好有照片/截图时，最大的那张往往就是正文截图——技术书里几乎必然是深色代码截图，于是封面错得离谱；
+- 首页是纯矢量排版（常见于国内教材、排版严谨的专著）时，文件里根本没有嵌入 JPEG，于是得到 `null`、只剩占位图标。
+
+改为**渲染第 1 页**：那是打开书时看到的画面，也是所有 PDF 唯一有共识的「封面」。新增 `lib/renderers/pdf/pdf_cover_renderer.dart`，用 `PdfPageRenderer.renderImage` 以 600 px 宽（覆盖网格 `_BookCover` 的 720 px 上限，PNG 约 200–750 KB）出图，`annotations: false` 与阅读器渲染一致。原字节扫描降级为兜底：只在没有绘制器、或首页画不出来时才走。
+
+分层上的约束：`MetadataExtractor` 在 `lib/core/files/`，而 `dart:ui` 不能进 core（`tool/refresh_covers.dart` 等 CLI 要在无 Flutter 的环境下编译）。因此渲染器以 `PdfCoverPainter` 回调注入（`MetadataExtractor({PdfCoverPainter? pdfCoverPainter})`），app 在 `metadataExtractorProvider` 里传入 `PdfCoverRenderer().renderCoverPng`，CLI 工具不传、自动落到字节扫描。
+
+实测（用户书库 4 本，Linux 桌面，600 px 宽，含 PNG 编码）：
+
+| 书 | 页数 | 旧逻辑结果 | 渲染首页耗时 |
+| --- | --- | --- | --- |
+| 匿名数学扫描样本 | 184 | 无封面 | 244 ms |
+| 匿名样本 02 | 410 | 深色代码截图 | 243 ms |
+| 匿名样本 01 | 776 | 无封面 | 71 ms |
+| 第1章（Kubernetes） | 206 | 深色代码截图 | 809 ms |
+
+封面是导入时一次性工作，`PdfCoverRenderer` 在调用 isolate 上同步渲染（把 345 MB 文件搬去 render isolate 只为一张图并不划算）。用户书库里已存在的旧封面由一次性脚本重算并写回数据库，旧 `*.jpg` 同时删除。
+
+### 20.2 4 项失败测试的处置
+
+4 项都与本次 PDF 改动无关，`git stash` 后在基线上同样失败。逐项定位后，三项是**测试过时**、一项是**真实布局缺陷**：
+
+| 测试 | 原因 | 处置 |
+| --- | --- | --- |
+| `mobile library creates a category from the filter sheet` | 代码在 `5c21a83` 把入口改名为「新建书架文件夹」，测试仍在找 `ActionChip('新建分类')` 与旧提示文案 | 更新期望值（筛选层与提示语都要改） |
+| `mobile reader controls fit short large-text windows` | 同上一次提交把移动端底栏从 6 个动作压到 4 个，「笔记」「AI」移进了「更多」抽屉；测试仍直接点底栏 | 改为先走「更多」，并连带验证抽屉在 1.5x 字号下不溢出——比原断言覆盖更多 |
+| `shows mobile settings sections with modern page headers` | 真实缺陷：`_SettingsGroup` 用带底色的 `DecoratedBox` 包住 `SwitchListTile`，Flutter 会断言「ListTile 背景与墨水可能不可见」 | 在该 `DecoratedBox` 内加一层 `Material(type: MaterialType.transparency)`，既满足 ListTile 对最近 Material 的要求，又不改变分组底色 |
+| `mobile settings AI and tag dialogs fit short large-text windows` | 与上一条同源：同一个分组里 3 处 `ListTile` 各报一次，合计「Multiple exceptions (3)」 | 同上，一处修复同时消掉 3 条 |
+
+另外修掉一个测试期间暴露的真实溢出：`_MobileReaderTopBar` 用固定 `SizedBox(height: 48)` 约束标题行，1.5x 字号下标题 + 定位两行需要 54 px，溢出 6 px。改为不设固定高度——图标按钮自身就有 48 px，文字行需要更多时让整行长高，而不是裁掉第二行。
+
+### 20.3 验证结果
+
+- `flutter analyze`：3 条 info，全部在 `poc_pdf_canvas/`（S7 删除该目录后消失）；仓库自身代码 0 error、0 warning。
+- `flutter test`：**285 项通过、2 项跳过、0 失败**（此前 280 通过 / 4 失败；新增 5 条含封面与 worker 用例）。
+- `flutter build linux --debug` 通过；用真实书库数据库重算 4 本封面后逐张目视确认：线性代数、匿名样本 02、匿名样本 01三本都是正确的封面图，第 1 章（Kubernetes）为其深色插画封面本身——此前的错误来自取了正文图片而非排版封面。
+- `tool/refresh_covers.dart` 在改动前就不能用 `dart run` 编译（仓库里 Flutter 框架源码无法被纯 Dart 前端编译），本次未改变这一点；`MetadataExtractor` 不再依赖 `dart:ui`，CLI 路径的分层约束得以保留。
+
+### 20.4 已知限制
+
+- 封面只取第 1 页。若某本书第 1 页是版权页/空白页（少数扫描版 PDF 会这样），封面仍不理想；要识别真正封面需要按前 N 页启发式挑选，本次未做。
+- 渲染首页在超大页面（A0 图纸等）上会按 600 px 目标宽度缩小，细节不可见——对书架缩略图而言可接受。
+- 已有书库不会自动重算封面；需要覆盖时用书库条目菜单里的「重新提取封面」，或对整库跑一次脚本。

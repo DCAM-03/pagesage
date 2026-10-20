@@ -6,8 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/files/app_paths.dart';
 import 'package:pagesage/core/files/metadata_extractor.dart';
 import 'package:pagesage/domain/books/book.dart';
+import 'package:pagesage/renderers/pdf/pdf_cover_renderer.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+
+import '../../../tool/generate_manual_samples.dart';
 
 void main() {
   late Directory tempDir;
@@ -51,7 +54,31 @@ void main() {
     expect(metadata.coverPath, endsWith('.jpg'));
   });
 
-  test('extracts largest embedded JPEG as PDF cover', () async {
+  test('renders the PDF first page as the cover', () async {
+    final pdf = File(p.join(tempDir.path, 'sample.pdf'));
+    // A real, parseable PDF: page 1 holds the cover, so the painter — not the
+    // embedded-JPEG scan — is what has to produce the image.
+    await pdf.writeAsBytes(
+      buildTextPdf(['Cover page of the sample book', 'Chapter one']),
+    );
+
+    final metadata = await MetadataExtractor(
+      appPaths: AppPaths(),
+      pdfCoverPainter: const PdfCoverRenderer().renderCoverPng,
+    ).extract(file: pdf, format: BookFormat.pdf, bookId: 'book-pdf');
+
+    expect(metadata.coverPath, isNotNull);
+    expect(metadata.coverPath, endsWith('.png'));
+    expect(await File(metadata.coverPath!).exists(), isTrue);
+    final coverBytes = await File(metadata.coverPath!).readAsBytes();
+    // PNG signature, and bigger than an empty placeholder.
+    expect(coverBytes.take(4), [0x89, 0x50, 0x4E, 0x47]);
+    expect(coverBytes.length, greaterThan(1024));
+  });
+
+  test('falls back to an embedded JPEG without a page painter', () async {
+    // The CLI tools have no `dart:ui`, so they pass no painter. A file whose
+    // page cannot be parsed then still gets a cover from the byte scan.
     final pdf = File(p.join(tempDir.path, 'sample.pdf'));
     await pdf.writeAsBytes(_buildPdfWithJpegCover());
 
@@ -125,11 +152,13 @@ List<int> _buildEpub3CoverPropertyBytes() {
 '''),
     )
     ..addFile(
-      ArchiveFile(
-        'OPS/img/front.jpg',
-        16,
-        [0xFF, 0xD8, 0xFF, 0xD9, ...List<int>.filled(12, 0)],
-      ),
+      ArchiveFile('OPS/img/front.jpg', 16, [
+        0xFF,
+        0xD8,
+        0xFF,
+        0xD9,
+        ...List<int>.filled(12, 0),
+      ]),
     );
   return ZipEncoder().encode(archive);
 }

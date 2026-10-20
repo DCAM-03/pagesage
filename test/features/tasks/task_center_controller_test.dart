@@ -43,6 +43,55 @@ void main() {
   );
 
   test(
+    'leaves a task whose work is still running in this session alone',
+    () async {
+      // The task center mounts during an import (the user opened it to check
+      // progress), so recovery used to flip a live import to 失败 until the
+      // import finished and overwrote the row again.
+      final repository = _MemoryTaskRepository();
+      final registry = TaskCancellationRegistry();
+      final task = await repository.saveTask(
+        type: PageSageTaskType.importBook,
+        status: PageSageTaskStatus.running,
+        progress: 0.2,
+        message: '正在计算文件指纹',
+      );
+      registry.register(task.id);
+      final controller = _controller(
+        repository,
+        cancellationRegistry: registry,
+      );
+
+      await controller.recoverInterruptedTasks();
+
+      final saved = (await repository.getTasks()).single;
+      expect(saved.status, PageSageTaskStatus.running);
+      expect(saved.message, '正在计算文件指纹');
+      expect(saved.error, isNull);
+    },
+  );
+
+  test('recovery still fails a task whose token was cancelled', () async {
+    final repository = _MemoryTaskRepository();
+    final registry = TaskCancellationRegistry();
+    final task = await repository.saveTask(
+      type: PageSageTaskType.importBook,
+      status: PageSageTaskStatus.running,
+      progress: 0.2,
+    );
+    final token = registry.register(task.id);
+    token.cancel();
+    final controller = _controller(repository, cancellationRegistry: registry);
+
+    await controller.recoverInterruptedTasks();
+
+    expect(
+      (await repository.getTasks()).single.status,
+      PageSageTaskStatus.failed,
+    );
+  });
+
+  test(
     'cancel task deletes partial target when no book id is linked',
     () async {
       final repository = _MemoryTaskRepository();
@@ -228,6 +277,7 @@ final class _MemoryTaskRepository implements TaskRepository {
     String? bookId,
     String? message,
     String? error,
+    bool clearError = false,
   }) async {
     final index = _tasks.indexWhere((task) => task.id == id);
     final previous = _tasks[index];
@@ -240,7 +290,7 @@ final class _MemoryTaskRepository implements TaskRepository {
       bookId: bookId ?? previous.bookId,
       progress: progress ?? previous.progress,
       message: message ?? previous.message,
-      error: error ?? previous.error,
+      error: error ?? (clearError ? null : previous.error),
       createdAt: previous.createdAt,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );

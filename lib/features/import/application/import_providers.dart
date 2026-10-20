@@ -6,6 +6,7 @@ import '../../../core/files/format_detector.dart';
 import '../../../core/files/hash_service.dart';
 import '../../../core/files/metadata_extractor.dart';
 import '../../../core/platform/platform_providers.dart';
+import '../../../renderers/pdf/pdf_cover_renderer.dart';
 import 'import_use_case.dart';
 
 final appPathsProvider = Provider<AppPaths>((ref) => AppPaths());
@@ -13,7 +14,13 @@ final appPathsProvider = Provider<AppPaths>((ref) => AppPaths());
 final hashServiceProvider = Provider<HashService>((ref) => HashService());
 
 final metadataExtractorProvider = Provider<MetadataExtractor>((ref) {
-  return MetadataExtractor(appPaths: ref.watch(appPathsProvider));
+  return MetadataExtractor(
+    appPaths: ref.watch(appPathsProvider),
+    // The app can rasterize, so a PDF's shelf cover is its first page — the
+    // same picture opening the book shows. The CLI tools leave this off and
+    // keep the embedded-image fallback.
+    pdfCoverPainter: const PdfCoverRenderer().renderCoverPng,
+  );
 });
 
 final formatDetectorProvider = Provider<FormatDetector>(

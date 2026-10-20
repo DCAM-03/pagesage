@@ -32,7 +32,6 @@ final class LibraryPage extends ConsumerStatefulWidget {
 
 final class _LibraryPageState extends ConsumerState<LibraryPage> {
   bool _isImporting = false;
-  int _handledImportIntent = 0;
   late final _dropImportService = ref.read(windowDropImportServiceProvider);
 
   @override
@@ -45,7 +44,7 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
       if (!mounted) {
         return;
       }
-      _handleImportIntent(context, ref.read(importIntentProvider));
+      _handleImportIntent();
     });
   }
 
@@ -57,9 +56,11 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Subsequent import intents while the library stays mounted.
+    // Subsequent import intents while the library stays mounted. The callback
+    // only reacts to a fresh request (0 -> N); the value is consumed below.
     ref.listen(importIntentProvider, (previous, next) {
-      _handleImportIntent(context, next);
+      if (next == 0 || next == previous) return;
+      _handleImportIntent();
     });
     final books = ref.watch(libraryBooksProvider);
     final libraryState = ref.watch(libraryControllerProvider);
@@ -196,14 +197,11 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
       if (mounted) {
         setState(() => _isImporting = false);
         // Drain a request that arrived while the previous import was busy.
-        final pending = ref.read(importIntentProvider);
-        if (pending != _handledImportIntent) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              _handleImportIntent(context, ref.read(importIntentProvider));
-            }
-          });
-        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _handleImportIntent();
+          }
+        });
       }
     }
   }
@@ -236,15 +234,18 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
     }
   }
 
-  void _handleImportIntent(BuildContext context, int intent) {
-    if (intent == _handledImportIntent) {
-      return;
-    }
+  /// Opens the picker if a request is pending and nothing else is importing.
+  ///
+  /// The request is consumed here, so navigating to the library later does not
+  /// replay it: a pending value only ever covers the current mount.
+  void _handleImportIntent() {
     if (_isImporting) {
-      // Keep the intent pending until the current import finishes.
+      // Leave the intent pending until the current import finishes.
       return;
     }
-    _handledImportIntent = intent;
+    if (ref.read(importIntentProvider.notifier).take() == null) {
+      return;
+    }
     if (mounted) {
       _pickAndImport(context);
     }
@@ -3519,6 +3520,13 @@ final class _BookActionsMenu extends ConsumerWidget {
       await ref
           .read(bookRepositoryProvider)
           .updateMetadata(bookId: book.id, coverPath: coverPath);
+      // The previous cover was extracted into a file of its own; leaving it
+      // behind orphans a copy for every refresh, and the old extraction is
+      // exactly the wrong image the user asked to replace.
+      final previous = book.coverPath;
+      if (previous != null && previous != coverPath) {
+        await _deleteIfExists(previous);
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
