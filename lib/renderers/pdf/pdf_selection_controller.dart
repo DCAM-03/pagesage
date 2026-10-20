@@ -22,21 +22,36 @@ final class PdfSelectionController {
     required this.renderer,
     required this.pageIndex,
     required this.box,
-    required this.rasterScale,
-    required this.paintOrigin,
     required this.paintSize,
+    required this.displayedSize,
+    required this.globalOrigin,
+    required this.pageSize,
   });
 
   final PdfCanvasRenderer renderer;
   final int pageIndex;
   final PdfRect box;
 
-  /// Device pixels per PDF point used when rasterising the page.
-  final double rasterScale;
-
-  /// Where the page was painted, in the page widget's local coordinates.
-  final Offset paintOrigin;
+  /// Size of the page's own coordinate space, in logical pixels. Pointer
+  /// positions arrive in this space, so overlays are laid out against it.
   final Size paintSize;
+
+  /// Size the page actually occupies on screen, in logical pixels.
+  final Size displayedSize;
+
+  /// Global position of the painted page's top-left corner.
+  final Offset globalOrigin;
+
+  /// The page's rotation-aware size in PDF points
+  /// (`PdfPageRenderer.pageSize`), i.e. what [paintSize] represents.
+  final Size pageSize;
+
+  /// Logical pixels per PDF point at the current layout.
+  ///
+  /// This is the value the WebView renderer exposed as `dataset.scale`, and
+  /// what `locator.zoom` is expected to carry.
+  double get layoutScale =>
+      pageSize.width <= 0 ? 1 : displayedSize.width / pageSize.width;
 
   PdfPageText? _cached;
 
@@ -53,8 +68,8 @@ final class PdfSelectionController {
   /// Widget-local point -> PDF page coordinates, or null when outside the page.
   PagePoint? toPagePoint(Offset local) {
     if (paintSize.width <= 0 || paintSize.height <= 0) return null;
-    final dx = local.dx - paintOrigin.dx;
-    final dy = local.dy - paintOrigin.dy;
+    final dx = local.dx;
+    final dy = local.dy;
     if (dx < 0 || dy < 0 || dx > paintSize.width || dy > paintSize.height) {
       return null;
     }
@@ -66,8 +81,8 @@ final class PdfSelectionController {
 
   /// PDF page coordinates -> widget-local offset.
   Offset toWidgetPoint(double x, double y) => Offset(
-    paintOrigin.dx + (x - box.left) / box.width * paintSize.width,
-    paintOrigin.dy + (box.top - y) / box.height * paintSize.height,
+    (x - box.left) / box.width * paintSize.width,
+    (box.top - y) / box.height * paintSize.height,
   );
 
   /// Selection covering the drag from [anchorWidget] to [currentWidget].
@@ -111,7 +126,11 @@ final class PdfSelectionController {
 
     final range = _wordRangeAt(index);
     if (range == null) return null;
-    return _buildEvent(range.$1, range.$2, _text.text.substring(range.$1, range.$2));
+    return _buildEvent(
+      range.$1,
+      range.$2,
+      _text.text.substring(range.$1, range.$2),
+    );
   }
 
   /// (start, end) of the word containing [index].
@@ -139,7 +158,8 @@ final class PdfSelectionController {
   }
 
   static const _asciiSeparators = ' \t\n\r,.!?;:\'"()[]{}<>/\\|@#\$%^&*-_=+';
-  static const _cjkPunctuation = '、。，．；：？！…—～·「」『』《》【】（）〔〕｛｝'
+  static const _cjkPunctuation =
+      '、。，．；：？！…—～·「」『』《》【】（）〔〕｛｝'
       '“”‘’　';
 
   /// CJK punctuation counts as a separator, but CJK ideographs do not: they are
@@ -161,19 +181,42 @@ final class PdfSelectionController {
     // Anchor on the largest run so the flash effect lands on real text rather
     // than a sliver.
     final anchor = rects.isEmpty
-        ? ReaderRect(page: pageIndex + 1, x: 0, y: 0, width: 0, height: 0)
-        : rects.reduce((a, b) => b.width * b.height > a.width * a.height ? b : a);
+        ? null
+        : rects.reduce(
+            (a, b) => b.width * b.height > a.width * a.height ? b : a,
+          );
 
     return RendererTextSelected(
       text: text,
       locator: ReadingLocator.pdf(
         page: pageIndex + 1,
-        zoom: rasterScale,
+        // The host compares this against the current device-pixel ratio, so it
+        // must be the layout scale (CSS px per PDF point) the WebView
+        // renderer reported — not the raster density.
+        zoom: layoutScale,
         excerpt: text,
         selectionRects: rects,
       ),
-      sourceRect: anchor,
+      sourceRect: _toGlobalRect(anchor),
       selectionRects: rects,
+    );
+  }
+
+  /// Normalised page rect -> global logical pixels.
+  ///
+  /// `RendererTextSelected.sourceRect` and `RendererAnnotationSelected`
+  /// `sourceRect` are consumed by the host as window coordinates
+  /// (`_toOverlayLocalRect` only subtracts the Overlay origin), so the
+  /// renderer has to do the localToGlobal step the WebView renderer does in
+  /// `_mapEventToFlutterCoords`.
+  ReaderRect? _toGlobalRect(ReaderRect? normalized) {
+    if (normalized == null) return null;
+    return ReaderRect(
+      page: normalized.page,
+      x: globalOrigin.dx + normalized.x * displayedSize.width,
+      y: globalOrigin.dy + normalized.y * displayedSize.height,
+      width: normalized.width * displayedSize.width,
+      height: normalized.height * displayedSize.height,
     );
   }
 
@@ -184,6 +227,9 @@ final class PdfSelectionController {
   /// emitting them, and annotations persist these values and re-render from
   /// them at whatever size the reader happens to be at. Emitting pixels here
   /// would make every stored annotation scale wrongly.
+  ///
+  /// The normalised basis is the *displayed* page box, i.e. after /Rotate,
+  /// which is what `annotation.locator.selectionRects` is projected onto.
   List<ReaderRect> _readerRectsFor(int start, int end) {
     final out = <ReaderRect>[];
     for (final quad in _text.quadsFor(start, end)) {
@@ -221,6 +267,9 @@ final class PdfSelectionController {
   }
 
   /// PDF page point -> 0..1 fraction of the page box.
+  ///
+  /// Rotation stays out of scope until S1 centralises geometry on
+  /// [PdfPageGeometry]; see `docs/11-pdf-canvas-implementation-plan.md` §S0.
   Offset _normalisePagePoint(double x, double y) => Offset(
     ((x - box.left) / box.width).clamp(0.0, 1.0),
     ((box.top - y) / box.height).clamp(0.0, 1.0),

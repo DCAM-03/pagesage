@@ -6894,37 +6894,40 @@ final class _DefaultRendererHost extends StatelessWidget {
       // renders through pdf_graphics instead. Other platforms keep the WebView
       // renderer until selection, search and annotation overlays are ported.
       // See docs/10-pdf-renderer-migration.md.
-      BookFormat.pdf => Platform.isLinux
-          ? PdfCanvasView(
-              key: ValueKey('pdf-canvas-${config.book.id}-${config.version}'),
-              book: config.book,
-              settings: config.settings,
-              initialProgress: config.progress,
-              annotations: config.annotations,
-              ocrOverlayPage: config.ocrOverlayPage,
-              ocrOverlayBlocks: config.ocrOverlayBlocks,
-              searchQuery: config.searchQuery,
-              focusLocator: config.focusLocator,
-              jumpToken: config.jumpToken,
-              clearSearchHighlightsVersion:
-                  config.clearSearchHighlightsVersion,
-              onEvent: config.onEvent,
-            )
-          : PdfRendererView(
-              key: ValueKey('pdf-${config.book.id}-${config.version}'),
-              book: config.book,
-              settings: config.settings,
-              initialProgress: config.progress,
-              annotations: config.annotations,
-              searchQuery: config.searchQuery,
-              focusLocator: config.focusLocator,
-              clearSearchHighlightsVersion: config.clearSearchHighlightsVersion,
-              jumpToken: config.jumpToken,
-              ocrOverlayToken: config.ocrOverlayToken,
-              ocrOverlayPage: config.ocrOverlayPage,
-              ocrOverlayBlocks: config.ocrOverlayBlocks,
-              onEvent: config.onEvent,
-            ),
+      BookFormat.pdf =>
+        Platform.isLinux
+            ? PdfCanvasView(
+                key: ValueKey('pdf-canvas-${config.book.id}-${config.version}'),
+                book: config.book,
+                settings: config.settings,
+                initialProgress: config.progress,
+                annotations: config.annotations,
+                ocrOverlayPage: config.ocrOverlayPage,
+                ocrOverlayBlocks: config.ocrOverlayBlocks,
+                ocrOverlayToken: config.ocrOverlayToken,
+                searchQuery: config.searchQuery,
+                focusLocator: config.focusLocator,
+                jumpToken: config.jumpToken,
+                clearSearchHighlightsVersion:
+                    config.clearSearchHighlightsVersion,
+                onEvent: config.onEvent,
+              )
+            : PdfRendererView(
+                key: ValueKey('pdf-${config.book.id}-${config.version}'),
+                book: config.book,
+                settings: config.settings,
+                initialProgress: config.progress,
+                annotations: config.annotations,
+                searchQuery: config.searchQuery,
+                focusLocator: config.focusLocator,
+                clearSearchHighlightsVersion:
+                    config.clearSearchHighlightsVersion,
+                jumpToken: config.jumpToken,
+                ocrOverlayToken: config.ocrOverlayToken,
+                ocrOverlayPage: config.ocrOverlayPage,
+                ocrOverlayBlocks: config.ocrOverlayBlocks,
+                onEvent: config.onEvent,
+              ),
     };
   }
 }

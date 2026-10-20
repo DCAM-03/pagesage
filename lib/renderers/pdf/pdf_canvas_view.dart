@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
-import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
 import '../../domain/annotations/annotation.dart';
@@ -35,6 +35,7 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
     required this.annotations,
     this.ocrOverlayPage,
     this.ocrOverlayBlocks = const [],
+    this.ocrOverlayToken = 0,
     this.searchQuery,
     this.focusLocator,
     this.jumpToken = 0,
@@ -53,6 +54,9 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
   /// 1-based page carrying a recognised text layer (scanned PDFs).
   final int? ocrOverlayPage;
   final List<Map<String, Object?>> ocrOverlayBlocks;
+
+  /// Bumped by the host when a new OCR overlay should be painted.
+  final int ocrOverlayToken;
   final String? searchQuery;
   final ReadingLocator? focusLocator;
 
@@ -71,13 +75,24 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   Timer? _locationTimer;
 
   PdfCanvasRenderer? _renderer;
-  Object? _error;
+  String? _error;
   int _currentPage = 0;
   bool _readySent = false;
   String _lastReportedSearchQuery = '';
+
   /// Page index -> quads in page space; each page widget converts these
   /// to widget coordinates using its own painted box.
   final Map<int, List<PdfTextQuad>> _searchHighlights = {};
+
+  /// Layout scale of the current page, in logical pixels per PDF point.
+  ///
+  /// The page widget reports it after layout; `locator.zoom` must carry this
+  /// value (what the WebView renderer exposed as `dataset.scale`), not the
+  /// user's `pdfScale` setting.
+  double _layoutScale = 1;
+
+  /// Result of the text-layer probe, or null while it is still running.
+  bool? _nativeTextLayer;
 
   @override
   void initState() {
@@ -95,9 +110,16 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
         widget.clearSearchHighlightsVersion) {
       setState(() => _searchHighlights.clear());
     }
-    if (oldWidget.jumpToken != widget.jumpToken ||
-        oldWidget.focusLocator != widget.focusLocator) {
-      unawaited(_jumpToFocus());
+    // The host puts the jump target in `initialProgress`: `_jumpProgress`
+    // carries the enriched locator, while `focusLocator` is only set when the
+    // target can be flashed. Reading focusLocator dropped every page-number
+    // and outline jump that had no excerpt.
+    if (oldWidget.jumpToken != widget.jumpToken) {
+      unawaited(_jumpToLocator(widget.initialProgress?.locator));
+    }
+    if (oldWidget.ocrOverlayToken != widget.ocrOverlayToken ||
+        oldWidget.ocrOverlayPage != widget.ocrOverlayPage) {
+      _emitCapabilities();
     }
   }
 
@@ -125,27 +147,81 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       setState(() {
         _currentPage = _initialPage(doc.pageCount);
         _error = null;
+        _readySent = true;
       });
-
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(_currentPage);
-      }
 
       // Capability first: the host enables selection/search UI from this, so a
       // silent selection path would leave the reader offering dead buttons.
+      // Assume text until the probe finishes, so a document that does have a
+      // text layer never flickers its controls off and on.
       widget.onEvent(
-        const RendererCapabilityChanged(
-          textSelection: true,
-          search: true,
-        ),
+        const RendererCapabilityChanged(textSelection: true, search: true),
       );
       widget.onEvent(RendererReady());
-      _readySent = true;
       _reportLocation(doc.pageCount);
+      unawaited(_detectCapabilities(renderer));
+
+      // PageView only exists once the build above has run, so a jump issued
+      // here has no clients and is silently dropped. Restore on the first
+      // frame instead; without it the reader opens on page 1 while reporting
+      // the saved page, and the first swipe rewrites progress to page 2.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_pageController.hasClients) return;
+        if ((_pageController.page ?? 0).round() != _currentPage) {
+          _pageController.jumpToPage(_currentPage);
+        }
+      });
       unawaited(_runSearch());
     } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (!mounted) return;
+      final message = _openErrorMessage(error);
+      setState(() => _error = message);
+      // The host owns retry and error details; a local string alone leaves the
+      // reader with a dead page and no recovery path.
+      widget.onEvent(RendererFailed(message));
     }
+  }
+
+  /// Probes the text layer, then reports what the renderer can actually do.
+  Future<void> _detectCapabilities(PdfCanvasRenderer renderer) async {
+    final hasText = await renderer.hasTextLayerAsync();
+    if (!mounted) return;
+    _nativeTextLayer = hasText;
+    _emitCapabilities();
+  }
+
+  void _emitCapabilities() {
+    final native = _nativeTextLayer;
+    if (native == null) return;
+    final hasOcr =
+        widget.ocrOverlayPage != null && widget.ocrOverlayBlocks.isNotEmpty;
+    final reason = native
+        ? null
+        : hasOcr
+        ? '已叠加 OCR 文本层，划词暂未启用。'
+        : '此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别可见页」提取文字。';
+    widget.onEvent(
+      RendererCapabilityChanged(
+        // OCR block selection lands in S5; until then only native text is
+        // selectable. Search never covers OCR text in v1
+        // (`v1-experience-freeze.md` §5), so it follows the native flag.
+        textSelection: native,
+        search: native,
+        nativeTextLayer: native,
+        ocrTextLayer: hasOcr,
+        reason: reason,
+      ),
+    );
+  }
+
+  String _openErrorMessage(Object error) {
+    return switch (error) {
+      CosPasswordException() => '此 PDF 需要密码（当前版本不支持输入密码）',
+      UnsupportedEncryptionException() => '此 PDF 使用了不支持的加密方式',
+      CosParseException() => '文件可能已损坏',
+      StateError(:final message) => message,
+      _ => '无法打开 PDF: $error',
+    };
   }
 
   int _initialPage(int pageCount) {
@@ -159,16 +235,34 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     final page = _currentPage + 1;
     // progress is page-based; the WebView renderer used the same convention.
     final progress = pageCount <= 1 ? 1.0 : (page - 1) / (pageCount - 1);
+    // The WebView renderer skipped excerpts on phones: scanning the text layer
+    // is a layout-heavy pass and the excerpt is only used to flash a phrase
+    // after a jump. Capture the width now; reading MediaQuery from the timer
+    // would register an inherited-widget dependency outside build.
+    final includeExcerpt = MediaQuery.sizeOf(context).width >= 900;
 
     _locationTimer?.cancel();
     _locationTimer = Timer(const Duration(milliseconds: 120), () {
       if (!mounted) return;
+      String? excerpt;
+      if (includeExcerpt) {
+        try {
+          excerpt = compactLocatorExcerpt(
+            _renderer?.textOf(_currentPage).text,
+            maxChars: 120,
+          );
+        } on Object {
+          excerpt = null;
+        }
+      }
       widget.onEvent(
         RendererLocationChanged(
           locator: ReadingLocator.pdf(
             page: page,
-            zoom: widget.settings.pdfScale,
+            // scrollOffset stays 0 until continuous scrolling lands (S2).
+            zoom: _layoutScale,
             progress: progress.clamp(0.0, 1.0),
+            excerpt: excerpt,
           ),
           progress: progress.clamp(0.0, 1.0),
           pageNumber: page,
@@ -225,7 +319,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
             snippet: snippet ?? query,
             locator: ReadingLocator.pdf(
               page: page + 1,
-              zoom: widget.settings.pdfScale,
+              // Search results are rendered at whatever scale the reader has
+              // when the user opens them, so record the current layout scale.
+              zoom: _layoutScale,
               progress: renderer.pageCount <= 1
                   ? 0
                   : page / (renderer.pageCount - 1),
@@ -246,11 +342,10 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     widget.onEvent(RendererSearchResults(results));
   }
 
-  Future<void> _jumpToFocus() async {
+  Future<void> _jumpToLocator(ReadingLocator? locator) async {
     final renderer = _renderer;
-    final focus = widget.focusLocator;
-    if (renderer == null || focus == null) return;
-    final page = focus.page;
+    if (renderer == null || locator == null) return;
+    final page = locator.page;
     if (page == null || page < 1 || page > renderer.pageCount) return;
 
     final target = page - 1;
@@ -261,7 +356,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
         curve: Curves.easeOut,
       );
     }
-    if (mounted && target != _currentPage) setState(() => _currentPage = target);
+    if (mounted && target != _currentPage) {
+      setState(() => _currentPage = target);
+    }
     _reportLocation(renderer.pageCount);
   }
 
@@ -298,6 +395,11 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   ? widget.ocrOverlayBlocks
                   : const [],
               onSelection: widget.onEvent,
+              onLayoutScaleChanged: index == _currentPage
+                  ? (scale) {
+                      _layoutScale = scale;
+                    }
+                  : null,
             ),
           ),
         ),
@@ -306,15 +408,15 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
           total: renderer.pageCount,
           onPrev: _currentPage > 0
               ? () => _pageController.previousPage(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                  )
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                )
               : null,
           onNext: _currentPage < renderer.pageCount - 1
               ? () => _pageController.nextPage(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                  )
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                )
               : null,
         ),
       ],
@@ -332,6 +434,7 @@ final class _CanvasPage extends StatefulWidget {
     required this.annotations,
     required this.ocrBlocks,
     required this.onSelection,
+    this.onLayoutScaleChanged,
   });
 
   final PdfCanvasRenderer renderer;
@@ -344,6 +447,10 @@ final class _CanvasPage extends StatefulWidget {
   final List<Map<String, Object?>> ocrBlocks;
   final ValueChanged<RendererTextSelected> onSelection;
 
+  /// Reports the page's logical-pixels-per-point after layout, for
+  /// `locator.zoom`. Only the current page passes a callback.
+  final ValueChanged<double>? onLayoutScaleChanged;
+
   @override
   State<_CanvasPage> createState() => _CanvasPageState();
 }
@@ -355,7 +462,16 @@ final class _CanvasPageState extends State<_CanvasPage> {
   Offset? _dragAnchor;
   bool _dragSelecting = false;
   List<Rect> _selectionHighlights = const [];
-  Rect _paintOrigin = Rect.zero;
+
+  /// The page's layout size in PDF points.
+  ///
+  /// S0 deliberately keeps using the unrotated crop box: the rasteriser also
+  /// records in that space, and switching only the layout would crop rotated
+  /// pages. S1 moves both onto `PdfPageRenderer.pageSize` together.
+  Size get _pageSize {
+    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
+    return Size(box.width, box.height);
+  }
 
   // Rendering waits for LayoutBuilder: the fit-width and fit-page zoom modes
   // resolve against the real paint box, which is not known until layout. A
@@ -389,12 +505,16 @@ final class _CanvasPageState extends State<_CanvasPage> {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
         if (viewport != _lastBox) _render(viewport);
 
-        // FittedBox centres the page inside the slot. Everything downstream —
-        // selection, search quads, annotations, OCR — is expressed in the
-        // painted page's own pixel space, so resolve that origin once here,
-        // in the same scope that has the constraints.
-        final paint = _computePaintOrigin(constraints);
-        _paintOrigin = paint;
+        final pageSize = _pageSize;
+        final displayed = _displayedSize(constraints, pageSize);
+
+        // Report the layout scale once per frame; the parent stores it for
+        // `locator.zoom`. Doing it in the builder (not in a post-frame hook)
+        // keeps the value in sync with what the user is actually looking at.
+        final onScale = widget.onLayoutScaleChanged;
+        if (onScale != null && pageSize.width > 0) {
+          onScale(displayed.width / pageSize.width);
+        }
 
         return Center(
           child: FutureBuilder<PdfRenderedPage>(
@@ -404,26 +524,22 @@ final class _CanvasPageState extends State<_CanvasPage> {
               if (page == null) {
                 return const Center(child: CircularProgressIndicator());
               }
-              final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
               return SizedBox(
-                width: box.width,
-                height: box.height,
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  child: _SelectablePage(
-                    page: page,
-                    box: box,
-                    paintSize: paint.size,
-                    highlights: [
-                      for (final q in widget.searchQuads) _quadToRect(q),
-                      ..._selectionHighlights,
-                    ],
-                    annotations: _annotationBoxes(_geometryFor(paint.size)),
-                    ocrBoxes: _ocrBoxes(_geometryFor(paint.size)),
-                    onStart: _onDragStart,
-                    onUpdate: _onDragUpdate,
-                    onEnd: _onDragEnd,
-                  ),
+                width: displayed.width,
+                height: displayed.height,
+                child: _SelectablePage(
+                  page: page,
+                  pageSize: pageSize,
+                  highlightedRects: [
+                    for (final q in widget.searchQuads)
+                      _quadToRect(q, pageSize),
+                    ..._selectionHighlights,
+                  ],
+                  annotations: _annotationBoxes(pageSize),
+                  ocrBoxes: _ocrBoxes(pageSize),
+                  onStart: _onDragStart,
+                  onUpdate: _onDragUpdate,
+                  onEnd: _onDragEnd,
                 ),
               );
             },
@@ -431,6 +547,16 @@ final class _CanvasPageState extends State<_CanvasPage> {
         );
       },
     );
+  }
+
+  /// The size the page occupies on screen, in logical pixels.
+  Size _displayedSize(BoxConstraints constraints, Size pageSize) {
+    if (pageSize.width <= 0 || pageSize.height <= 0) return Size.zero;
+    final scale = math.min(
+      constraints.maxWidth / pageSize.width,
+      constraints.maxHeight / pageSize.height,
+    );
+    return Size(pageSize.width * scale, pageSize.height * scale);
   }
 
   /// Geometry for this page in its own painted box.
@@ -448,17 +574,14 @@ final class _CanvasPageState extends State<_CanvasPage> {
     );
   }
 
-  /// The size the page is painted at inside [constraints].
-  Size _paintedSize(BoxConstraints constraints) {
-    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
-    return Size(
-      box.width * math.min(constraints.maxWidth / box.width, constraints.maxHeight / box.height),
-      box.height * math.min(constraints.maxWidth / box.width, constraints.maxHeight / box.height),
-    );
-  }
-
   /// Stored annotations for this page, in view coordinates.
-  List<_AnnotationBox> _annotationBoxes(PdfPageGeometry geometry) {
+  ///
+  /// `annotation.locator.selectionRects` are 0..1 fractions of the displayed
+  /// (post-rotation) page box, exactly like `RendererTextSelected`
+  /// `selectionRects`. They are therefore multiplied by the view size
+  /// directly — routing them through page space would apply /Rotate a second
+  /// time on rotated pages.
+  List<_AnnotationBox> _annotationBoxes(Size viewSize) {
     final out = <_AnnotationBox>[];
     for (final annotation in widget.annotations) {
       if (annotation.locator.page != widget.pageIndex + 1) continue;
@@ -466,23 +589,16 @@ final class _CanvasPageState extends State<_CanvasPage> {
         if (rect.width <= 0 || rect.height <= 0) continue;
 
         // A multi-line selection can persist as one tall box; collapse it to a
-        // single readable band, matching the WebView renderer.
+        // single readable band, matching the WebView renderer. F-02 lands in
+        // S5; until then this is the same approximation the WebView uses.
         final height = rect.height > 0.055 ? 0.022 : rect.height;
-        final pageRect = PdfRect(
-          rect.x,
-          1 - rect.y - height,
-          rect.x + rect.width,
-          1 - rect.y,
-        );
         out.add(
           _AnnotationBox(
-            rect: geometry.toViewRect(
-              PdfRect(
-                pageRect.left * _pageWidth,
-                pageRect.bottom * _pageHeight,
-                pageRect.right * _pageWidth,
-                pageRect.top * _pageHeight,
-              ),
+            rect: Rect.fromLTWH(
+              rect.x * viewSize.width,
+              rect.y * viewSize.height,
+              rect.width * viewSize.width,
+              height * viewSize.height,
             ),
             color: annotation.color,
             underline: annotation.style == AnnotationStyle.underline,
@@ -494,7 +610,11 @@ final class _CanvasPageState extends State<_CanvasPage> {
   }
 
   /// OCR text-layer boxes for a scanned page, in view coordinates.
-  List<_OcrBox> _ocrBoxes(PdfPageGeometry geometry) {
+  ///
+  /// OCR blocks are 0..1 fractions of the displayed page box (the OCR pipeline
+  /// rasterises exactly what is on screen), so they use the same direct
+  /// projection as annotations.
+  List<_OcrBox> _ocrBoxes(Size viewSize) {
     final out = <_OcrBox>[];
     for (final block in widget.ocrBlocks) {
       final text = block['text'];
@@ -508,16 +628,13 @@ final class _CanvasPageState extends State<_CanvasPage> {
       }
       if (width <= 0 || height <= 0) continue;
 
-      final h = height.toDouble().clamp(0.0, 1.0);
       out.add(
         _OcrBox(
-          rect: geometry.toViewRect(
-            PdfRect(
-              left.toDouble() * _pageWidth,
-              (1 - top.toDouble() - h) * _pageHeight,
-              (left.toDouble() + width.toDouble()) * _pageWidth,
-              (1 - top.toDouble()) * _pageHeight,
-            ),
+          rect: Rect.fromLTWH(
+            left.toDouble() * viewSize.width,
+            top.toDouble() * viewSize.height,
+            width.toDouble() * viewSize.width,
+            height.toDouble() * viewSize.height,
           ),
           text: text,
         ),
@@ -526,55 +643,42 @@ final class _CanvasPageState extends State<_CanvasPage> {
     return out;
   }
 
-  Rect _computePaintOrigin(BoxConstraints constraints) {
-    final painted = _paintedSize(constraints);
-    return Rect.fromLTWH(
-      (constraints.maxWidth - painted.width) / 2,
-      (constraints.maxHeight - painted.height) / 2,
-      painted.width,
-      painted.height,
-    );
-  }
-
-  double get _pageWidth => widget.renderer.pageAt(widget.pageIndex).cropBox.width;
-  double get _pageHeight => widget.renderer.pageAt(widget.pageIndex).cropBox.height;
-
-  PdfSelectionController? _selectionFor(BoxConstraints constraints) {
-    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
-    final paint = _computePaintOrigin(constraints);
+  PdfSelectionController _selectionFor(
+    BoxConstraints constraints,
+    Offset globalOrigin,
+  ) {
+    final displayed = _displayedSize(constraints, _pageSize);
     return PdfSelectionController(
       renderer: widget.renderer,
       pageIndex: widget.pageIndex,
-      box: box,
-      rasterScale: 1,
-      paintOrigin: paint.topLeft,
-      paintSize: paint.size,
+      box: widget.renderer.pageAt(widget.pageIndex).cropBox,
+      paintSize: displayed,
+      displayedSize: displayed,
+      globalOrigin: globalOrigin,
+      pageSize: _pageSize,
     );
   }
 
-  /// Page-space quad -> widget rectangle, using the same origin as selection.
-  Rect _quadToRect(PdfTextQuad quad) {
-    final box = widget.renderer.pageAt(widget.pageIndex).cropBox;
-    final paint = _paintOrigin;
-    if (paint.width <= 0 || paint.height <= 0) return Rect.zero;
-
-    var minX = double.infinity, maxX = -double.infinity;
-    var minY = double.infinity, maxY = -double.infinity;
-    for (final corner in quad.corners) {
-      final x = paint.left + (corner.$1 - box.left) / box.width * paint.width;
-      final y = paint.top + (box.top - corner.$2) / box.height * paint.height;
-      minX = math.min(minX, x);
-      maxX = math.max(maxX, x);
-      minY = math.min(minY, y);
-      maxY = math.max(maxY, y);
+  /// Page-space quad -> view rectangle.
+  ///
+  /// Search quads are page-space (y-up, crop-box origin), so they need the
+  /// rotation-aware projection [PdfPageGeometry] provides.
+  Rect _quadToRect(PdfTextQuad quad, Size viewSize) {
+    final geometry = _geometryFor(viewSize);
+    var rect = Rect.fromPoints(
+      geometry.toViewOffset(quad.corners[0].$1, quad.corners[0].$2),
+      geometry.toViewOffset(quad.corners[0].$1, quad.corners[0].$2),
+    );
+    for (final corner in quad.corners.skip(1)) {
+      final offset = geometry.toViewOffset(corner.$1, corner.$2);
+      rect = rect.expandToInclude(Rect.fromLTWH(offset.dx, offset.dy, 0, 0));
     }
-    if (!minX.isFinite || !minY.isFinite) return Rect.zero;
-    return Rect.fromLTRB(minX, minY, maxX, maxY);
+    return rect;
   }
 
   void _onDragStart(Offset local, BoxConstraints constraints) {
-    final controller = _selectionFor(constraints);
-    if (controller == null || !controller.hasText) return;
+    final controller = _selectionFor(constraints, Offset.zero);
+    if (!controller.hasText) return;
     setState(() {
       _dragAnchor = local;
       _dragSelecting = true;
@@ -584,31 +688,40 @@ final class _CanvasPageState extends State<_CanvasPage> {
 
   void _onDragUpdate(Offset local, BoxConstraints constraints) {
     if (!_dragSelecting) return;
-    final controller = _selectionFor(constraints);
+    final controller = _selectionFor(constraints, Offset.zero);
     final anchor = _dragAnchor;
-    if (controller == null || anchor == null) {
-        return;
-    }
+    if (anchor == null) return;
 
-    // Live highlight feedback; the selection is only committed on drag end.
+    // Live highlight feedback in view coordinates; the selection itself is
+    // only committed on drag end.
+    final displayed = _displayedSize(constraints, _pageSize);
     final rect = controller.selectionBetween(anchor, local);
     setState(() {
       _selectionHighlights = rect == null
           ? const []
           : [
               for (final r in rect.selectionRects)
-                Rect.fromLTWH(r.x, r.y, r.width, r.height),
+                Rect.fromLTWH(
+                  r.x * displayed.width,
+                  r.y * displayed.height,
+                  r.width * displayed.width,
+                  r.height * displayed.height,
+                ),
             ];
     });
   }
 
-  void _onDragEnd(Offset local, BoxConstraints constraints) {
+  void _onDragEnd(
+    Offset local,
+    BoxConstraints constraints,
+    Offset globalOrigin,
+  ) {
     if (!_dragSelecting) return;
     setState(() => _dragSelecting = false);
 
-    final controller = _selectionFor(constraints);
+    final controller = _selectionFor(constraints, globalOrigin);
     final anchor = _dragAnchor;
-    if (controller == null || anchor == null) return;
+    if (anchor == null) return;
 
     final drag = (local - anchor).distance;
     final selection = drag < 6
@@ -616,6 +729,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
         ? controller.selectionAtWord(local)
         : controller.selectionBetween(anchor, local);
 
+    final displayed = _displayedSize(constraints, _pageSize);
     if (selection == null || selection.selectionRects.isEmpty) {
       setState(() => _selectionHighlights = const []);
       return;
@@ -623,7 +737,12 @@ final class _CanvasPageState extends State<_CanvasPage> {
     setState(() {
       _selectionHighlights = [
         for (final r in selection.selectionRects)
-          Rect.fromLTWH(r.x, r.y, r.width, r.height),
+          Rect.fromLTWH(
+            r.x * displayed.width,
+            r.y * displayed.height,
+            r.width * displayed.width,
+            r.height * displayed.height,
+          ),
       ];
     });
     widget.onSelection(selection);
@@ -656,9 +775,19 @@ final class _PicturePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFFFFFFFF));
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = const Color(0xFFFFFFFF),
+    );
 
-    // Under the page: search hits and stored highlights.
+    // The rasterised page is in PDF point space; scale it into the page box.
+    canvas.save();
+    canvas.scale(pxPerPoint);
+    canvas.drawPicture(page.picture);
+    canvas.restore();
+
+    // Over the page: search hits and stored highlights. These must be painted
+    // after the picture — anything drawn first is hidden behind the raster.
     final searchFill = Paint()..color = const Color(0x553F8CFF);
     for (final rect in highlights) {
       canvas.drawRect(rect, searchFill);
@@ -680,13 +809,7 @@ final class _PicturePainter extends CustomPainter {
       }
     }
 
-    // The rasterised page is in PDF point space; scale it into the painted box.
-    canvas.save();
-    canvas.scale(pxPerPoint);
-    canvas.drawPicture(page.picture);
-    canvas.restore();
-
-    // Over the page: recognised text on scanned pages.
+    // Also over the page: recognised text on scanned pages.
     for (final box in ocrBoxes) {
       if (!box.rect.isEmpty) _paintOcrText(canvas, box);
     }
@@ -758,34 +881,38 @@ final class _PdfCanvasPager extends StatelessWidget {
 
 /// Paints the rasterised page and turns pointer gestures into selection events.
 ///
-/// Gesture positions arrive in the window's coordinate space; this converts
-/// them into the page box's own space so [PdfSelectionController] can map them
-/// onto PDF page coordinates.
+/// The widget is laid out at the page's on-screen size and its coordinate
+/// space is that same box, so pointer positions and overlay rects need no
+/// origin offset or fitted-box compensation.
 final class _SelectablePage extends StatefulWidget {
   const _SelectablePage({
     required this.page,
-    required this.box,
-    required this.highlights,
+    required this.pageSize,
+    required this.highlightedRects,
     required this.annotations,
     required this.ocrBoxes,
-    required this.paintSize,
     required this.onStart,
     required this.onUpdate,
     required this.onEnd,
   });
 
   final PdfRenderedPage page;
-  final PdfRect box;
-  final List<Rect> highlights;
+
+  /// The page's rotation-aware size in PDF points; the picture is recorded in
+  /// this space, so it is what the raster is scaled from.
+  final Size pageSize;
+  final List<Rect> highlightedRects;
   final List<_AnnotationBox> annotations;
   final List<_OcrBox> ocrBoxes;
 
-  /// Size the page is painted at, in logical pixels. The canvas uses it as its
-  /// coordinate space, so overlay rects need no further conversion.
-  final Size paintSize;
   final void Function(Offset local, BoxConstraints constraints) onStart;
   final void Function(Offset local, BoxConstraints constraints) onUpdate;
-  final void Function(Offset local, BoxConstraints constraints) onEnd;
+  final void Function(
+    Offset local,
+    BoxConstraints constraints,
+    Offset globalOrigin,
+  )
+  onEnd;
 
   @override
   State<_SelectablePage> createState() => _SelectablePageState();
@@ -795,41 +922,53 @@ final class _SelectablePageState extends State<_SelectablePage> {
   final _key = GlobalKey();
   Offset? _lastLocal;
 
-  /// Converts a global pointer position into the page box's local space,
-  /// accounting for the FittedBox centring the page inside its slot.
-  Offset _toLocal(Offset global, BoxConstraints constraints) {
+  /// Converts a global pointer position into this widget's local space.
+  Offset _toLocal(Offset global) {
     final renderBox = _key.currentContext?.findRenderObject() as RenderBox?;
     final local = renderBox == null ? global : renderBox.globalToLocal(global);
     _lastLocal = local;
     return local;
   }
 
+  Offset get _globalOrigin {
+    final renderBox = _key.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.hasSize) return Offset.zero;
+    return renderBox.localToGlobal(Offset.zero);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final size = Size(widget.box.width, widget.box.height);
     return LayoutBuilder(
       builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanStart: (d) =>
-              widget.onStart(_toLocal(d.globalPosition, constraints), constraints),
+              widget.onStart(_toLocal(d.globalPosition), constraints),
           onPanUpdate: (d) =>
-              widget.onUpdate(_toLocal(d.globalPosition, constraints), constraints),
+              widget.onUpdate(_toLocal(d.globalPosition), constraints),
           onPanEnd: (_) {
             final last = _lastLocal;
-            if (last != null) widget.onEnd(last, constraints);
+            if (last != null) {
+              widget.onEnd(last, constraints, _globalOrigin);
+            }
           },
-          onTapUp: (d) =>
-              widget.onEnd(_toLocal(d.globalPosition, constraints), constraints),
+          onTapUp: (d) => widget.onEnd(
+            _toLocal(d.globalPosition),
+            constraints,
+            _globalOrigin,
+          ),
           child: CustomPaint(
             key: _key,
-            size: widget.paintSize,
+            size: size,
             painter: _PicturePainter(
               widget.page,
-              highlights: widget.highlights,
+              highlights: widget.highlightedRects,
               annotations: widget.annotations,
               ocrBoxes: widget.ocrBoxes,
-              pxPerPoint: widget.paintSize.width / size.width,
+              pxPerPoint: widget.pageSize.width <= 0
+                  ? 1
+                  : size.width / widget.pageSize.width,
             ),
           ),
         );

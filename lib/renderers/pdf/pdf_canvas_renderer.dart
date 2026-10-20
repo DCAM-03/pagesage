@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
@@ -36,8 +37,11 @@ final class PdfCanvasRenderer {
     // device has no bitmaps and drawImage paints nothing — silently, with no
     // exception.
     final collector = ImageCollector();
-    PdfInterpreter(cos: cos, device: collector, scanImagesOnly: true)
-        .drawPage(page);
+    PdfInterpreter(
+      cos: cos,
+      device: collector,
+      scanImagesOnly: true,
+    ).drawPage(page);
     final images = await decodeImages(cos, collector.streams);
 
     // Rasterise at device pixels, capped so a huge page at high zoom cannot
@@ -53,7 +57,10 @@ final class PdfCanvasRenderer {
     final h = (box.height * scale).round().clamp(1, 20000);
 
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
+    final canvas = Canvas(
+      recorder,
+      Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+    );
 
     canvas.save();
     // Uniform scale first, then the page transform. The flip must pivot around
@@ -75,8 +82,10 @@ final class PdfCanvasRenderer {
     canvas.scale(1, -1);
     canvas.translate(-box.left, -box.bottom);
 
-    PdfInterpreter(cos: cos, device: CanvasPdfDevice(canvas, images: images))
-        .drawPage(page);
+    PdfInterpreter(
+      cos: cos,
+      device: CanvasPdfDevice(canvas, images: images),
+    ).drawPage(page);
     canvas.restore();
 
     final picture = recorder.endRecording();
@@ -87,8 +96,65 @@ final class PdfCanvasRenderer {
   }
 
   /// Text of [pageIndex] with geometry, for selection and search.
-  PdfPageText textOf(int pageIndex) =>
-      PdfTextExtractor.extract(_doc, pageIndex);
+  ///
+  /// Extraction runs the page content stream through the interpreter, so
+  /// results are cached per page: the location reporter, the selection
+  /// controller and search all ask for the same page within a few frames.
+  PdfPageText textOf(int pageIndex) {
+    final cached = _textCache.remove(pageIndex);
+    if (cached != null) {
+      // Re-insert so the map stays in least-recently-used order.
+      _textCache[pageIndex] = cached;
+      return cached;
+    }
+    final extracted = PdfTextExtractor.extract(_doc, pageIndex);
+    _textCache[pageIndex] = extracted;
+    while (_textCache.length > _textCachePages) {
+      _textCache.remove(_textCache.keys.first);
+    }
+    return extracted;
+  }
+
+  static const _textCachePages = 8;
+  final Map<int, PdfPageText> _textCache = <int, PdfPageText>{};
+
+  /// Whether the document has an extractable text layer at all.
+  ///
+  /// Samples the first [maxSamplePages] pages, then one middle page, matching
+  /// the WebView renderer's `detectDocumentTextLayer` (`bridge.js:2914`):
+  /// scanning every page blocks the UI on large books, while front-matter-only
+  /// scans would wrongly disable selection for the whole document.
+  ///
+  /// Text extraction is synchronous, so the probe yields between pages.
+  Future<bool> hasTextLayerAsync({int maxSamplePages = 8}) async {
+    final limit = math.min(pageCount, maxSamplePages);
+    for (var page = 0; page < limit; page += 1) {
+      if (_pageHasText(page)) return true;
+      await Future<void>.delayed(Duration.zero);
+    }
+    if (pageCount > limit) {
+      final middle = math.max(0, pageCount ~/ 2);
+      if (_pageHasText(middle)) return true;
+    }
+    return false;
+  }
+
+  bool _pageHasText(int pageIndex) {
+    try {
+      return textOf(pageIndex).text.trim().isNotEmpty;
+    } on Object {
+      // A page that cannot be parsed says nothing about the document.
+      return false;
+    }
+  }
+
+  /// The page's rotation-aware display size, in PDF points.
+  ///
+  /// `PdfPageRenderer.pageSize` applies /Rotate, matching what
+  /// `PdfPageGeometry` expects as its `viewSize` basis. Layout, selection and
+  /// annotation projection must all start from this instead of `cropBox`.
+  Size displaySizeOf(int pageIndex) =>
+      PdfPageRenderer.pageSize(_doc.page(pageIndex));
 }
 
 const double mathPi = 3.1415926535897932;
