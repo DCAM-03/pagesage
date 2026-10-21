@@ -346,6 +346,53 @@ void main() {
     expect(find.text('8 字'), findsOneWidget);
   });
 
+  testWidgets('a clipped reference can be read in full', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    const long =
+        '虚拟内存把主存的地址空间抽象成连续的字节数组，'
+        '每个进程看到的是自己独立的一份，'
+        '页表负责把这份抽象映射到物理页框，缺页时由内核换入，'
+        '换入的代价是一次磁盘读，因此局部性越好命中率越高，'
+        '而局部性又取决于访问模式是否集中，'
+        '这正是把这段话拆成引用清单、逐段检查的缘由。';
+    await tester.pumpWidget(
+      _panel('book.epub', _StubSource(), selection: long),
+    );
+    await tester.pumpAndSettle();
+
+    // The row shows a few lines and says so.
+    expect(find.text('显示全文'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.text(long).first).maxLines,
+      isNotNull,
+      reason: 'the collapsed row clips its text',
+    );
+
+    await tester.tap(find.text('显示全文'));
+    await tester.pumpAndSettle();
+
+    // Expanded, the whole text is there and the offer is withdrawn.
+    expect(find.text(long), findsOneWidget);
+    expect(find.text('收起'), findsOneWidget);
+    expect(find.text('显示全文'), findsNothing);
+  });
+
+  testWidgets('a short reference is not given an expand control', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _panel('book.epub', _StubSource(), selection: '短句。'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('显示全文'), findsNothing);
+  });
+
   testWidgets('the hidden quick actions are still reachable', (tester) async {
     await tester.binding.setSurfaceSize(const Size(480, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));

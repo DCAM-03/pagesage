@@ -1632,17 +1632,122 @@ final class _AiReferenceRow extends StatelessWidget {
               onChanged: onChanged,
             )
           else
-            Text(
-              text,
-              maxLines: compact ? 2 : 3,
-              overflow: TextOverflow.ellipsis,
-              style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurface,
-                height: 1.4,
-                fontSize: compact ? 13 : 14,
-              ),
-            ),
+            _AiReferenceText(text: text, compact: compact),
         ],
+      ),
+    );
+  }
+}
+
+/// The reference text, clipped to a few lines, with a way to read all of it.
+///
+/// A long selection was simply cut off with an ellipsis: the reader could
+/// see that there was more but not what it said, and the whole point of the
+/// list is that the reader checks what is about to be sent.
+final class _AiReferenceText extends StatefulWidget {
+  const _AiReferenceText({required this.text, required this.compact});
+
+  final String text;
+  final bool compact;
+
+  @override
+  State<_AiReferenceText> createState() => _AiReferenceTextState();
+}
+
+final class _AiReferenceTextState extends State<_AiReferenceText> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final style = textTheme.bodySmall?.copyWith(
+      color: colorScheme.onSurface,
+      height: 1.4,
+      fontSize: widget.compact ? 13 : 14,
+    );
+    final maxLines = widget.compact ? 2 : 3;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final clipped = _isClipped(style, constraints.maxWidth, maxLines);
+        if (_expanded) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.text, style: style),
+              const SizedBox(height: AppSpacing.x1),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _AiExpandToggle(
+                  label: '收起',
+                  onPressed: () => setState(() => _expanded = false),
+                ),
+              ),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.text,
+              maxLines: maxLines,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
+            // Only offered when something was actually cut: a button that
+            // expands nothing is noise.
+            if (clipped) ...[
+              const SizedBox(height: AppSpacing.x1),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _AiExpandToggle(
+                  label: '显示全文',
+                  onPressed: () => setState(() => _expanded = true),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  /// Whether the text is longer than the lines the row shows.
+  bool _isClipped(TextStyle? style, double maxWidth, int maxLines) {
+    final painter = TextPainter(
+      text: TextSpan(text: widget.text, style: style),
+      maxLines: maxLines,
+      textDirection: Directionality.of(context),
+    )..layout(maxWidth: maxWidth);
+    final clipped = painter.didExceedMaxLines;
+    painter.dispose();
+    return clipped;
+  }
+}
+
+/// A plain text link that expands or collapses something.
+final class _AiExpandToggle extends StatelessWidget {
+  const _AiExpandToggle({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        minimumSize: const Size(0, 28),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.primary,
+        ),
       ),
     );
   }
