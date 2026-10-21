@@ -2363,10 +2363,27 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     // resumes; only the latest menu is allowed to clear the renderer's paint.
     final epoch = ++_selectionMenuEpoch;
     _selectionActionsOpen = true;
+    // Whether the reader picked an action or merely walked away from the menu.
+    //
+    // Acting on a selection is not the same as being done with it: after
+    // asking AI about a passage, the reader still needs to see which passage
+    // that was. The paint therefore stays up once an action ran, and only a
+    // dismissal clears it. The renderer still drops it on the next tap
+    // elsewhere, which is the reader's other way of saying "finished".
+    var acted = false;
+    void runAction(_SelectionAction action) {
+      acted = true;
+      unawaited(_handleSelectionAction(context, selection, action));
+    }
+
     _showMobileChrome(autoHide: false);
     try {
       if (context.supportsSidePanel) {
-        await _showDesktopSelectionMenu(context, selection);
+        await _showDesktopSelectionMenu(
+          context,
+          selection,
+          onAction: runAction,
+        );
         return;
       }
       await showModalBottomSheet<void>(
@@ -2378,7 +2395,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
             compact: true,
             onAction: (action) {
               Navigator.of(sheetContext).pop();
-              unawaited(_handleSelectionAction(context, selection, action));
+              runAction(action);
             },
             onDismiss: () => Navigator.of(sheetContext).pop(),
           ),
@@ -2387,7 +2404,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     } finally {
       _selectionActionsOpen = false;
       _lastSelectionActionKey = null;
-      if (mounted && epoch == _selectionMenuEpoch) {
+      if (mounted && epoch == _selectionMenuEpoch && !acted) {
         setState(() => _clearSelectionVersion += 1);
       }
       _scheduleMobileChromeAutoHide();
@@ -2396,8 +2413,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
 
   Future<void> _showDesktopSelectionMenu(
     BuildContext context,
-    RendererTextSelected selection,
-  ) async {
+    RendererTextSelected selection, {
+    required ValueChanged<_SelectionAction> onAction,
+  }) async {
     _closeSelectionOverlay();
     final overlayState = Overlay.of(context);
     final overlayBox = overlayState.context.findRenderObject() as RenderBox?;
@@ -2458,9 +2476,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                   autofocus: true,
                   child: _DesktopSelectionOverlay(
                     selection: selection,
-                    onAction: (action) async {
+                    onAction: (action) {
                       dismiss();
-                      await _handleSelectionAction(context, selection, action);
+                      onAction(action);
                     },
                     onDismiss: dismiss,
                   ),

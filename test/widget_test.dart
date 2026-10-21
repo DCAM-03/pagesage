@@ -880,6 +880,126 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('acting on a selection keeps its highlight painted', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    var latest = ValueNotifier<ReaderRendererHostConfig?>(null);
+    addTearDown(latest.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [
+                _libraryBook(
+                  id: 'reader-keep-selection',
+                  title: '保留选区验证样本',
+                  progress: 0.2,
+                ),
+              ],
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            _FakeSettingsRepository(),
+          ),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            const _FakeBookmarkRepository(),
+          ),
+          annotationRepositoryProvider.overrideWithValue(
+            const _FakeAnnotationRepository(),
+          ),
+          noteRepositoryProvider.overrideWithValue(const _FakeNoteRepository()),
+          searchRepositoryProvider.overrideWithValue(
+            const _FakeSearchRepository(),
+          ),
+          aiSettingsRepositoryProvider.overrideWithValue(
+            const _FakeAiSettingsRepository(),
+          ),
+          aiConversationRepositoryProvider.overrideWithValue(
+            const _FakeAiConversationRepository(),
+          ),
+          readerRendererHostProvider.overrideWithValue(
+            (config) => _FakeRendererHost(
+              config: config,
+              // Reports the selection after the menu has had time to open.
+              event: RendererLocationChanged(
+                locator: ReadingLocator.epub(
+                  href: 'chapter.xhtml',
+                  chapterIndex: 0,
+                  progress: 0.2,
+                  excerpt: '选中的一段话',
+                ),
+                progress: 0.2,
+                chapterTitle: '第一章',
+              ),
+              exportConfig: (config) => latest.value = config,
+            ),
+          ),
+        ],
+        // A wide window: the desktop selection menu, not the bottom sheet.
+        child: const MediaQuery(
+          data: MediaQueryData(size: Size(1280, 800)),
+          child: MaterialApp(home: ReaderPage(bookId: 'reader-keep-selection')),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final before = latest.value!.clearSelectionVersion;
+
+    // A selection arrives; the action menu opens over it.
+    final host = tester.widget<_FakeRendererHost>(
+      find.byType(_FakeRendererHost),
+    );
+    host.config.onEvent(
+      RendererTextSelected(
+        text: '选中的一段话',
+        locator: ReadingLocator.epub(
+          href: 'chapter.xhtml',
+          chapterIndex: 0,
+          progress: 0.2,
+          excerpt: '选中的一段话',
+        ),
+        // Where the selection sits, so the floating menu lands inside the
+        // window instead of below it.
+        sourceRect: const ReaderRect(
+          page: 1,
+          x: 120,
+          y: 120,
+          width: 200,
+          height: 24,
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 250));
+
+    await tester.tap(find.text('复制').first);
+    await tester.pump(const Duration(milliseconds: 250));
+
+    // Acting on a selection is not the same as being done with it: the paint
+    // has to outlive the menu, or the reader loses track of which passage the
+    // answer is about.
+    expect(
+      latest.value!.clearSelectionVersion,
+      before,
+      reason: 'running an action must not clear the selection paint',
+    );
+
+    // The mobile chrome auto-hide timer is still armed; let it fire before the
+    // tree goes away.
+    await tester.pump(const Duration(seconds: 5));
+  });
+
   testWidgets('reader shows PDF no-text-layer capability notice', (
     tester,
   ) async {
@@ -1525,10 +1645,18 @@ Future<void> _sendControlShiftShortcut(
 }
 
 final class _FakeRendererHost extends StatefulWidget {
-  const _FakeRendererHost({required this.config, required this.event});
+  const _FakeRendererHost({
+    required this.config,
+    required this.event,
+    this.exportConfig,
+  });
 
   final ReaderRendererHostConfig config;
   final RendererEvent event;
+
+  /// Receives the latest config, so a test can read the selection token the
+  /// host passes down.
+  final void Function(ReaderRendererHostConfig config)? exportConfig;
 
   @override
   State<_FakeRendererHost> createState() => _FakeRendererHostState();
@@ -1553,6 +1681,8 @@ final class _FakeRendererHostState extends State<_FakeRendererHost> {
 
   @override
   Widget build(BuildContext context) {
+    // Every rebuild, since the host passes a fresh config down each time.
+    widget.exportConfig?.call(widget.config);
     return Center(child: Text('Fake renderer ${widget.config.book.title}'));
   }
 }
