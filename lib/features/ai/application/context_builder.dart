@@ -74,10 +74,7 @@ final class ContextBuilder {
     return paragraphs.sublist(start, end).join('\n\n');
   }
 
-  String _describe({
-    required AiContextRange range,
-    required String text,
-  }) {
+  String _describe({required AiContextRange range, required String text}) {
     // UI metadata only — location is shown separately, never mixed into payload.
     return '${range.label} · 约 ${text.length} 字 · 仅发送下方文本';
   }

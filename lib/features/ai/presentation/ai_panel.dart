@@ -136,9 +136,9 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
             if (!embedded) ...[
               Text(
                 'AI',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
               SizedBox(height: gap),
             ],
@@ -607,7 +607,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
           bookId: widget.bookId,
           title: conversation?.prompt ?? _promptController.text.trim(),
           content: answer,
-          sourceText: conversation?.sourceText ?? _contextController.text.trim(),
+          sourceText:
+              conversation?.sourceText ?? _contextController.text.trim(),
           locator: widget.locator,
           noteType: NoteType.ai,
         );
@@ -655,7 +656,9 @@ final class _AiPanelTabBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(AppRadius.full),
-        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.7)),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(3),
@@ -714,14 +717,18 @@ final class _AiPanelTabChip extends StatelessWidget {
               Icon(
                 icon,
                 size: 15,
-                color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                color: selected
+                    ? colorScheme.primary
+                    : colorScheme.onSurfaceVariant,
               ),
               const SizedBox(width: 5),
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                  color: selected
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -786,8 +793,9 @@ final class _AiContextCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     '将发送的文本',
-                    style: (compact ? textTheme.labelLarge : textTheme.titleSmall)
-                        ?.copyWith(fontWeight: FontWeight.w700),
+                    style:
+                        (compact ? textTheme.labelLarge : textTheme.titleSmall)
+                            ?.copyWith(fontWeight: FontWeight.w700),
                   ),
                 ),
                 _MetaChip(label: range.label, color: aiAccent),
@@ -910,16 +918,10 @@ final class _AiPromptChip extends StatelessWidget {
     return ActionChip(
       visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 4 : 6,
-        vertical: 0,
-      ),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 6, vertical: 0),
       labelPadding: EdgeInsets.symmetric(horizontal: compact ? 4 : 6),
       avatar: Icon(Icons.auto_awesome_outlined, size: compact ? 14 : 16),
-      label: Text(
-        label,
-        style: Theme.of(context).textTheme.labelMedium,
-      ),
+      label: Text(label, style: Theme.of(context).textTheme.labelMedium),
       onPressed: onPressed,
     );
   }
@@ -1169,7 +1171,9 @@ final class _AiHistoryCard extends StatelessWidget {
       color: colorScheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.9)),
+        side: BorderSide(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.9),
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
@@ -1218,10 +1222,7 @@ final class _AiHistoryCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.x2),
               Row(
                 children: [
-                  TextButton(
-                    onPressed: onOpen,
-                    child: const Text('载入提问'),
-                  ),
+                  TextButton(onPressed: onOpen, child: const Text('载入提问')),
                   IconButton(
                     tooltip: '复制回答',
                     onPressed: onCopy,

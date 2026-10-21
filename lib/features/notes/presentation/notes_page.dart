@@ -426,18 +426,15 @@ final class _NotesPageState extends ConsumerState<NotesPage> {
     final bookId = note.bookId;
     final locator = note.locator;
     if (bookId == null || locator == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('这条笔记没有原文位置')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('这条笔记没有原文位置')));
       return;
     }
     context.goNamed(
       'reader',
       pathParameters: {'bookId': bookId},
-      extra: enrichLocatorForJump(
-        locator,
-        fallbackExcerpt: note.sourceText,
-      ),
+      extra: enrichLocatorForJump(locator, fallbackExcerpt: note.sourceText),
     );
   }
 }

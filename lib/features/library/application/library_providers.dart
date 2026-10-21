@@ -56,10 +56,11 @@ final tagsProvider = StreamProvider<List<BookTag>>((ref) {
 });
 
 /// Shared bookId → tags map for list rendering and filters (no per-row queries).
-final bookTagsByBookIdProvider =
-    StreamProvider<Map<String, List<BookTag>>>((ref) {
-      return ref.watch(tagRepositoryProvider).watchTagsByBookId();
-    });
+final bookTagsByBookIdProvider = StreamProvider<Map<String, List<BookTag>>>((
+  ref,
+) {
+  return ref.watch(tagRepositoryProvider).watchTagsByBookId();
+});
 
 List<LibraryBook> sortLibraryBooks(List<LibraryBook> books, LibrarySort sort) {
   final sorted = [...books];

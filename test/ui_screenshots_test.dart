@@ -1072,8 +1072,10 @@ final class _FakeTagRepository implements TagRepository {
   }
 
   @override
-  Future<Set<String>> getBookIdsWithTag(String tagId) async =>
-      {'book-long', 'book-1'};
+  Future<Set<String>> getBookIdsWithTag(String tagId) async => {
+    'book-long',
+    'book-1',
+  };
 
   @override
   Future<List<BookTag>> getTagsForNote(String noteId) async => getTags();
@@ -1330,7 +1332,6 @@ final class _FakeSearchRepository implements SearchRepository {
       );
     }
   }
-
 }
 
 final class _FakeAiConversationRepository implements AiConversationRepository {

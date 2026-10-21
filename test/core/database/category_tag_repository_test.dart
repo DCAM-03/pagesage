@@ -196,17 +196,23 @@ void main() {
       expect(await repository.getTagsForNote('note-1'), isEmpty);
     });
 
-    test('watchTagsByBookId and getBookIdsWithTag avoid per-book polling', () async {
-      final tech = await repository.saveTag(id: 'tag-tech', name: '技术');
-      final fiction = await repository.saveTag(id: 'tag-fic', name: '小说');
-      await repository.setBookTags('book-a', [tech.id, fiction.id]);
-      await repository.setBookTags('book-b', [fiction.id]);
+    test(
+      'watchTagsByBookId and getBookIdsWithTag avoid per-book polling',
+      () async {
+        final tech = await repository.saveTag(id: 'tag-tech', name: '技术');
+        final fiction = await repository.saveTag(id: 'tag-fic', name: '小说');
+        await repository.setBookTags('book-a', [tech.id, fiction.id]);
+        await repository.setBookTags('book-b', [fiction.id]);
 
-      final map = await repository.watchTagsByBookId().first;
-      expect(map['book-a']!.map((tag) => tag.name), ['小说', '技术']);
-      expect(map['book-b']!.single.name, '小说');
-      expect(await repository.getBookIdsWithTag(fiction.id), {'book-a', 'book-b'});
-      expect(await repository.getBookIdsWithTag(tech.id), {'book-a'});
-    });
+        final map = await repository.watchTagsByBookId().first;
+        expect(map['book-a']!.map((tag) => tag.name), ['小说', '技术']);
+        expect(map['book-b']!.single.name, '小说');
+        expect(await repository.getBookIdsWithTag(fiction.id), {
+          'book-a',
+          'book-b',
+        });
+        expect(await repository.getBookIdsWithTag(tech.id), {'book-a'});
+      },
+    );
   });
 }

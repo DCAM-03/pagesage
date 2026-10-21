@@ -25,6 +25,7 @@ import 'pdf_layout.dart';
 import 'pdf_page_image_source.dart';
 import 'pdf_links.dart';
 import 'pdf_outline.dart';
+import 'pdf_page_tint.dart';
 import 'pdf_selection.dart';
 import 'pdf_selection_controller.dart';
 import 'pdf_zoom.dart';
@@ -751,12 +752,14 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                 viewport,
                 pageSize: pageSize,
                 scale: scale,
+                narrow: narrow,
               ),
               PdfDisplayMode.single || PdfDisplayMode.double => _buildPaged(
                 renderer,
                 viewport,
                 pageSize: pageSize,
                 scale: scale,
+                narrow: narrow,
                 mode: mode,
               ),
             };
@@ -765,6 +768,14 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       ),
     );
   }
+
+  /// Theme adjustment for the page, resolved per layout.
+  ///
+  /// Narrow viewports skip the colour matrix: a full-page filter forces the
+  /// page into its own layer on every frame, which is a real heat cost while
+  /// scrolling. The paper colour still follows the theme there.
+  PdfPageTint _tint(bool narrow) =>
+      PdfPageTint.forPreset(widget.settings.themePreset, narrow: narrow);
 
   // --- layout -----------------------------------------------------------
 
@@ -819,6 +830,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     Size viewport, {
     required Size pageSize,
     required double scale,
+    required bool narrow,
   }) {
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
@@ -850,6 +862,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               turnOnWheel: false,
               searchQuads: _searchHighlights[index] ?? const [],
               focusQuads: _focusQuads[index] ?? const [],
+              tint: _tint(narrow),
               annotations: widget.annotations,
               ocrBlocks: widget.ocrOverlayPage == index + 1
                   ? widget.ocrOverlayBlocks
@@ -882,6 +895,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     Size viewport, {
     required Size pageSize,
     required double scale,
+    required bool narrow,
     required PdfDisplayMode mode,
   }) {
     final doubleMode = mode == PdfDisplayMode.double;
@@ -924,6 +938,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   turnOnWheel: true,
                   searchQuads: _searchHighlights[indices[i]] ?? const [],
                   focusQuads: _focusQuads[indices[i]] ?? const [],
+                  tint: _tint(narrow),
                   annotations: widget.annotations,
                   ocrBlocks: widget.ocrOverlayPage == indices[i] + 1
                       ? widget.ocrOverlayBlocks
@@ -1581,6 +1596,7 @@ final class _CanvasPage extends StatefulWidget {
     required this.turnOnWheel,
     required this.searchQuads,
     required this.focusQuads,
+    required this.tint,
     required this.annotations,
     required this.ocrBlocks,
     required this.selectionRange,
@@ -1629,6 +1645,9 @@ final class _CanvasPage extends StatefulWidget {
   /// Quads of the one hit the reader just jumped to, painted brighter than the
   /// rest for a couple of seconds.
   final List<PdfTextQuad> focusQuads;
+
+  /// Theme adjustment resolved once for the whole layout.
+  final PdfPageTint tint;
   final List<Annotation> annotations;
   final List<Map<String, Object?>> ocrBlocks;
 
@@ -1836,6 +1855,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
       focusedRects: [
         for (final q in widget.focusQuads) _quadToRect(q, _pageSize),
       ],
+      tint: widget.tint,
       annotations: _annotationBoxes(_paintedSize),
       ocrBoxes: _ocrBoxes(_paintedSize),
       onStart: _onDragStart,
@@ -1902,6 +1922,20 @@ final class _CanvasPageState extends State<_CanvasPage> {
                       future: _future,
                       builder: (context, snapshot) {
                         final page = snapshot.data;
+                        if (snapshot.hasError) {
+                          // A page the interpreter rejected must not leave a
+                          // spinner behind it forever: the reader would sit on
+                          // a page that never arrives. Show a placeholder the
+                          // user can retry, and tell the host once.
+                          return _PageFailure(
+                            pageNumber: widget.pageIndex + 1,
+                            onRetry: () => setState(
+                              () => _future = widget.renderer.renderPage(
+                                widget.pageIndex,
+                              ),
+                            ),
+                          );
+                        }
                         if (page == null) {
                           if (snapshot.connectionState ==
                                   ConnectionState.done &&
@@ -2462,6 +2496,7 @@ final class _PicturePainter extends CustomPainter {
     this.annotations = const [],
     this.ocrBoxes = const [],
     this.pxPerPoint = 1,
+    this.tint = const PdfPageTint.plain(Color(0xFFFFFFFF)),
   });
 
   final PdfRenderedPage page;
@@ -2474,20 +2509,29 @@ final class _PicturePainter extends CustomPainter {
   /// overlays land directly; only the point-space picture needs scaling.
   final double pxPerPoint;
 
+  /// Theme adjustment for the page's own colours.
+  final PdfPageTint tint;
+
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xFFFFFFFF),
-    );
+    canvas.drawRect(Offset.zero & size, Paint()..color = tint.paper);
 
     // The picture is in PDF point space; scale it into the page box. Because
     // it is recorded as vectors, a zoom change replays it sharply instead of
     // stretching a raster.
+    //
+    // The theme filter wraps only the picture: highlights, annotations and OCR
+    // text are painted afterwards so a night-mode inversion cannot flip their
+    // colours into something unreadable.
+    final filter = tint.filter;
+    if (filter != null) {
+      canvas.saveLayer(Offset.zero & size, Paint()..colorFilter = filter);
+    }
     canvas.save();
     canvas.scale(pxPerPoint);
     canvas.drawPicture(page.picture);
     canvas.restore();
+    if (filter != null) canvas.restore();
 
     // Over the page: search hits and stored highlights. These must be painted
     // after the picture — anything drawn first is hidden behind the raster.
@@ -2550,7 +2594,8 @@ final class _PicturePainter extends CustomPainter {
       old.focusHighlights != focusHighlights ||
       old.annotations != annotations ||
       old.ocrBoxes != ocrBoxes ||
-      old.pxPerPoint != pxPerPoint;
+      old.pxPerPoint != pxPerPoint ||
+      old.tint != tint;
 }
 
 /// Paints the rasterised page and turns pointer gestures into selection events.
@@ -2564,6 +2609,7 @@ final class _SelectablePage extends StatefulWidget {
     required this.pageSize,
     required this.highlightedRects,
     required this.focusedRects,
+    required this.tint,
     required this.annotations,
     required this.ocrBoxes,
     required this.onStart,
@@ -2585,6 +2631,7 @@ final class _SelectablePage extends StatefulWidget {
 
   /// The jumped-to hit, drawn in a stronger colour than [highlightedRects].
   final List<Rect> focusedRects;
+  final PdfPageTint tint;
   final List<_AnnotationBox> annotations;
   final List<_OcrBox> ocrBoxes;
 
@@ -2687,6 +2734,7 @@ final class _SelectablePageState extends State<_SelectablePage> {
               focusHighlights: widget.focusedRects,
               annotations: widget.annotations,
               ocrBoxes: widget.ocrBoxes,
+              tint: widget.tint,
               pxPerPoint: widget.pageSize.width <= 0
                   ? 1
                   : size.width / widget.pageSize.width,
@@ -2917,5 +2965,56 @@ final class _CanvasPageImageSource implements PdfPageImageSource {
       mode: PdfDisplayMode.double,
     ).end;
     return [for (var page = start; page <= end + 1; page += 1) page];
+  }
+}
+
+/// Placeholder for a page the interpreter could not produce.
+///
+/// A single unreadable page is a property of that page, not of the book: the
+/// reader must be able to keep reading the rest and retry just this one. The
+/// WebView renderer had no equivalent because pdf.js drew its own error, and
+/// without this the canvas renderer left a spinner running for a page that was
+/// never coming.
+final class _PageFailure extends StatelessWidget {
+  const _PageFailure({required this.pageNumber, required this.onRetry});
+
+  final int pageNumber;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.broken_image_outlined,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '第 $pageNumber 页无法显示',
+                style: theme.textTheme.bodyMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_outlined),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -905,9 +905,9 @@ final class _SearchResultTile extends ConsumerWidget {
                             result.type == SearchResultType.note ||
                                     result.type == SearchResultType.ai
                                 ? (result.locator != null ||
-                                        result.bookId != null
-                                    ? '跳转原文'
-                                    : '查看详情')
+                                          result.bookId != null
+                                      ? '跳转原文'
+                                      : '查看详情')
                                 : '打开来源',
                           ),
                         ),
@@ -1147,8 +1147,8 @@ final class _SearchResultTile extends ConsumerWidget {
         pathParameters: {'bookId': bookId},
         extra: enrichLocatorForJump(
           locator,
-          fallbackExcerpt: note.sourceText ??
-              _plainSearchSnippet(result.snippet),
+          fallbackExcerpt:
+              note.sourceText ?? _plainSearchSnippet(result.snippet),
         ),
       );
       return;
@@ -1251,7 +1251,8 @@ final class _SearchResultTile extends ConsumerWidget {
         pathParameters: {'bookId': bookId},
         extra: enrichLocatorForJump(
           locator,
-          fallbackExcerpt: conversation.sourceText ??
+          fallbackExcerpt:
+              conversation.sourceText ??
               conversation.contextText ??
               _plainSearchSnippet(result.snippet),
         ),
@@ -1315,7 +1316,8 @@ final class _SearchResultTile extends ConsumerWidget {
                       ? null
                       : enrichLocatorForJump(
                           locator,
-                          fallbackExcerpt: conversation.contextText ??
+                          fallbackExcerpt:
+                              conversation.contextText ??
                               conversation.sourceText,
                         ),
                 );

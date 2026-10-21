@@ -16,6 +16,7 @@ final class AppPageHeader extends StatelessWidget {
   final String? subtitle;
   final Widget? leading;
   final List<Widget> actions;
+
   /// Tighter vertical padding under a desktop command bar.
   final bool dense;
 
@@ -232,6 +233,7 @@ final class AppEmptyState extends StatelessWidget {
   final Widget? action;
   final Widget? secondaryAction;
   final String? semanticLabel;
+
   /// Optional brand illustration under `assets/images/empty-states/`.
   final String? illustrationAsset;
 
@@ -314,9 +316,7 @@ final class _EmptyIconBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: colorScheme.accentSubtle,
         borderRadius: BorderRadius.circular(AppRadius.xl),
-        border: Border.all(
-          color: colorScheme.primary.withValues(alpha: 0.12),
-        ),
+        border: Border.all(color: colorScheme.primary.withValues(alpha: 0.12)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.x4),
@@ -407,10 +407,14 @@ final class AppSidePanel extends StatelessWidget {
         decoration: BoxDecoration(
           border: switch (border) {
             AppSidePanelBorder.left => Border(
-              left: BorderSide(color: colorScheme.appBorder.withValues(alpha: 0.95)),
+              left: BorderSide(
+                color: colorScheme.appBorder.withValues(alpha: 0.95),
+              ),
             ),
             AppSidePanelBorder.right => Border(
-              right: BorderSide(color: colorScheme.appBorder.withValues(alpha: 0.95)),
+              right: BorderSide(
+                color: colorScheme.appBorder.withValues(alpha: 0.95),
+              ),
             ),
           },
         ),

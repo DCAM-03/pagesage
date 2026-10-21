@@ -81,9 +81,7 @@ final class OcrPageController extends Notifier<OcrPageUiState> {
   }
 
   /// Look up a stored OCR page without starting a new recognition.
-  Future<OcrPageResult?> peekCached({
-    required int pageNumber,
-  }) {
+  Future<OcrPageResult?> peekCached({required int pageNumber}) {
     return ref
         .read(ocrCurrentPageUseCaseProvider)
         .peekCachedPage(bookId: bookId, pageNumber: pageNumber);

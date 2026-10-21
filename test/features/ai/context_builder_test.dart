@@ -26,17 +26,20 @@ void main() {
     expect(context.text, '第一段\n\n第二段包含目标句子\n\n第三段');
   });
 
-  test('describes current PDF page context without embedding location in payload copy', () {
-    final builder = const ContextBuilder();
-    final context = builder.build(
-      selectedText: '页面文字',
-      range: AiContextRange.currentPage,
-      locator: ReadingLocator.pdf(page: 12),
-    );
+  test(
+    'describes current PDF page context without embedding location in payload copy',
+    () {
+      final builder = const ContextBuilder();
+      final context = builder.build(
+        selectedText: '页面文字',
+        range: AiContextRange.currentPage,
+        locator: ReadingLocator.pdf(page: 12),
+      );
 
-    expect(context.text, '页面文字');
-    expect(context.description, contains('当前页'));
-    expect(context.description, isNot(contains('第 12 页')));
-    expect(builder.locationLabel(ReadingLocator.pdf(page: 12)), '第 12 页');
-  });
+      expect(context.text, '页面文字');
+      expect(context.description, contains('当前页'));
+      expect(context.description, isNot(contains('第 12 页')));
+      expect(builder.locationLabel(ReadingLocator.pdf(page: 12)), '第 12 页');
+    },
+  );
 }

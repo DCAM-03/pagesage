@@ -114,42 +114,45 @@ void main() {
     expect(content, contains('- 类型：AI'));
   });
 
-  test('backupDatabaseZip packages sqlite and restores with rollback', () async {
-    final root = Directory(p.join(tempDir.path, 'data-root'));
-    await root.create(recursive: true);
-    final appPaths = AppPaths(overrideRoot: root);
-    final databaseFile = await appPaths.databaseFile();
-    await databaseFile.parent.create(recursive: true);
-    final sqliteHeader = <int>[
-      ...ascii.encode('SQLite format 3'),
-      0,
-      ...List<int>.filled(48, 1),
-    ];
-    await databaseFile.writeAsBytes(sqliteHeader, flush: true);
-    final covers = await appPaths.coversDirectory();
-    await File(p.join(covers.path, 'cover-a.png')).writeAsBytes([1, 2, 3]);
+  test(
+    'backupDatabaseZip packages sqlite and restores with rollback',
+    () async {
+      final root = Directory(p.join(tempDir.path, 'data-root'));
+      await root.create(recursive: true);
+      final appPaths = AppPaths(overrideRoot: root);
+      final databaseFile = await appPaths.databaseFile();
+      await databaseFile.parent.create(recursive: true);
+      final sqliteHeader = <int>[
+        ...ascii.encode('SQLite format 3'),
+        0,
+        ...List<int>.filled(48, 1),
+      ];
+      await databaseFile.writeAsBytes(sqliteHeader, flush: true);
+      final covers = await appPaths.coversDirectory();
+      await File(p.join(covers.path, 'cover-a.png')).writeAsBytes([1, 2, 3]);
 
-    final service = ExportService(
-      appPaths: appPaths,
-      noteRepository: const _FakeNoteRepository([]),
-      bookmarkRepository: const _FakeBookmarkRepository([]),
-      annotationRepository: const _FakeAnnotationRepository([]),
-      aiConversationRepository: const _FakeAiConversationRepository([]),
-      database: database,
-    );
+      final service = ExportService(
+        appPaths: appPaths,
+        noteRepository: const _FakeNoteRepository([]),
+        bookmarkRepository: const _FakeBookmarkRepository([]),
+        annotationRepository: const _FakeAnnotationRepository([]),
+        aiConversationRepository: const _FakeAiConversationRepository([]),
+        database: database,
+      );
 
-    final backup = await service.backupDatabaseZip(
-      targetPath: p.join(tempDir.path, 'backup.zip'),
-    );
-    expect(await backup.exists(), isTrue);
+      final backup = await service.backupDatabaseZip(
+        targetPath: p.join(tempDir.path, 'backup.zip'),
+      );
+      expect(await backup.exists(), isTrue);
 
-    await databaseFile.writeAsBytes([9, 9, 9], flush: true);
-    final restore = await service.restoreDatabaseBackup(backup);
-    expect(await File(restore.databasePath).exists(), isTrue);
-    final restored = await File(restore.databasePath).readAsBytes();
-    expect(restored.sublist(0, 16), [...ascii.encode('SQLite format 3'), 0]);
-    expect(await File(restore.rollbackPath).exists(), isTrue);
-  });
+      await databaseFile.writeAsBytes([9, 9, 9], flush: true);
+      final restore = await service.restoreDatabaseBackup(backup);
+      expect(await File(restore.databasePath).exists(), isTrue);
+      final restored = await File(restore.databasePath).readAsBytes();
+      expect(restored.sublist(0, 16), [...ascii.encode('SQLite format 3'), 0]);
+      expect(await File(restore.rollbackPath).exists(), isTrue);
+    },
+  );
 }
 
 ExportService _service(

@@ -941,3 +941,70 @@ abstract interface class PdfPageImageSource {
 | 假 OCR 引擎（仅测试） | **未做**；Linux 上 `StubOcrEngine` 仍 `supportsPdfPageOcr => false` |
 
 后三项需要在 Linux 上有一条可跑的 OCR 管线才有验证价值，计划把它们与 S7 的真机验证一起排。
+
+## 23. S6 施工记录：主题纸色 / 错误分级 / 性能基线（2026-10-21）
+
+### 23.1 开工前状态核对
+
+| 计划项 | 实际状态 |
+| --- | --- |
+| 1. 纸色 + 夜间 `ColorFilter`，移动端禁用滤镜 | **完全缺失**。canvas 页面固定在白底上，主题只影响页面外的外边距 |
+| 2. worker 接入与预取 | **已提前完成**（§19），本轮只复核，未重建 |
+| 3. 删除 `image_decoder.dart` implementation import | **不适用**：`pdf_canvas_renderer.dart` 当前没有任何 `src/` 导入，无需删除 |
+| 4. 失败分级：打开/单页/密码/损坏 | 打开类已分级；**单页失败会让转圈永远转下去** |
+| 5. replay 路径 rotation | 已满足（§19 用 `rotation: null`），本轮补了旋转页标注验收的说明 |
+| 6. 性能采样 | 缺 |
+
+### 23.2 主题纸色与夜间模式
+
+新增 `lib/renderers/pdf/pdf_page_tint.dart`：`ColorFilter` 无法从外部读取自己的矩阵，所以 `PdfPageTint` 由**效果参数**（invert/sepia/saturation/brightness/contrast）定义，再折叠成 4×5 矩阵。
+
+映射沿用 `viewer.css` 的既有分组，保证两个渲染器同主题下同色：
+
+| 主题 | 处理 |
+| --- | --- |
+| night | 软反色 0.9 + 180° 色相旋转 + contrast 0.92 / brightness 0.92，纸色 `#1A1A1A` |
+| paper / warm / amber | sepia 0.22 / saturate 0.9 / brightness 0.98，纸色 `#F6ECDA` |
+| green / sage | sepia 0.18 / saturate 0.85 / brightness 0.97，纸色 `#EEF5EA` |
+| day / contrast / ink / inkWarm | **不施加矩阵**，只用主题纸色 |
+
+最后一行是刻意取舍：高对比主题对已经自带对比的 PDF 再加一层会削掉扫描件的细节，而墨水屏预设对本来就低饱和的版面再叠一层等于双重着色。
+
+**滤镜只包住页面图像**，高亮、标注、OCR 文字在 `saveLayer` 之外绘制。否则夜间反色会把琥珀色命中标记和标注色一起翻成难以辨认的颜色。
+
+**窄视口（< 900 px）不施加任何矩阵**，只保留主题纸色。整页滤镜会强制页面进入独立图层并在滚动期间持续合成，是手机发热的主要来源——bridge 的 `@media (max-width: 899px)` 出于同一原因做了同样取舍。
+
+### 23.3 单页失败不再无限转圈
+
+`FutureBuilder` 原先只判 `snapshot.data == null`，渲染抛异常时 `hasError` 为真但 data 为空，于是永远停在转圈。这违反 F-04（无空白页）的另一面：**不是空白，是永远等待**。
+
+改为：`snapshot.hasError` → `_PageFailure` 占位，显示「第 N 页无法显示」+ 重试按钮。单页不可读是那一页的属性，不是整本书的——读者必须能继续读其余页并只重试这一页。
+
+打开阶段的错误映射已覆盖 `CosPasswordException` / `UnsupportedEncryptionException` / `CosParseException`，本轮复核确认无需改动。
+
+### 23.4 性能基线
+
+新增 `test/renderers/pdf/pdf_render_perf_test.dart`，把数字记录下来而不是断言某台机器的绝对速度。实测（本机，Linux，debug）：
+
+| 指标 | 数值 |
+| --- | --- |
+| 80 页样本打开（解析 xref + 页树） | **9 ms** |
+| 首次渲染一页（大样本，含解释） | **353 ms** |
+| 同页再次渲染（worker 缓存命中） | **1 ms** |
+| 有后台预取时的可见页渲染 | **30 ms** |
+
+第三行的差距就是缓存存在的理由：没有它，每次往回滚动都要重新付 353 ms。第四行说明预取（优先级 1）确实没有挡住读者正在看的页。
+
+**关于「80 页首开」**：打开本身只要 9 ms，因为没有任何页面被解释——这是「打开即出现」的原因。真正的体感延迟在首个可见页的 353 ms，以及随后每页一次的解释成本。计划里写的「80 页首开时长」如果指整本预渲染，那不是本实现的目标，也不应该做：读者只看得到一两页。
+
+### 23.5 验证结果
+
+- `flutter analyze`：0 error、0 warning；3 条 info 全在 `poc_pdf_canvas/`。
+- `flutter test`：**336 项通过、2 项跳过、0 失败**（S5 为 322；S6 新增 3 项性能 + 11 项主题）。
+
+### 23.6 未在本轮完成 / 明确不做
+
+- **帧时间采样**：`flutter test` 的假时钟不产出真实帧时间，这类数字只能在真机 `--profile` 下拿。留给 S8 的手工矩阵。
+- **峰值内存**：同上，需要 DevTools 或 `flutter run --profile` 观测。
+- **夜间模式标注不被反色的验收**：已由「滤镜只包图像」的结构保证，并写在 §23.2；但缺少一条视觉回归测试（widget test 无法断言最终像素颜色而不引入 golden 文件）。计划在 S8 手工矩阵里目视确认。
+- 旋转页标注投影验收仍未做（`/Rotate 90` 页上的标注渲染），与 S5 遗留项一同排期。

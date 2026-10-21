@@ -184,7 +184,9 @@ final class _DesktopNavigation extends StatelessWidget {
       decoration: BoxDecoration(
         color: colorScheme.surface,
         border: Border(
-          right: BorderSide(color: colorScheme.appBorder.withValues(alpha: 0.95)),
+          right: BorderSide(
+            color: colorScheme.appBorder.withValues(alpha: 0.95),
+          ),
         ),
       ),
       child: SizedBox(
