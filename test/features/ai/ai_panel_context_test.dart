@@ -92,23 +92,31 @@ final class _SingleBook implements BookRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-/// Configured AI, so `_ask` gets as far as the confirmation dialog.
+/// Configured AI, so a send gets as far as the request.
 final class _ConfiguredAiSettings implements AiSettingsRepository {
-  const _ConfiguredAiSettings();
+  _ConfiguredAiSettings({this.confirmBeforeRequest = true});
+
+  /// What a reader who left the confirmation on would have.
+  final bool confirmBeforeRequest;
+
+  AiSettings? saved;
 
   @override
   Future<void> clearApiKey() async {}
 
   @override
-  Future<AiSettings> getSettings() async => const AiSettings(
+  Future<AiSettings> getSettings() async => AiSettings(
     enabled: true,
     baseUrl: 'http://localhost:11434',
     model: 'test-model',
     hasApiKey: true,
+    confirmBeforeRequest: confirmBeforeRequest,
   );
 
   @override
-  Future<void> saveSettings(AiSettings settings, {String? apiKey}) async {}
+  Future<void> saveSettings(AiSettings settings, {String? apiKey}) async {
+    saved = settings;
+  }
 
   @override
   Stream<AiSettings> watchSettings() =>
@@ -120,6 +128,7 @@ Widget _panel(
   AiContextSource source, {
   String selection = '选中的句子',
   bool aiConfigured = false,
+  AiSettingsRepository? aiSettings,
   RetrievalContextSource? retrieval,
 }) {
   return ProviderScope(
@@ -127,10 +136,10 @@ Widget _panel(
       aiContextSourceProvider.overrideWithValue(source),
       if (retrieval != null)
         retrievalContextSourceProvider.overrideWithValue(retrieval),
-      if (aiConfigured)
-        aiSettingsRepositoryProvider.overrideWithValue(
-          const _ConfiguredAiSettings(),
-        ),
+      if (aiSettings != null)
+        aiSettingsRepositoryProvider.overrideWithValue(aiSettings)
+      else if (aiConfigured)
+        aiSettingsRepositoryProvider.overrideWithValue(_ConfiguredAiSettings()),
     ],
     child: MaterialApp(
       home: Scaffold(
@@ -455,6 +464,64 @@ void main() {
     expect(body.data, contains('2 段引用'));
     expect(body.data, contains('选中文本'));
     expect(body.data, contains('第一章'));
+  });
+
+  testWidgets('sending does not stop for a dialog by default', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    // The rail already lists every block going out; a second stop on every
+    // question is what the reader asked to be rid of.
+    await tester.pumpWidget(
+      _panel(
+        'book.epub',
+        _StubSource(text: '章节正文内容'),
+        aiSettings: _ConfiguredAiSettings(confirmBeforeRequest: false),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, '解释这段');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('发送'));
+    // A real send starts a request, so settle on frames rather than a quiet
+    // tree; what is under test is that no dialog appears first.
+    for (var i = 0; i < 4; i += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.text('发送 AI 请求？'), findsNothing);
+  });
+
+  testWidgets('the confirmation can be switched off from the dialog', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final settings = _ConfiguredAiSettings(confirmBeforeRequest: true);
+    await tester.pumpWidget(
+      _panel('book.epub', _StubSource(text: '章节正文内容'), aiSettings: settings),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, '解释这段');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('发送'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('以后不再询问'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(AlertDialog), matching: find.text('发送')),
+    );
+    // A real send starts a request; settle on frames, not on a quiet tree.
+    for (var i = 0; i < 4; i += 1) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    // The choice sticks, so the next question goes straight out.
+    expect(settings.saved?.confirmBeforeRequest, isFalse);
   });
 
   testWidgets('an unreadable book says so and leaves no spinner', (

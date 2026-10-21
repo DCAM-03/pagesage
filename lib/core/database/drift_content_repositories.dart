@@ -799,7 +799,7 @@ final class DriftAiSettingsRepository implements AiSettingsRepository {
       maxTokens: int.tryParse(values['ai.maxTokens'] ?? '') ?? 1200,
       streaming: values['ai.streaming'] != 'false',
       systemPrompt: values['ai.systemPrompt'] ?? '',
-      confirmBeforeRequest: values['privacy.confirmBeforeAiRequest'] != 'false',
+      confirmBeforeRequest: values['privacy.confirmBeforeAiRequest'] == 'true',
       hasApiKey: await _secureStore.hasValue(aiApiKeyStorageKey),
     );
   }

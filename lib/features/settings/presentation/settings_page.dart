@@ -2282,7 +2282,7 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('每次请求前确认上下文'),
                   subtitle: Text(
-                    '发送前展示将上传的文本范围',
+                    '默认关闭；开启后每次发送前弹出确认框',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colorScheme.textSecondary,
                     ),

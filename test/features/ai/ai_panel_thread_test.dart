@@ -147,10 +147,6 @@ Future<void> _ask(WidgetTester tester, String prompt) async {
   await tester.pumpAndSettle();
   await tester.tap(find.text('发送'));
   await tester.pumpAndSettle();
-  await tester.tap(
-    find.descendant(of: find.byType(AlertDialog), matching: find.text('发送')),
-  );
-  await tester.pumpAndSettle();
 }
 
 void main() {

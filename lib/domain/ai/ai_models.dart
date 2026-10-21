@@ -10,7 +10,7 @@ final class AiSettings {
     this.maxTokens = 1200,
     this.streaming = true,
     this.systemPrompt = '',
-    this.confirmBeforeRequest = true,
+    this.confirmBeforeRequest = false,
     this.hasApiKey = false,
   });
 
@@ -22,6 +22,13 @@ final class AiSettings {
   final int maxTokens;
   final bool streaming;
   final String systemPrompt;
+
+  /// Show a dialog before every request.
+  ///
+  /// Off by default: the rail already lists every block that will be sent,
+  /// with its size and origin, and a dialog on every question turns a
+  /// deliberate privacy check into a reflex the reader clicks through. The
+  /// setting stays for readers who want the extra stop.
   final bool confirmBeforeRequest;
   final bool hasApiKey;
 

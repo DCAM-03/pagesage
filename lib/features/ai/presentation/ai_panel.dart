@@ -582,25 +582,21 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
         if (reference.text.trim().isNotEmpty) '· ${reference.label}',
     ].join('\n');
     if (settings.confirmBeforeRequest && mounted) {
-      final confirmed = await showDialog<bool>(
+      final choice = await showDialog<_ConfirmSendChoice>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('发送 AI 请求？'),
-          content: Text(contextDescription),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('发送'),
-            ),
-          ],
-        ),
+        builder: (context) =>
+            _ConfirmSendDialog(description: contextDescription),
       );
-      if (confirmed != true) {
+      if (choice == null) {
         return;
+      }
+      if (choice.stopAsking) {
+        // Remembered now rather than on the way out of the panel: a reader
+        // who says "don't ask again" and closes the panel should still get
+        // what they asked for.
+        await ref
+            .read(aiSettingsRepositoryProvider)
+            .saveSettings(settings.copyWith(confirmBeforeRequest: false));
       }
     }
     // A thread is named by its first turn; every later turn in the same
@@ -1458,6 +1454,76 @@ final class _AiContextCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// What the reader chose in the send confirmation.
+final class _ConfirmSendChoice {
+  const _ConfirmSendChoice({required this.stopAsking});
+
+  final bool stopAsking;
+}
+
+/// The optional stop before a request leaves the device.
+///
+/// The dialog exists for readers who want to double-check every request. It
+/// also carries the way out: a dialog with no memory turns a privacy check
+/// into a reflex, and a reader who has read the list once does not need to
+/// read it on every question.
+final class _ConfirmSendDialog extends StatefulWidget {
+  const _ConfirmSendDialog({required this.description});
+
+  final String description;
+
+  @override
+  State<_ConfirmSendDialog> createState() => _ConfirmSendDialogState();
+}
+
+final class _ConfirmSendDialogState extends State<_ConfirmSendDialog> {
+  bool _stopAsking = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('发送 AI 请求？'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.description),
+          const SizedBox(height: AppSpacing.x2),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            dense: true,
+            value: _stopAsking,
+            onChanged: (value) => setState(() => _stopAsking = value ?? false),
+            title: Text(
+              '以后不再询问',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            subtitle: Text(
+              '发送的内容仍会列在侧栏里',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(
+            context,
+          ).pop(_ConfirmSendChoice(stopAsking: _stopAsking)),
+          child: const Text('发送'),
+        ),
+      ],
     );
   }
 }
