@@ -338,26 +338,26 @@ Canvas 当前把下划线画成 `box.rect.height * 0.15`（`:672`），而 `box.
 
 - [x] 常规 PDF 可打开并连续滚动（S2）
 - [x] 退出后恢复到对应页与页内位置（S2）
-- [ ] 缩放与适合宽度无错位/裁切（S1）
-- [ ] 页码跳转可靠（S0）
+- [x] 缩放与适合宽度无错位/裁切（S1）— `pdf_zoom_test.dart` 14 项（四种模式、0.5–3.0 钳制、旋转页尺寸、退化页兜底）+ `pdf_layout_test.dart` 几何项；**视觉上的"无错位"仍待手工确认**
+- [x] 页码跳转可靠（S0）— `pdf_layout_test.dart` 的恢复目标/越界回落 + `pdf_canvas_view_test.dart` 的跳页用例
 - [x] 单页/双页模式可用（S2，共用 `ReaderSettings.readerMode`）
-- [ ] outline 跳转 + 无 outline 页码回退（S4）
-- [ ] 文本层检测如实上报，扫描件禁用划词/搜索并给出原因（S0）
+- [x] outline 跳转 + 无 outline 页码回退（S4）— `pdf_outline_links_test.dart` 11 项 + 视图用例
+- [x] 文本层检测如实上报，扫描件禁用划词/搜索并给出原因（S0）— 契约测试「reports no text layer for a scanned page」+ 视图测试「a scanned page says there is no selectable text」
 - [x] 桌面拖选、移动长按选词 + 手柄、跨页选择（S3）
-- [ ] 书内搜索可取消、可跳转（S4）
-- [ ] 标注显示与点击命中（S5）
-- [ ] **F-02：永久标注不盖住未选中的下一行**（S5，含文本 PDF 与 OCR 页；S7 删除 WebView 后由 Canvas 独立满足）
-- [ ] OCR 管线打通：导出图 → overlay → 划词（S5，Linux 用假引擎验管线；真实识别质量在 Android/Windows 真机验，S7/S8）
+- [x] 书内搜索可取消、可跳转（S4）— 命中/清空/聚焦跳转均有视图用例
+- [x] 标注显示与点击命中（S5）
+- [x] **F-02：永久标注不盖住未选中的下一行**（S5）— `pdf_annotation_lines_test.dart` 17 项；S7 删除 WebView 后由 Canvas 独立满足
+- [ ] OCR 管线打通：导出图 → overlay → 划词（S5，Linux 用假引擎验管线；真实识别质量在 Android/Windows 真机验，S8）— **导出接口已就绪并有 3 项测试；假 OCR 引擎未做，管线端到端未验**
 - [ ] OCR 后的能力上报如实：无原生文本层时 `search: false`、`textSelection: true`（S5）
-- [ ] 加密/损坏 PDF 明确错误（S0/S6）
-- [ ] 主题纸色与夜间模式（S6）
+- [x] 加密/损坏 PDF 明确错误（S0/S6）— 打开期异常映射 + 单页 `_PageFailure` 占位
+- [x] 主题纸色与夜间模式（S6）— `pdf_page_tint_test.dart` 11 项；**夜间标注配色仍待目视**
 - [ ] 大文档滚动性能与内存基线（S6/S8）
   - 页面解释已移出 UI 线程（§19.2）；剩余项为帧时间与峰值内存基线
-- [ ] 三端回归通过（S7/S8）
-- [ ] WebView 渲染器与 PDF.js 资源删除（S7）
-- [ ] 文档、许可、任务清单同步（S7）
+- [ ] 三端回归通过（S7/S8）— **Linux 自动化全绿；Windows/Android 未跑**
+- [x] WebView 渲染器与 PDF.js 资源删除（S7）— 见 §24
+- [x] 文档、许可、任务清单同步（S7）— 见 §24.5
 - [ ] 90°/270° 旋转页布局、选区、标注全部正确（S1/S3/S6，含 replay 路径 `rotation: null`）
-  - 布局与选区已在 S1/S3 卡住；标注投影与 replay 路径留到 S5/S6
+  - 布局与选区已有测试（契约测试「rotated page geometry」3 项 + 视图用例）；**标注在旋转页上的投影仍未验**
 
 ## 7. 风险与应对
 
