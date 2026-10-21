@@ -16,6 +16,7 @@ final class AiContextReference {
     required this.text,
     this.locator,
     this.bookTitle,
+    this.bookId,
     this.isSelection = false,
   });
 
@@ -33,6 +34,13 @@ final class AiContextReference {
   /// Null for the book the panel is open in.
   final String? bookTitle;
 
+  /// Which book to open when the reference is from another one.
+  ///
+  /// Null for the current book: the panel is already inside it, and jumping
+  /// there is a scroll rather than a navigation. Set for retrieved passages
+  /// from a sibling book, which need a different reader.
+  final String? bookId;
+
   /// True for the reader's own selection, false for text read from the book.
   final bool isSelection;
 
@@ -48,6 +56,7 @@ final class AiContextReference {
       text: text ?? this.text,
       locator: locator,
       bookTitle: bookTitle,
+      bookId: bookId,
       isSelection: isSelection,
     );
   }

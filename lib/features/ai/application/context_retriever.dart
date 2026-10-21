@@ -122,6 +122,9 @@ final class ContextRetriever {
           text: _excerpt(hit.chunk.text, terms),
           locator: hit.chunk.locator,
           bookTitle: hit.bookTitle,
+          // Set only when the passage came from another book: reaching the
+          // current book's passages is a scroll, not a navigation.
+          bookId: hit.bookTitle == null ? null : hit.bookId,
         ),
     ];
   }

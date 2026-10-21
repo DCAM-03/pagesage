@@ -324,12 +324,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                     setState(() => _contextExpanded = !_contextExpanded),
                 onReferenceChanged: _editReference,
                 onRemoveReference: _removeReference,
-                onOpenReference: (locator) {
-                  widget.onJumpTo?.call(locator);
-                  if (!widget.embedded && Navigator.of(context).canPop()) {
-                    Navigator.of(context).pop();
-                  }
-                },
+                onOpenReference: (reference) =>
+                    _openReference(context, reference),
                 onRangeChanged: _applyContextRange,
               ),
               if (_contextNotice != null) ...[
@@ -873,9 +869,10 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       return;
     }
     _applyRetrievedReferences(range, outcome);
-    final firstQuery = query;
-    final prompt = _promptController.text.trim();
-    if (prompt.isEmpty || prompt == firstQuery) {
+    // Only a question the reader actually wrote refines the search; the
+    // prefilled default is an instruction for the model, not a topic.
+    final prompt = _editedPrompt ?? '';
+    if (prompt.isEmpty || prompt == query) {
       return;
     }
     if (mounted && token == _loadToken) {
@@ -964,6 +961,29 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
           locator: widget.locator,
           isEpub: widget.isEpub,
         );
+  }
+
+  /// Opens the passage a reference came from.
+  ///
+  /// Jumps inside this book are a scroll. A passage retrieved from a sibling
+  /// book is a different document: the reader route takes the target locator
+  /// as `extra` and opens at the same place, which is why the reference has to
+  /// carry its book.
+  void _openReference(BuildContext context, AiContextReference reference) {
+    final locator = reference.locator;
+    if (locator == null) return;
+    final bookId = reference.bookId;
+    if (bookId != null && bookId != widget.bookId) {
+      if (!widget.embedded && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      context.go('/book/$bookId/reader', extra: locator);
+      return;
+    }
+    widget.onJumpTo?.call(locator);
+    if (!widget.embedded && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   /// Applies an edit to the text of one reference.
@@ -1197,7 +1217,10 @@ final class _AiContextCard extends StatelessWidget {
   /// Applies an edit to one reference, keyed by id.
   final void Function(String id, String text) onReferenceChanged;
   final ValueChanged<String> onRemoveReference;
-  final ValueChanged<ReadingLocator> onOpenReference;
+
+  /// Opens one reference. Given the whole reference, not its locator: a
+  /// passage from another book has to navigate to that book first.
+  final ValueChanged<AiContextReference> onOpenReference;
   final ValueChanged<AiContextRange> onRangeChanged;
 
   @override
@@ -1339,7 +1362,7 @@ final class _AiContextCard extends StatelessWidget {
                 onRemove: () => onRemoveReference(reference.id),
                 onOpen: reference.locator == null
                     ? null
-                    : () => onOpenReference(reference.locator!),
+                    : () => onOpenReference(reference),
               ),
             if (truncated) ...[
               const SizedBox(height: AppSpacing.x1),

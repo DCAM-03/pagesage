@@ -121,6 +121,10 @@
   实测 FTS5 对中文召回仅有 LIKE 的 4%（「数据」21 vs 489），故直接扫分块打分。
   真实库单本检索 100–190ms。测试见 `test/features/ai/context_retriever_test.dart`、
   `retrieval_context_source_test.dart`、`test/core/database/search_repository_test.dart`。
+- **第 5 步已完成（2026-10-21）**：文件夹关联。`AiContextRange.folder` 按当前书的
+  `categoryId` 检索同文件夹书籍，每本最多 2 段；跨书引用带书名，点击经
+  `/book/:bookId/reader`（`locator` 作为 `extra`）打开目标书并定位。无文件夹时不
+  扩大到全库。测试见 `test/features/ai/ai_panel_cross_book_test.dart`。
 - 上述两项扩展的验收标准：引用清单（第 2 步）已具备回显能力，可据此制定。
   全书关联还缺检索与跨书跳转，见 `docs/12-ai-retrieval-strategy.md` §9 第 4、5 步。
 
