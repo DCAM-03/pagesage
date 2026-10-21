@@ -43,6 +43,18 @@ final class ContextBuilder {
     );
   }
 
+  /// Public form of [_boundedChapter], for callers that carry their own
+  /// reference list rather than one blob of context.
+  ///
+  /// The panel bounds each reference separately so that one long chapter
+  /// cannot consume the whole budget and silently drop the others.
+  String boundText({required String text, String selected = ''}) {
+    return _boundedChapter(selected: selected.trim(), source: text.trim());
+  }
+
+  /// Whether [text] has to be cut before a request can carry it.
+  static bool exceedsBudget(String text) => text.trim().length > maxSourceChars;
+
   /// A whole page or chapter, trimmed to fit a request rather than rejected.
   ///
   /// A long chapter runs past any sane request size, and the panel used to

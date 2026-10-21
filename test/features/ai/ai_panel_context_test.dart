@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/core/database/database_providers.dart';
+import 'package:pagesage/domain/ai/ai_models.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/features/ai/application/ai_context_range.dart';
 import 'package:pagesage/features/ai/application/ai_context_source.dart';
@@ -52,13 +54,43 @@ final class _StubSource extends AiContextSource {
   }
 }
 
+/// Configured AI, so `_ask` gets as far as the confirmation dialog.
+final class _ConfiguredAiSettings implements AiSettingsRepository {
+  const _ConfiguredAiSettings();
+
+  @override
+  Future<void> clearApiKey() async {}
+
+  @override
+  Future<AiSettings> getSettings() async => const AiSettings(
+    enabled: true,
+    baseUrl: 'http://localhost:11434',
+    model: 'test-model',
+    hasApiKey: true,
+  );
+
+  @override
+  Future<void> saveSettings(AiSettings settings, {String? apiKey}) async {}
+
+  @override
+  Stream<AiSettings> watchSettings() =>
+      Stream.value(const AiSettings(enabled: true, hasApiKey: true));
+}
+
 Widget _panel(
   String? bookPath,
   AiContextSource source, {
   String selection = '选中的句子',
+  bool aiConfigured = false,
 }) {
   return ProviderScope(
-    overrides: [aiContextSourceProvider.overrideWithValue(source)],
+    overrides: [
+      aiContextSourceProvider.overrideWithValue(source),
+      if (aiConfigured)
+        aiSettingsRepositoryProvider.overrideWithValue(
+          const _ConfiguredAiSettings(),
+        ),
+    ],
     child: MaterialApp(
       home: Scaffold(
         body: AiPanel(
@@ -113,8 +145,12 @@ void main() {
 
     expect(source.requested, contains(AiContextRange.currentChapter));
     expect(find.textContaining('段落乙'), findsOneWidget);
-    expect(find.textContaining('来源：'), findsOneWidget);
-    expect(find.text('选中的句子'), findsNothing);
+    // The loaded block is a row naming where it came from, and the selection
+    // stays as its own row: that is the question's subject.
+    expect(find.text('第一章'), findsOneWidget);
+    expect(find.text('选中文本'), findsOneWidget);
+    expect(find.text('选中的句子'), findsOneWidget);
+    expect(find.textContaining('2 段引用'), findsOneWidget);
   });
 
   testWidgets('going back to the selection restores it, not the chapter', (
@@ -137,6 +173,7 @@ void main() {
 
     expect(find.text('选中的句子'), findsOneWidget);
     expect(find.textContaining('段落乙'), findsNothing);
+    expect(find.text('选中文本'), findsOneWidget);
   });
 
   testWidgets('without a book file the ranges that need one are disabled', (
@@ -214,8 +251,94 @@ void main() {
 
     expect(find.text('下一页的句子'), findsOneWidget);
     expect(find.textContaining('旧章节正文'), findsNothing);
-    expect(find.textContaining('来源：'), findsNothing);
+    expect(find.text('旧的一章'), findsNothing);
     expect(find.text('正在读取…'), findsNothing);
+  });
+
+  testWidgets('dropping a reference takes it out of what will be sent', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_panel('book.epub', _StubSource(text: '章节正文内容')));
+    await tester.pumpAndSettle();
+    await _pickChapter(tester);
+    expect(find.textContaining('章节正文内容'), findsOneWidget);
+
+    // Drop the chapter; the selection stays and the range stops claiming it.
+    await tester.tap(find.byTooltip('移除这段引用').last);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('章节正文内容'), findsNothing);
+    expect(find.text('选中的句子'), findsOneWidget);
+    expect(find.textContaining('1 段引用'), findsNothing);
+    expect(find.textContaining('约 5 字'), findsOneWidget);
+  });
+
+  testWidgets('editing a reference changes the text that is sent', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_panel('book.epub', _StubSource(text: '章节正文内容')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('编辑文本'));
+    await tester.pumpAndSettle();
+
+    final editor = find.byType(TextField).first;
+    await tester.enterText(editor, '改写后的选中文本');
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('改写后的选中文本'), findsWidgets);
+    // Only the selection is in the list here; the total follows the edit.
+    expect(find.textContaining('约 8 字'), findsOneWidget);
+    expect(find.text('8 字'), findsOneWidget);
+  });
+
+  testWidgets('the last reference cannot be dropped to nothing', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_panel('book.epub', _StubSource()));
+    await tester.pumpAndSettle();
+
+    // With only the selection left there is nothing to remove it to.
+    expect(find.byTooltip('移除这段引用'), findsNothing);
+  });
+
+  testWidgets('the privacy prompt names every block being sent', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _panel('book.epub', _StubSource(text: '章节正文内容'), aiConfigured: true),
+    );
+    await tester.pumpAndSettle();
+    await _pickChapter(tester);
+
+    await tester.enterText(find.byType(TextField).last, '解释这段');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('发送'));
+    await tester.pumpAndSettle();
+
+    // A bare range name would not tell the reader that two separate blocks,
+    // one of them a whole chapter, are about to leave the device.
+    expect(find.text('发送 AI 请求？'), findsOneWidget);
+    final dialog = find.byType(AlertDialog);
+    expect(dialog, findsOneWidget);
+    final body = tester.widget<Text>(
+      find.descendant(of: dialog, matching: find.byType(Text)).at(1),
+    );
+    expect(body.data, contains('2 段引用'));
+    expect(body.data, contains('选中文本'));
+    expect(body.data, contains('第一章'));
   });
 
   testWidgets('an unreadable book says so and leaves no spinner', (

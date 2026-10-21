@@ -14,9 +14,15 @@ import 'ai_context_range.dart';
 /// The panel lists these as references the reader can inspect, drop, or jump
 /// back to. `AGENTS.md` requires the AI context range to be explicit, and a
 /// list the reader can see is the only form of that which survives automatic
-/// retrieval.
+/// retrieval — the whole-book and whole-folder ranges will hand back several
+/// of these, from more than one book, and the reader has to see each one.
 final class ContextSource {
-  const ContextSource({required this.title, required this.text, this.locator});
+  const ContextSource({
+    required this.title,
+    required this.text,
+    this.locator,
+    this.bookTitle,
+  });
 
   /// Human-readable origin, e.g. `第 3 章 · 用 Rust 写猜数字游戏`.
   final String title;
@@ -25,6 +31,15 @@ final class ContextSource {
 
   /// Where to jump back to, when the block can be located.
   final ReadingLocator? locator;
+
+  /// The book this came from, once retrieval can cross books.
+  ///
+  /// Null for the current book: the panel is open inside it, and repeating its
+  /// title on every reference would only add noise.
+  final String? bookTitle;
+
+  /// One line naming where this came from, for the reference row.
+  String get label => bookTitle == null ? title : '$bookTitle · $title';
 }
 
 /// Thrown when the book itself cannot be opened.

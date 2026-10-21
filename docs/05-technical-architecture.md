@@ -525,7 +525,7 @@ Provider 实现：
 - page number。
 - book metadata。
 
-**已修复（2026-10-21）**：`availableText` 断链已接通。`ReaderPage` 把 `bookPath` / `isEpub` 传给 `AiPanel`，面板经 `AiContextSource` 从磁盘读一页 PDF（`PdfTextExtractor.reflowPage`，走 isolate）或一章 EPUB（`EpubDocumentLoader`），再交给 `ContextBuilder.build(availableText: …)`。超长章节由 `_boundedChapter` 以选区为中心截到 `maxSourceChars`，不再报错；读不到书文件或本页无文字时明确提示并退回「仅选中文本」。方案与后续步骤见 `docs/12-ai-retrieval-strategy.md` §7.1、§9。
+**已修复（2026-10-21）**：`availableText` 断链已接通。`ReaderPage` 把 `bookPath` / `isEpub` 传给 `AiPanel`，面板经 `AiContextSource` 从磁盘读一页 PDF（`PdfTextExtractor.reflowPage`，走 isolate）或一章 EPUB（`EpubDocumentLoader`），再交给 `ContextBuilder.build(availableText: …)`。超长章节由 `_boundedChapter` 以选区为中心截到 `maxSourceChars`，不再报错；读不到书文件或本页无文字时明确提示并退回「仅选中文本」。发送内容以引用清单（`AiContextReference`）呈现，每段可跳回、可移除、可逐段编辑，多段时每段带 `【来源】` 标题。方案与后续步骤见 `docs/12-ai-retrieval-strategy.md` §7.1、§9。
 
 ### 13.3 全书 / 文件夹检索
 

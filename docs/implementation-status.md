@@ -98,6 +98,7 @@ AI 检索层（`docs/12-ai-retrieval-strategy.md`，2026-10-21）：
 - 依据：DCI 在 Android 无 shell 不可行；实测同准确率下 token 高 338×、成本高 17.5×、延迟 4–20×；论文自述语料从 10 万增至 40 万文档时准确率跌至 37.5%。向量 RAG 需 100MB+ 嵌入模型与两个原生依赖，对 3,499 块的语料规模不划算。
 - **发现断链缺陷**：AI 面板「前后段落 / 当前章节 / 当前页」三项范围从未生效——`ContextBuilder.build()` 的 `availableText` 生产代码从未传入。
 - **第 1 步已完成**：`AiPanel(bookPath, isEpub)` → `AiContextSource`（磁盘读一页 PDF / 一章 EPUB）→ `availableText`；读不到或本页无文字时明确提示并退回「仅选中文本」。US-008 恢复 `[x]`。
+- **第 2 步已完成**：发送内容改为引用清单（`ai_context_reference.dart`）：每段可看来源与字数、可跳回原文、可移除、可逐段编辑；多段带 `【来源】` 标题，隐私确认框逐段列出。
 - 实施顺序：① 修断链 → ② 引用区 UI → ③ 多轮对话（需 `threadId` 迁移）→ ④ 全书关联 → ⑤ 文件夹关联（依赖跨书跳转）。
 
 ---

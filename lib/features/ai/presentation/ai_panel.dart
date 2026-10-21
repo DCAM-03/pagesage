@@ -14,6 +14,7 @@ import '../../../domain/books/reading_position.dart';
 import '../../../domain/notes/note.dart';
 import '../../../renderers/epub/epub_jump.dart';
 import '../application/ai_context_range.dart';
+import '../application/ai_context_reference.dart';
 import '../application/ai_context_source.dart';
 import '../application/ai_providers.dart';
 import '../application/context_builder.dart';
@@ -55,18 +56,18 @@ final class AiPanel extends ConsumerStatefulWidget {
 enum _AiPanelTab { compose, history }
 
 final class _AiPanelState extends ConsumerState<AiPanel> {
-  late final TextEditingController _contextController = TextEditingController(
-    text: widget.initialContext ?? '',
-  );
   final _promptController = TextEditingController(text: '解释这段内容');
   AiContextRange _contextRange = AiContextRange.selectedText;
-  late String _contextDescription = const ContextBuilder()
-      .build(
-        selectedText: widget.initialContext ?? '',
-        range: _contextRange,
-        locator: widget.locator,
-      )
-      .description;
+
+  /// What the next request will carry, in the order it will be sent.
+  ///
+  /// A list rather than one text box: `AGENTS.md` requires the context range to
+  /// be explicit, and once a range can return several blocks from several
+  /// books, a single box hides which ones are in play. Each row can be opened,
+  /// edited, jumped back to, or dropped.
+  final List<AiContextReference> _references = [];
+  int _nextReferenceId = 0;
+
   AiConversation? _conversation;
   AiCancelToken? _cancelToken;
   String _answer = '';
@@ -77,8 +78,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   /// True while a page or chapter is being read for a wider context range.
   bool _loadingContext = false;
 
-  /// Title of the page or chapter the context was read from, when it was.
-  String? _contextSourceTitle;
+  /// True when the loaded block was longer than one request can carry.
+  bool _contextTruncated = false;
 
   /// Why a wider range could not be loaded, shown next to the context card.
   ///
@@ -98,28 +99,52 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   /// nothing would tell the selector to drop the label it was just handed.
   int _rangeVersion = 0;
 
-  /// The reader's selection, kept apart from the editable context box.
-  ///
-  /// Widening the range replaces the box's text with the page or chapter.
-  /// Without this, switching back to "仅选中文本" restored whatever the box
-  /// held at that moment — the chapter — so the narrowest range could never
-  /// be reached again once a wide one was picked. It is refreshed from the
-  /// box while that range is still the selection, so an edited snippet
-  /// survives the same round trip.
-  String _selectionText = '';
-
   _AiPanelTab _tab = _AiPanelTab.compose;
 
   @override
   void initState() {
     super.initState();
-    _selectionText = _contextController.text.trim();
+    _references.add(_selectionReference());
+  }
+
+  /// The reader's own selection, as the first reference by default.
+  AiContextReference _selectionReference() {
+    return AiContextReference(
+      id: 'ref-${_nextReferenceId++}',
+      title: '选中文本',
+      text: widget.initialContext?.trim() ?? '',
+      locator: widget.locator,
+      isSelection: true,
+    );
+  }
+
+  /// The selection currently in the list, if the reader has not dropped it.
+  AiContextReference? get _selection =>
+      _references.where((reference) => reference.isSelection).firstOrNull;
+
+  /// The references that actually carry text, in list order.
+  List<AiContextReference> get _visibleReferences => _references
+      .where((reference) => reference.text.trim().isNotEmpty)
+      .toList(growable: false);
+
+  /// Everything the request will carry, in list order.
+  String get _payloadText => joinContextReferences(_references);
+
+  int get _payloadChars => _payloadText.length;
+
+  String get _contextDescription {
+    final visible = _visibleReferences;
+    final what = switch (visible.length) {
+      0 => '没有可发送的文本',
+      1 => visible.first.label,
+      final count => '$count 段引用',
+    };
+    return '$what · 约 $_payloadChars 字 · 仅发送下方列表';
   }
 
   @override
   void dispose() {
     _cancelToken?.cancel();
-    _contextController.dispose();
     _promptController.dispose();
     super.dispose();
   }
@@ -143,44 +168,25 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       // old chapter. A build follows this call, so no setState is needed.
       _loadToken++;
       _loadingContext = false;
-      _contextSourceTitle = null;
     }
-    final current = _contextController.text;
-    final canReplace =
-        current.trim().isEmpty ||
-        // Text a wide range put in the box is not the reader's, so it must not
-        // block the arrival of a selection from the page they are on now.
-        _contextRange != AiContextRange.selectedText ||
-        current == (oldWidget.initialContext ?? '') ||
-        current == oldContext;
-    if (!canReplace) {
-      setState(() {
-        _contextDescription = const ContextBuilder()
-            .build(
-              selectedText: current,
-              range: _contextRange,
-              locator: widget.locator,
-            )
-            .description;
-      });
-      return;
-    }
-    _contextController.text = widget.initialContext ?? '';
-    _selectionText = _contextController.text.trim();
     setState(() {
-      // A new selection starts from the narrowest range again: the old one
-      // was read for the previous page, and silently reusing it would send
-      // the chapter the reader has since left.
-      _contextRange = AiContextRange.selectedText;
-      _contextSourceTitle = null;
-      _contextNotice = null;
-      _contextDescription = const ContextBuilder()
-          .build(
-            selectedText: widget.initialContext ?? '',
-            range: _contextRange,
+      // A new selection replaces the list rather than adding to it: text read
+      // for the previous page is not context for this one, and leaving it in
+      // would send a chapter the reader has since left.
+      _references
+        ..clear()
+        ..add(
+          AiContextReference(
+            id: 'ref-${_nextReferenceId++}',
+            title: '选中文本',
+            text: nextContext,
             locator: widget.locator,
-          )
-          .description;
+            isSelection: true,
+          ),
+        );
+      _contextRange = AiContextRange.selectedText;
+      _contextTruncated = false;
+      _contextNotice = null;
       if (nextContext != oldContext) {
         _answer = '';
         _error = null;
@@ -254,10 +260,10 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
             children: [
               _AiContextCard(
                 description: _contextDescription,
-                text: _contextController.text,
+                references: _references,
                 range: _contextRange,
                 rangeVersion: _rangeVersion,
-                sourceTitle: _contextSourceTitle,
+                truncated: _contextTruncated,
                 loadingSource: _loadingContext,
                 canLoadSource: widget.bookPath != null,
                 locationLabel: const ContextBuilder().locationLabel(
@@ -267,8 +273,14 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                 compact: embedded,
                 onToggleExpand: () =>
                     setState(() => _contextExpanded = !_contextExpanded),
-                contextController: _contextController,
-                onContextChanged: _refreshContextDescription,
+                onReferenceChanged: _editReference,
+                onRemoveReference: _removeReference,
+                onOpenReference: (locator) {
+                  widget.onJumpTo?.call(locator);
+                  if (!widget.embedded && Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
+                },
                 onRangeChanged: _applyContextRange,
               ),
               if (_contextNotice != null) ...[
@@ -489,7 +501,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     if (_loading || _loadingContext) {
       return;
     }
-    final contextText = _contextController.text.trim();
+    final contextText = _payloadText;
     final prompt = _promptController.text.trim();
     if (contextText.isEmpty || prompt.isEmpty) {
       setState(() => _error = '请输入上下文和问题');
@@ -510,13 +522,13 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       setState(() => _error = '上下文过长，请缩短选区或改用更短范围后再发送');
       return;
     }
-    final contextDescription = const ContextBuilder()
-        .build(
-          selectedText: contextText,
-          range: _contextRange,
-          locator: widget.locator,
-        )
-        .description;
+    // The confirmation names what is going out, not just how much: the whole
+    // point of the reference list is that the reader can check it here.
+    final contextDescription = [
+      _contextDescription,
+      for (final reference in _references)
+        if (reference.text.trim().isNotEmpty) '· ${reference.label}',
+    ].join('\n');
     if (settings.confirmBeforeRequest && mounted) {
       final confirmed = await showDialog<bool>(
         context: context,
@@ -605,17 +617,24 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       _tab = _AiPanelTab.compose;
       _conversation = conversation;
       _promptController.text = conversation.prompt;
-      _contextController.text =
-          conversation.contextText ?? conversation.sourceText ?? '';
+      // The stored conversation carries one block of context; show it as a
+      // single reference so the rows stay the one source of truth.
+      _references
+        ..clear()
+        ..add(
+          AiContextReference(
+            id: 'ref-${_nextReferenceId++}',
+            title: '上次的上下文',
+            text: conversation.contextText ?? conversation.sourceText ?? '',
+            locator: conversation.locator ?? widget.locator,
+            isSelection: true,
+          ),
+        );
       _answer = conversation.answer;
       _error = null;
-      _contextDescription = const ContextBuilder()
-          .build(
-            selectedText: _contextController.text,
-            range: _contextRange,
-            locator: conversation.locator ?? widget.locator,
-          )
-          .description;
+      _contextRange = AiContextRange.selectedText;
+      _contextTruncated = false;
+      _contextNotice = null;
     });
   }
 
@@ -656,30 +675,25 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
 
   /// Switches the context range and loads the text that range needs.
   ///
-  /// This is the call that used to be a no-op. It built the context without
-  /// ever supplying `availableText`, so every range produced exactly the
-  /// selection again — the dropdown changed its label and nothing else. The
-  /// selection is kept aside in `_selectionText` so switching back to
-  /// "仅选中文本" restores the original rather than yesterday's chapter.
+  /// The loaded block becomes one more reference rather than replacing the
+  /// box: the reader can see exactly what is going out, drop it, or open it.
+  /// Switching back to "仅选中文本" removes it and leaves the selection, which
+  /// the list kept the whole time.
   Future<void> _applyContextRange(AiContextRange range) async {
-    final selection = _selectionText;
     // A failed read falls back to the range the panel was already on, which
     // leaves `initialValue` unchanged — and a `FormField` would keep showing
     // the range the reader just picked. A fresh key each attempt rebuilds it
     // from `_contextRange`.
     setState(() => _rangeVersion++);
     if (!range.needsBookText) {
-      final built = const ContextBuilder().build(
-        selectedText: selection,
-        range: range,
-        locator: widget.locator,
-      );
       setState(() {
         _contextRange = range;
-        _contextController.text = built.text;
-        _contextDescription = built.description;
-        _contextSourceTitle = null;
+        _contextTruncated = false;
         _contextNotice = null;
+        // Back to the selection alone: whatever the previous range read is no
+        // longer what will be sent, and leaving it in would keep sending the
+        // chapter under a label that says otherwise.
+        _references.removeWhere((reference) => !reference.isSelection);
       });
       return;
     }
@@ -703,10 +717,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       loaded = await _loadSource(range, path);
     } on BookUnreadableException {
       if (!mounted || token != _loadToken) return;
-      setState(() => _loadingContext = false);
-      await _applyContextRange(AiContextRange.selectedText);
-      if (!mounted) return;
-      setState(() => _contextNotice = '无法读取书籍文件，已退回仅发送选中文本');
+      await _fallBackToSelection('无法读取书籍文件，已退回仅发送选中文本');
       return;
     }
     if (!mounted || token != _loadToken) return;
@@ -714,30 +725,46 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       // The file opened but this page or chapter has no text (a scanned page,
       // a cover image). Staying on the wide range would send the bare
       // selection under a label promising the page.
-      final notice =
-          '这一${range == AiContextRange.currentPage ? '页' : '章'}没有可读文字，已退回仅发送选中文本';
-      setState(() => _loadingContext = false);
-      await _applyContextRange(AiContextRange.selectedText);
-      if (!mounted) return;
-      setState(() => _contextNotice = notice);
+      final what = range == AiContextRange.currentPage ? '页' : '章';
+      await _fallBackToSelection('这一$what没有可读文字，已退回仅发送选中文本');
       return;
     }
-    // Read out of `loaded` before the closure: promotion does not survive
-    // being captured, and the setState callback runs later.
     final source = loaded;
-    final built = const ContextBuilder().build(
-      selectedText: selection,
-      range: range,
-      locator: widget.locator,
-      availableText: source.text,
+    final original = source.text.trim();
+    final text = const ContextBuilder().boundText(
+      text: original,
+      selected: _selection?.text ?? '',
     );
     setState(() {
       _loadingContext = false;
       _contextRange = range;
-      _contextController.text = built.text;
-      _contextDescription = built.description;
-      _contextSourceTitle = source.title;
+      _contextTruncated = text.length < original.length;
+      // Replaces whatever the previous range contributed, but keeps the
+      // reader's selection: the selection is the question's subject, and
+      // dropping it would send the chapter alone.
+      _references.removeWhere((reference) => !reference.isSelection);
+      _references.add(
+        AiContextReference(
+          id: 'ref-${_nextReferenceId++}',
+          title: source.title,
+          text: text,
+          locator: source.locator,
+          bookTitle: source.bookTitle,
+        ),
+      );
     });
+  }
+
+  /// Puts the list back to just the selection, and says why.
+  Future<void> _fallBackToSelection(String notice) async {
+    setState(() {
+      _loadingContext = false;
+      _contextRange = AiContextRange.selectedText;
+      _contextTruncated = false;
+      _references.removeWhere((reference) => !reference.isSelection);
+    });
+    if (!mounted) return;
+    setState(() => _contextNotice = notice);
   }
 
   /// Reads the range's text, letting [BookUnreadableException] through.
@@ -755,20 +782,23 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
         );
   }
 
-  void _refreshContextDescription(String value) {
-    final built = const ContextBuilder().build(
-      selectedText: value,
-      range: _contextRange,
-      locator: widget.locator,
-    );
+  /// Applies an edit to the text of one reference.
+  void _editReference(String id, String text) {
     setState(() {
-      _contextDescription = built.description;
-      // Hand edits belong to the selection; text that arrived from a page or
-      // chapter read does not, or widening twice would keep the chapter as
-      // the "selection" the next widening centres on.
-      if (_contextRange == AiContextRange.selectedText) {
-        _selectionText = value.trim();
-      }
+      final index = _references.indexWhere((reference) => reference.id == id);
+      if (index < 0) return;
+      _references[index] = _references[index].copyWith(text: text);
+    });
+  }
+
+  void _removeReference(String id) {
+    setState(() {
+      _references.removeWhere((reference) => reference.id == id);
+      // A range whose block the reader just dropped is no longer what is
+      // being sent, so the selector must stop claiming it.
+      _contextRange = AiContextRange.selectedText;
+      _contextTruncated = false;
+      _contextNotice = null;
     });
   }
 
@@ -798,8 +828,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
           bookId: widget.bookId,
           title: conversation?.prompt ?? _promptController.text.trim(),
           content: answer,
-          sourceText:
-              conversation?.sourceText ?? _contextController.text.trim(),
+          sourceText: conversation?.sourceText ?? _payloadText,
           locator: widget.locator,
           noteType: NoteType.ai,
         );
@@ -930,18 +959,25 @@ final class _AiPanelTabChip extends StatelessWidget {
   }
 }
 
+/// The list of text the request will carry.
+///
+/// Every block is a row the reader can open, edit, or drop, and each says
+/// where it came from with a way back to that place. A single editable box
+/// could not show which of several blocks — eventually from several books —
+/// was in play, and `AGENTS.md` requires the context to be explicit.
 final class _AiContextCard extends StatelessWidget {
   const _AiContextCard({
     required this.description,
-    required this.text,
+    required this.references,
     required this.range,
     required this.expanded,
     required this.onToggleExpand,
-    required this.contextController,
-    required this.onContextChanged,
+    required this.onReferenceChanged,
+    required this.onRemoveReference,
+    required this.onOpenReference,
     required this.onRangeChanged,
     this.locationLabel,
-    this.sourceTitle,
+    this.truncated = false,
     this.rangeVersion = 0,
     this.loadingSource = false,
     this.canLoadSource = true,
@@ -949,12 +985,12 @@ final class _AiContextCard extends StatelessWidget {
   });
 
   final String description;
-  final String text;
+  final List<AiContextReference> references;
   final AiContextRange range;
   final String? locationLabel;
 
-  /// Where the text was read from — a page number or a chapter title.
-  final String? sourceTitle;
+  /// True when a block was cut to fit one request.
+  final bool truncated;
 
   /// Changes whenever the panel tries a range, to rebuild the selector.
   final int rangeVersion;
@@ -968,8 +1004,11 @@ final class _AiContextCard extends StatelessWidget {
   final bool expanded;
   final bool compact;
   final VoidCallback onToggleExpand;
-  final TextEditingController contextController;
-  final ValueChanged<String> onContextChanged;
+
+  /// Applies an edit to one reference, keyed by id.
+  final void Function(String id, String text) onReferenceChanged;
+  final ValueChanged<String> onRemoveReference;
+  final ValueChanged<ReadingLocator> onOpenReference;
   final ValueChanged<AiContextRange> onRangeChanged;
 
   @override
@@ -977,12 +1016,10 @@ final class _AiContextCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final aiAccent = colorScheme.aiAccent;
-    final preview = loadingSource
-        ? '正在读取…'
-        : text.trim().isEmpty
-        ? '还没有可发送的文本'
-        : text.trim();
     final pad = compact ? AppSpacing.x2 : AppSpacing.x3;
+    final visible = references
+        .where((reference) => reference.text.trim().isNotEmpty)
+        .toList(growable: false);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: aiAccent.withValues(alpha: 0.06),
@@ -1060,12 +1097,6 @@ final class _AiContextCard extends StatelessWidget {
                   color: colorScheme.onSurfaceVariant,
                   subtle: true,
                 ),
-                if (sourceTitle != null && sourceTitle!.trim().isNotEmpty)
-                  _MetaChip(
-                    label: '来源：$sourceTitle',
-                    color: colorScheme.onSurfaceVariant,
-                    subtle: true,
-                  ),
                 if (locationLabel != null && locationLabel!.trim().isNotEmpty)
                   _MetaChip(
                     label: '回跳：$locationLabel',
@@ -1074,17 +1105,55 @@ final class _AiContextCard extends StatelessWidget {
                   ),
               ],
             ),
-            SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
-            Text(
-              preview,
-              maxLines: expanded ? null : (compact ? 2 : 3),
-              overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-              style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurface,
-                height: 1.4,
-                fontSize: compact ? 13 : 14,
+            if (loadingSource) ...[
+              const SizedBox(height: AppSpacing.x1),
+              Row(
+                children: [
+                  // A static icon rather than a spinner: the read is short,
+                  // and an indeterminate animation would keep any tree that
+                  // contains the panel from ever settling.
+                  Icon(Icons.hourglass_empty, size: 12, color: aiAccent),
+                  const SizedBox(width: AppSpacing.x1),
+                  Text(
+                    '正在读取…',
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            ),
+            ],
+            const SizedBox(height: AppSpacing.x1),
+            if (visible.isEmpty && !loadingSource)
+              Text(
+                '还没有可发送的文本',
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            for (final reference in visible)
+              _AiReferenceRow(
+                key: ValueKey(reference.id),
+                reference: reference,
+                expanded: expanded,
+                compact: compact,
+                canRemove: visible.length > 1 || !reference.isSelection,
+                onChanged: (value) => onReferenceChanged(reference.id, value),
+                onRemove: () => onRemoveReference(reference.id),
+                onOpen: reference.locator == null
+                    ? null
+                    : () => onOpenReference(reference.locator!),
+              ),
+            if (truncated) ...[
+              const SizedBox(height: AppSpacing.x1),
+              Text(
+                '原文较长，已截取选区附近 '
+                '${ContextBuilder.maxSourceChars} 字以内发送',
+                style: textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
@@ -1099,30 +1168,176 @@ final class _AiContextCard extends StatelessWidget {
                   size: 16,
                 ),
                 label: Text(
-                  expanded ? '收起' : '编辑',
+                  expanded ? '收起' : '编辑文本',
                   style: textTheme.labelMedium,
                 ),
               ),
             ),
-            if (expanded) ...[
-              TextField(
-                controller: contextController,
-                minLines: compact ? 2 : 3,
-                maxLines: compact ? 6 : 8,
-                style: textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurface,
-                  height: 1.4,
-                ),
-                onChanged: onContextChanged,
-                decoration: InputDecoration(
-                  helperText: compact ? null : '默认只发送这里显示的文本，不会发送整本书',
-                  isDense: compact,
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Editable text for one reference.
+///
+/// Stateful so the controller outlives a rebuild: a controller built inside
+/// `build` would be recreated on every keystroke and take the cursor with it.
+final class _AiReferenceEditor extends StatefulWidget {
+  const _AiReferenceEditor({
+    required this.text,
+    required this.compact,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String text;
+  final bool compact;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_AiReferenceEditor> createState() => _AiReferenceEditorState();
+}
+
+final class _AiReferenceEditorState extends State<_AiReferenceEditor> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.text,
+  );
+
+  @override
+  void didUpdateWidget(covariant _AiReferenceEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Take an outside change (a new range loaded) without fighting the reader
+    // mid-edit: only when the text really differs.
+    if (widget.text != _controller.text) {
+      _controller.text = widget.text;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return TextField(
+      controller: _controller,
+      minLines: widget.compact ? 2 : 3,
+      maxLines: widget.compact ? 6 : 8,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+        color: colorScheme.onSurface,
+        height: 1.4,
+      ),
+      onChanged: widget.onChanged,
+      decoration: InputDecoration(
+        isDense: widget.compact,
+        border: const OutlineInputBorder(),
+      ),
+    );
+  }
+}
+
+/// One reference: what it is, where it came from, and its text.
+final class _AiReferenceRow extends StatelessWidget {
+  const _AiReferenceRow({
+    required this.reference,
+    required this.expanded,
+    required this.compact,
+    required this.canRemove,
+    required this.onChanged,
+    required this.onRemove,
+    required this.onOpen,
+    super.key,
+  });
+
+  final AiContextReference reference;
+  final bool expanded;
+  final bool compact;
+  final bool canRemove;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onRemove;
+
+  /// Null when the block cannot be located in the book.
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final text = reference.text.trim();
+    return Padding(
+      padding: EdgeInsets.only(bottom: compact ? AppSpacing.x1 : AppSpacing.x2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                reference.isSelection
+                    ? Icons.format_quote_outlined
+                    : Icons.article_outlined,
+                size: 14,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  reference.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              Text(
+                '${reference.charCount} 字',
+                style: textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (onOpen != null)
+                IconButton(
+                  tooltip: '回到这段原文',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 16,
+                  onPressed: onOpen,
+                  icon: const Icon(Icons.open_in_new),
+                ),
+              if (canRemove)
+                IconButton(
+                  tooltip: '移除这段引用',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 16,
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.close),
+                ),
+            ],
+          ),
+          if (expanded)
+            _AiReferenceEditor(
+              key: ValueKey('edit-${reference.id}'),
+              text: reference.text,
+              compact: compact,
+              onChanged: onChanged,
+            )
+          else
+            Text(
+              text,
+              maxLines: compact ? 2 : 3,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurface,
+                height: 1.4,
+                fontSize: compact ? 13 : 14,
+              ),
+            ),
+        ],
       ),
     );
   }
