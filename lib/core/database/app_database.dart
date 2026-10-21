@@ -1086,6 +1086,67 @@ WHERE (lower(COALESCE(c.title, '')) LIKE ? OR lower(c.text) LIKE ?)
     final end = (index + query.length + 72).clamp(0, text.length).toInt();
     return text.substring(start, end);
   }
+
+  /// Body chunks of the selected books, in reading order.
+  ///
+  /// Only rows whose `source_id` is not the book's own id: that row is the
+  /// book's title/author metadata, and a question about a topic must not match
+  /// a book just because its name contains the topic.
+  Future<List<SearchChunkRow>> bookChunks({
+    Iterable<String> bookIds = const [],
+    String? categoryId,
+  }) async {
+    final buffer = StringBuffer('''
+SELECT c.*
+FROM search_chunks c
+LEFT JOIN books b ON b.id = c.book_id
+WHERE c.source_type = 'book'
+  AND (c.source_id IS NULL OR c.source_id != c.book_id)
+''');
+    final variables = <Variable<Object>>[];
+
+    final ids = bookIds.toList(growable: false);
+    if (ids.isNotEmpty) {
+      buffer.write(' AND c.book_id IN (');
+      buffer.write(List.filled(ids.length, '?').join(', '));
+      buffer.write(')');
+      variables.addAll(ids.map((id) => Variable<String>(id)));
+    }
+
+    if (categoryId != null) {
+      if (categoryId == '__uncategorized__') {
+        buffer.write(' AND b.category_id IS NULL');
+      } else {
+        buffer.write(' AND b.category_id = ?');
+        variables.add(Variable<String>(categoryId));
+      }
+    }
+
+    buffer.write(' ORDER BY c.book_id, c.sort_order');
+
+    final rows = await customSelect(
+      buffer.toString(),
+      variables: variables,
+      readsFrom: {searchChunks, books},
+    ).get();
+
+    return rows
+        .map(
+          (row) => SearchChunkRow(
+            id: row.read<String>('id'),
+            bookId: row.readNullable<String>('book_id'),
+            sourceType: row.read<String>('source_type'),
+            sourceId: row.readNullable<String>('source_id'),
+            locator: row.readNullable<String>('locator'),
+            title: row.readNullable<String>('title'),
+            body: row.read<String>('text'),
+            sortOrder: row.read<int>('sort_order'),
+            createdAt: row.read<int>('created_at'),
+            updatedAt: row.read<int>('updated_at'),
+          ),
+        )
+        .toList(growable: false);
+  }
 }
 
 @DriftAccessor(tables: [AppSettings])

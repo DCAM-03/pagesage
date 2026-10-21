@@ -95,11 +95,16 @@ class AiContextSource {
         return _epubChapter(bookPath, locator);
       case AiContextRange.surroundingParagraphs:
         // Narrowed from the body of text the selection sits in; the builder
-        // cuts the paragraphs. Whole-book and whole-folder ranges are not
-        // expressed here: they need retrieval, not one file read.
+        // cuts the paragraphs.
         return isEpub
             ? _epubChapter(bookPath, locator)
             : _pdfPage(bookPath, locator);
+      case AiContextRange.wholeBook || AiContextRange.folder:
+        // Not one file read: these ranges are answered by retrieval over the
+        // indexed chunks (`RetrievalContextSource`). Throwing rather than
+        // returning null keeps a caller that routes them here from silently
+        // sending the selection under a whole-book label.
+        throw ArgumentError.value(range, 'range', 'needs retrieval');
     }
   }
 

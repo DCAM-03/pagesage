@@ -18,6 +18,7 @@ import '../application/ai_context_reference.dart';
 import '../application/ai_context_source.dart';
 import '../application/ai_providers.dart';
 import '../application/context_builder.dart';
+import '../application/retrieval_context_source.dart';
 
 /// Reader AI surface used as desktop right-rail body or mobile bottom sheet.
 final class AiPanel extends ConsumerStatefulWidget {
@@ -100,6 +101,20 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   /// speaks about the AI provider, and neither helps when the book file is
   /// simply unreadable.
   String? _contextNotice;
+
+  /// What the reader has typed into the question box.
+  ///
+  /// Null until they type: the prefilled default is a suggestion for the
+  /// model, and using it as a search query would look for the words in the
+  /// suggestion instead of the words in the passage.
+  String? _editedPrompt;
+
+  /// True while retrieval is picking passages from the indexed book text.
+  ///
+  /// Separate from [_loadingContext] only in what the card says: a read names
+  /// one page or chapter, retrieval has to say how many books it went
+  /// through before the passages appear.
+  String? _retrievalStatus;
 
   /// Discards a read whose page the reader has already left.
   int _loadToken = 0;
@@ -298,6 +313,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                 rangeVersion: _rangeVersion,
                 truncated: _contextTruncated,
                 loadingSource: _loadingContext,
+                retrievalStatus: _retrievalStatus,
                 canLoadSource: widget.bookPath != null,
                 locationLabel: const ContextBuilder().locationLabel(
                   widget.locator,
@@ -343,6 +359,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                       prompt: action.prompt,
                       compact: embedded,
                       onPressed: () {
+                        _editedPrompt = action.prompt;
                         _promptController.text = action.prompt;
                         _promptController.selection = TextSelection.collapsed(
                           offset: action.prompt.length,
@@ -362,6 +379,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                   height: 1.4,
                 ),
                 textInputAction: TextInputAction.send,
+                onChanged: (value) =>
+                    _editedPrompt = value.trim().isEmpty ? null : value.trim(),
                 onSubmitted: (_) {
                   if (!_loading) {
                     unawaited(_ask());
@@ -755,6 +774,11 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       return;
     }
 
+    if (range.usesRetrieval) {
+      await _loadRetrieval(range);
+      return;
+    }
+
     final path = widget.bookPath;
     if (path == null) {
       // The dropdown disables these ranges when there is no file, so this is
@@ -812,10 +836,113 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     });
   }
 
+  /// Retrieval branch of [_applyContextRange].
+  ///
+  /// The passages are added to the list rather than replacing it, but the
+  /// selection stays first: the reader selected a passage and asked what in
+  /// the book relates to it, so an answer built only from retrieved passages
+  /// would be answering a different question.
+  Future<void> _loadRetrieval(AiContextRange range) async {
+    final query = _retrievalQuery();
+    if (query.isEmpty) {
+      await _fallBackToSelection('请先选中文本或输入问题，再使用${range.label}');
+      return;
+    }
+    setState(() {
+      _loadingContext = true;
+      _contextNotice = null;
+      _retrievalStatus = range == AiContextRange.folder
+          ? '正在检索同文件夹的书籍…'
+          : '正在检索全书…';
+    });
+    final token = ++_loadToken;
+
+    // The reader can type a question while retrieval runs; the first pass
+    // goes out immediately with what is known, and a second pass replaces the
+    // references if the question then narrows or widens what is relevant.
+    final outcome = await _runRetrieval(range, query);
+    if (!mounted || token != _loadToken) return;
+    if (outcome == null) {
+      await _fallBackToSelection('无法检索书籍内容，已退回仅发送选中文本');
+      return;
+    }
+    if (outcome.isEmpty) {
+      await _fallBackToSelection(
+        outcome.booksSearched == 0 ? '没有已建立索引的书籍可供检索' : '书中没有与这个问题相关的内容',
+      );
+      return;
+    }
+    _applyRetrievedReferences(range, outcome);
+    final firstQuery = query;
+    final prompt = _promptController.text.trim();
+    if (prompt.isEmpty || prompt == firstQuery) {
+      return;
+    }
+    if (mounted && token == _loadToken) {
+      setState(() => _retrievalStatus = '正在按问题重新检索…');
+    }
+    final refined = await _runRetrieval(range, prompt);
+    if (!mounted || token != _loadToken) return;
+    // An empty second pass keeps the first: the question was already answered
+    // by the selection query, and dropping everything because a follow-up
+    // refinement found nothing would be a worse outcome than a slightly wider
+    // set of passages.
+    if (refined != null && !refined.isEmpty) {
+      _applyRetrievedReferences(range, refined);
+    }
+  }
+
+  /// Runs retrieval, reporting a failure rather than throwing into the UI.
+  Future<RetrievalOutcome?> _runRetrieval(
+    AiContextRange range,
+    String query,
+  ) async {
+    try {
+      return await ref
+          .read(retrievalContextSourceProvider)
+          .load(range: range, bookId: widget.bookId, query: query);
+    } on Object {
+      return null;
+    }
+  }
+
+  void _applyRetrievedReferences(
+    AiContextRange range,
+    RetrievalOutcome outcome,
+  ) {
+    setState(() {
+      _loadingContext = false;
+      _retrievalStatus = null;
+      _contextRange = range;
+      _contextTruncated = false;
+      // Only the passages from the previous retrieval go; the selection and
+      // anything the reader added by hand stay.
+      _references.removeWhere((reference) => !reference.isSelection);
+      _references.addAll(outcome.references);
+    });
+  }
+
+  /// The text retrieval searches with.
+  ///
+  /// The question when the reader has written one — they are asking something
+  /// specific — and the selection otherwise, since "what in this book relates
+  /// to this passage" is the workflow the panel exists for.
+  ///
+  /// Only what the reader typed counts, not the prefilled default. That
+  /// default («解释这段内容») is an action for the model, not a description of
+  /// what to look up; searching with it would return passages about explaining
+  /// rather than about the passage.
+  String _retrievalQuery() {
+    final prompt = _editedPrompt ?? '';
+    if (prompt.isNotEmpty) return prompt;
+    return _selection?.text.trim() ?? '';
+  }
+
   /// Puts the list back to just the selection, and says why.
   Future<void> _fallBackToSelection(String notice) async {
     setState(() {
       _loadingContext = false;
+      _retrievalStatus = null;
       _contextRange = AiContextRange.selectedText;
       _contextTruncated = false;
       _references.removeWhere((reference) => !reference.isSelection);
@@ -1038,6 +1165,7 @@ final class _AiContextCard extends StatelessWidget {
     this.truncated = false,
     this.rangeVersion = 0,
     this.loadingSource = false,
+    this.retrievalStatus,
     this.canLoadSource = true,
     this.compact = false,
   });
@@ -1055,6 +1183,9 @@ final class _AiContextCard extends StatelessWidget {
 
   /// True while the page or chapter is being read off disk.
   final bool loadingSource;
+
+  /// What retrieval is doing right now, or null when it is not running.
+  final String? retrievalStatus;
 
   /// False when the panel has no file to read, so wide ranges cannot work.
   final bool canLoadSource;
@@ -1132,7 +1263,13 @@ final class _AiContextCard extends StatelessWidget {
                       // Ranges that read the book are off when there is no
                       // file behind the panel; a range that cannot do what it
                       // says is worse than one that is disabled.
-                      enabled: canLoadSource || !value.needsBookText,
+                      // Retrieval ranges work off the index, not the file, so
+                      // they stay available even without a path. They say so
+                      // themselves when nothing is indexed.
+                      enabled:
+                          value.usesRetrieval ||
+                          canLoadSource ||
+                          !value.needsBookText,
                       child: Text(value.label),
                     ),
                   )
@@ -1163,7 +1300,7 @@ final class _AiContextCard extends StatelessWidget {
                   ),
               ],
             ),
-            if (loadingSource) ...[
+            if (loadingSource || retrievalStatus != null) ...[
               const SizedBox(height: AppSpacing.x1),
               Row(
                 children: [
@@ -1172,10 +1309,12 @@ final class _AiContextCard extends StatelessWidget {
                   // contains the panel from ever settling.
                   Icon(Icons.hourglass_empty, size: 12, color: aiAccent),
                   const SizedBox(width: AppSpacing.x1),
-                  Text(
-                    '正在读取…',
-                    style: textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
+                  Expanded(
+                    child: Text(
+                      retrievalStatus ?? '正在读取…',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],

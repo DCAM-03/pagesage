@@ -116,6 +116,11 @@
   上下文一变（换选区、换范围、删引用）即开新会话，避免模型拿着它没见过的正文作答。
   测试见 `test/features/ai/ai_thread_messages_test.dart`（抓真实请求体）、`ai_panel_thread_test.dart`、
   `test/core/database/ai_thread_migration_test.dart`。
+- **第 4 步已完成（2026-10-21）**：全书关联。`AiContextRange.wholeBook` + `ContextRetriever`
+  （BM25、中文二元组、目录页过滤）+ `RetrievalContextSource`（决定搜哪些书）。
+  实测 FTS5 对中文召回仅有 LIKE 的 4%（「数据」21 vs 489），故直接扫分块打分。
+  真实库单本检索 100–190ms。测试见 `test/features/ai/context_retriever_test.dart`、
+  `retrieval_context_source_test.dart`、`test/core/database/search_repository_test.dart`。
 - 上述两项扩展的验收标准：引用清单（第 2 步）已具备回显能力，可据此制定。
   全书关联还缺检索与跨书跳转，见 `docs/12-ai-retrieval-strategy.md` §9 第 4、5 步。
 

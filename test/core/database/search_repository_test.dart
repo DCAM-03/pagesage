@@ -215,6 +215,63 @@ void main() {
     expect(results.any((item) => item.sourceId == 'book-epub:batch-1'), isTrue);
     expect(results.any((item) => item.sourceId == 'book-epub:batch-2'), isTrue);
   });
+
+  group('book chunks', () {
+    test('returns body chunks and leaves out the metadata row', () async {
+      // The metadata row's source_id is the book's own id; indexing the title
+      // as body would let a book match a question purely on its name.
+      await repository.indexText(
+        sourceType: 'book',
+        sourceId: 'book-pdf',
+        bookId: 'book-pdf',
+        title: 'PDF Book',
+        text: 'alpha in the title row',
+      );
+
+      final chunks = await repository.bookChunks(bookIds: ['book-pdf']);
+
+      expect(chunks, hasLength(1));
+      expect(chunks.single.bookId, 'book-pdf');
+      expect(chunks.single.chunks.map((chunk) => chunk.id), [
+        'book:book-pdf:page-1',
+      ]);
+      expect(chunks.single.chunks.single.text, contains('alpha'));
+    });
+
+    test('a folder search returns every book in that category', () async {
+      final chunks = await repository.bookChunks(categoryId: 'cat-fiction');
+
+      expect(chunks.map((book) => book.bookId), ['book-epub']);
+    });
+
+    test('chunks come back in reading order', () async {
+      for (final order in [30, 10, 20]) {
+        await repository.indexText(
+          sourceType: 'book',
+          sourceId: 'book-epub:chapter-$order',
+          bookId: 'book-epub',
+          title: '第 $order 块',
+          text: 'alpha $order',
+          sortOrder: order,
+        );
+      }
+
+      final chunks = await repository.bookChunks(bookIds: ['book-epub']);
+
+      final orders = chunks.single.chunks.map((chunk) => chunk.sortOrder);
+      expect(orders, orderedEquals(orders.toList()..sort()));
+      expect(chunks.single.chunks.last.sortOrder, 30);
+    });
+
+    test('no book named and no folder returns everything', () async {
+      final chunks = await repository.bookChunks();
+
+      expect(chunks.map((book) => book.bookId).toSet(), {
+        'book-epub',
+        'book-pdf',
+      });
+    });
+  });
 }
 
 Future<void> _insertBook(

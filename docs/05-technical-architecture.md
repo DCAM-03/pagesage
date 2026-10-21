@@ -533,12 +533,14 @@ Provider 实现：
 
 不做向量索引，采用「结构感知的词法检索」：
 
-- 复用 `SearchChunks`（1200 字分块，带 locator）与 FTS5 bm25；
-- 复用 `SearchDao.search()` 已有的 `bookId` / `categoryId` / `tagIds` 过滤；
-- 用 EPUB `EpubTocItem` 树与 PDF `PdfOutline` 做结构重排与邻近扩展；
-- 检索结果必须回显为可检查、可增删的引用清单，满足「上下文范围显式」约束。
+- 复用 `SearchChunks`（1200 字分块，带 locator），**直接扫描正文打分，不走 FTS 索引**：
+  FTS5 的 `unicode61` 把整段 CJK 当一个词元，实测「数据」命中 21 块而实含 489 块；
+- 打分为 BM25（长度归一 + IDF）+ 覆盖度加权；中文查询按相邻二字切词；
+- 目录页按点号密度识别并降权（实测 0.43–0.47，正文 ≤0.02）；
+- 检索结果回显为可检查、可增删的引用清单，满足「上下文范围显式」约束。
 
-否决 DCI 与向量 RAG 的实测依据见 `docs/12-ai-retrieval-strategy.md`。
+否决 DCI 与向量 RAG 的实测依据见 `docs/12-ai-retrieval-strategy.md`；
+第 4 步的实测数据与已知边界见同文件 §7.4。
 
 ### 13.4 安全
 

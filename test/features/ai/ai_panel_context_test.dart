@@ -8,7 +8,11 @@ import 'package:pagesage/domain/ai/ai_models.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/features/ai/application/ai_context_range.dart';
 import 'package:pagesage/features/ai/application/ai_context_source.dart';
+import 'package:pagesage/domain/books/book.dart';
+import 'package:pagesage/domain/books/book_repository.dart';
+import 'package:pagesage/domain/search/search_models.dart';
 import 'package:pagesage/features/ai/application/ai_providers.dart';
+import 'package:pagesage/features/ai/application/retrieval_context_source.dart';
 import 'package:pagesage/features/ai/presentation/ai_panel.dart';
 
 /// Stands in for the disk reader, which cannot complete under the fake clock.
@@ -54,6 +58,40 @@ final class _StubSource extends AiContextSource {
   }
 }
 
+/// Stands in for the indexed chunk store.
+final class _IndexedBooks implements SearchRepository {
+  _IndexedBooks(this.chunks);
+
+  final List<SearchChunk> chunks;
+
+  @override
+  Future<List<SearchBookChunks>> bookChunks({
+    Iterable<String> bookIds = const [],
+    String? categoryId,
+  }) async => [SearchBookChunks(bookId: 'book-1', chunks: chunks)];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _SingleBook implements BookRepository {
+  @override
+  Future<Book?> getBook(String id) async => Book(
+    id: id,
+    title: '甲书',
+    format: BookFormat.pdf,
+    libraryFilePath: '/tmp/$id.pdf',
+    fileHash: 'hash-$id',
+    fileSize: 1,
+    indexingStatus: 'done',
+    createdAt: 1,
+    updatedAt: 1,
+  );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 /// Configured AI, so `_ask` gets as far as the confirmation dialog.
 final class _ConfiguredAiSettings implements AiSettingsRepository {
   const _ConfiguredAiSettings();
@@ -82,10 +120,13 @@ Widget _panel(
   AiContextSource source, {
   String selection = '选中的句子',
   bool aiConfigured = false,
+  RetrievalContextSource? retrieval,
 }) {
   return ProviderScope(
     overrides: [
       aiContextSourceProvider.overrideWithValue(source),
+      if (retrieval != null)
+        retrievalContextSourceProvider.overrideWithValue(retrieval),
       if (aiConfigured)
         aiSettingsRepositoryProvider.overrideWithValue(
           const _ConfiguredAiSettings(),
@@ -110,12 +151,14 @@ Widget _panel(
   );
 }
 
-Future<void> _pickChapter(WidgetTester tester) async {
+Future<void> _pickRange(WidgetTester tester, String label) async {
   await tester.tap(find.byType(DropdownButtonFormField<AiContextRange>));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('当前章节').last);
+  await tester.tap(find.text(label).last);
   await tester.pumpAndSettle();
 }
+
+Future<void> _pickChapter(WidgetTester tester) => _pickRange(tester, '当前章节');
 
 void main() {
   setUp(() => TestWidgetsFlutterBinding.ensureInitialized());
@@ -195,9 +238,12 @@ void main() {
         )
         .toList(growable: false);
     for (final item in items) {
+      // Retrieval ranges read the index rather than the file, so they stay
+      // available; they report an empty index themselves when it is empty.
       expect(
         item.enabled,
-        item.value == AiContextRange.selectedText,
+        item.value == AiContextRange.selectedText ||
+            (item.value?.usesRetrieval ?? false),
         reason: '${item.value} should only be selectable without a file',
       );
     }
@@ -359,5 +405,85 @@ void main() {
     expect(find.text('读取中'), findsNothing);
     expect(find.text('发送'), findsOneWidget);
     expect(find.text('选中的句子'), findsOneWidget);
+  });
+
+  testWidgets('the whole-book range lists the passages it found', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _panel(
+        'book.pdf',
+        _StubSource(),
+        selection: '虚拟内存',
+        retrieval: RetrievalContextSource(
+          searchRepository: _IndexedBooks([
+            SearchChunk(
+              id: 'book-1:pdf:595:0',
+              bookId: 'book-1',
+              title: '第 595 页',
+              text: '选中的句子：虚拟内存是危险的，每次指针引用都会与它交互。',
+              sortOrder: 1,
+              locator: ReadingLocator.pdf(page: 595),
+            ),
+            SearchChunk(
+              id: 'book-1:pdf:9:0',
+              bookId: 'book-1',
+              title: '第 9 页',
+              text: '无关的排版说明。',
+              sortOrder: 2,
+            ),
+          ]),
+          bookRepository: _SingleBook(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _pickRange(tester, '全书关联');
+    // The selection stays first: it is what the question is about.
+    expect(find.text('虚拟内存'), findsOneWidget);
+    expect(find.text('第 595 页'), findsOneWidget);
+    expect(find.textContaining('虚拟内存是危险的'), findsOneWidget);
+    // A passage that matched nothing must not be in the list.
+    expect(find.textContaining('无关的排版说明'), findsNothing);
+    // The list says how much is going, not just which range was picked.
+    expect(find.textContaining('2 段引用'), findsOneWidget);
+  });
+
+  testWidgets('a whole-book search with no match says so and sends the '
+      'selection', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _panel(
+        'book.pdf',
+        _StubSource(),
+        selection: '量子纠缠',
+        retrieval: RetrievalContextSource(
+          searchRepository: _IndexedBooks([
+            SearchChunk(
+              id: 'book-1:pdf:9:0',
+              bookId: 'book-1',
+              title: '第 9 页',
+              text: '无关的排版说明。',
+              sortOrder: 1,
+            ),
+          ]),
+          bookRepository: _SingleBook(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _pickRange(tester, '全书关联');
+
+    expect(find.textContaining('没有与这个问题相关的内容'), findsOneWidget);
+    expect(find.text('量子纠缠'), findsOneWidget);
+    // The selector must stop claiming the range it just failed to search.
+    expect(find.text('全书关联'), findsNothing);
   });
 }

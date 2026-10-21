@@ -143,6 +143,12 @@ final class _FakeSearchRepository implements SearchRepository {
   Future<void> deleteBySource(String sourceType, String? sourceId) async {}
 
   @override
+  Future<List<SearchBookChunks>> bookChunks({
+    Iterable<String> bookIds = const [],
+    String? categoryId,
+  }) async => const [];
+
+  @override
   Future<void> indexBookMetadata({
     required String bookId,
     required String title,

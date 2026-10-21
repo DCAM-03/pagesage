@@ -33,8 +33,16 @@ final class ContextBuilder {
         selected: selected,
         source: _surroundingParagraphs(selected: selected, source: source),
       ),
-      AiContextRange.currentChapter || AiContextRange.currentPage =>
-        _boundedChapter(selected: selected, source: source),
+      AiContextRange.currentChapter ||
+      AiContextRange.currentPage ||
+      // Retrieval returns several passages, each already sized by the
+      // retriever; they reach the request as separate references, so there is
+      // no single body of text to cut here.
+      AiContextRange.wholeBook ||
+      AiContextRange.folder => _boundedChapter(
+        selected: selected,
+        source: source,
+      ),
     };
     return AiContext(
       text: text,

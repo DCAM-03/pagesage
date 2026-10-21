@@ -622,6 +622,38 @@ final class DriftSearchRepository implements domain.SearchRepository {
   }
 
   @override
+  Future<List<domain.SearchBookChunks>> bookChunks({
+    Iterable<String> bookIds = const [],
+    String? categoryId,
+  }) async {
+    final rows = await _dao.bookChunks(
+      bookIds: bookIds,
+      categoryId: categoryId,
+    );
+    final grouped = <String, List<domain.SearchChunk>>{};
+    for (final row in rows) {
+      final bookId = row.bookId;
+      if (bookId == null) {
+        continue;
+      }
+      (grouped[bookId] ??= <domain.SearchChunk>[]).add(
+        domain.SearchChunk(
+          id: row.id,
+          bookId: bookId,
+          title: row.title ?? '',
+          text: row.body,
+          sortOrder: row.sortOrder,
+          locator: row.locator == null ? null : _locatorFromText(row.locator!),
+        ),
+      );
+    }
+    return [
+      for (final entry in grouped.entries)
+        domain.SearchBookChunks(bookId: entry.key, chunks: entry.value),
+    ];
+  }
+
+  @override
   Future<void> indexBookMetadata({
     required String bookId,
     required String title,
