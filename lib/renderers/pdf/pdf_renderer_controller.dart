@@ -5,26 +5,10 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../common/renderer_command.dart';
 import '../common/web_renderer_helpers.dart';
+import 'pdf_page_image_source.dart';
 
-final class PdfPageExport {
-  const PdfPageExport({
-    required this.pageNumber,
-    required this.width,
-    required this.height,
-    required this.bytes,
-    this.imageWidth,
-    this.imageHeight,
-  });
-
-  final int pageNumber;
-  final double width;
-  final double height;
-  final Uint8List bytes;
-  final int? imageWidth;
-  final int? imageHeight;
-}
-
-final class PdfRendererController implements BookRendererController {
+final class PdfRendererController
+    implements BookRendererController, PdfPageImageSource {
   PdfRendererController(this._webViewController);
 
   final InAppWebViewController _webViewController;
@@ -68,7 +52,11 @@ final class PdfRendererController implements BookRendererController {
   }
 
   /// Capture the currently rendered page canvas (display-space) for OCR.
-  Future<PdfPageExport?> exportPageImage({
+  ///
+  /// The WebView reports its canvas size alongside the image; OCR geometry is
+  /// computed from the image itself, so only the bytes leave this method.
+  @override
+  Future<Uint8List?> exportPageImage({
     required int pageNumber,
     double quality = 0.86,
   }) async {
@@ -89,15 +77,7 @@ final class PdfRendererController implements BookRendererController {
     }
     final b64 = dataUrl.substring(comma + 1);
     try {
-      final bytes = base64Decode(b64);
-      return PdfPageExport(
-        pageNumber: (map['page'] as num?)?.toInt() ?? pageNumber,
-        width: (map['width'] as num?)?.toDouble() ?? 0,
-        height: (map['height'] as num?)?.toDouble() ?? 0,
-        imageWidth: (map['imageWidth'] as num?)?.toInt(),
-        imageHeight: (map['imageHeight'] as num?)?.toInt(),
-        bytes: Uint8List.fromList(bytes),
-      );
+      return Uint8List.fromList(base64Decode(b64));
     } on FormatException {
       return null;
     }
@@ -106,6 +86,7 @@ final class PdfRendererController implements BookRendererController {
   /// Pages currently visible in the viewer (1-based).
   ///
   /// Double-page mode returns both pages of the spread when applicable.
+  @override
   Future<List<int>> getVisiblePages({int? fallbackPage}) async {
     final raw = await _webViewController.evaluateJavascript(
       source: rendererGetVisiblePagesScript(),

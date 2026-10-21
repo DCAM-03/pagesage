@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
@@ -16,9 +17,12 @@ import '../../domain/books/book.dart';
 import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
 import '../common/renderer_event.dart';
+import '../../features/ocr/application/ocr_providers.dart';
 import '../epub/epub_jump.dart';
+import 'pdf_annotation_lines.dart';
 import 'pdf_canvas_renderer.dart';
 import 'pdf_layout.dart';
+import 'pdf_page_image_source.dart';
 import 'pdf_links.dart';
 import 'pdf_outline.dart';
 import 'pdf_selection.dart';
@@ -160,6 +164,12 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// Result of the text-layer probe, or null while it is still running.
   bool? _nativeTextLayer;
 
+  /// Exposes the renderer to the reader's OCR path.
+  ///
+  /// Resolved lazily per call rather than captured, so a renderer replaced on
+  /// reopen exports from the document that is actually open.
+  late final _imageSource = _CanvasPageImageSource(this);
+
   /// Whether the user has zoomed in this session.
   ///
   /// The bridge coerced a saved custom scale to fit-width when a document
@@ -239,8 +249,21 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     }
   }
 
+  /// The OCR provider's notifier, captured while the widget is alive.
+  ///
+  /// Riverpod refuses `ref` inside `dispose` — the element is already
+  /// deactivated and reading a provider there throws. Registration has to be
+  /// undone, or the reader keeps a dangling source for a closed book, so the
+  /// notifier is held from `_open` instead.
+  StateController<PdfPageImageSource?>? _imageSourceNotifier;
+
   @override
   void dispose() {
+    _focusClearTimer?.cancel();
+    final notifier = _imageSourceNotifier;
+    if (notifier != null && identical(notifier.state, _imageSource)) {
+      notifier.state = null;
+    }
     _locationTimer?.cancel();
     _scrollController.dispose();
     _pageController?.dispose();
@@ -284,6 +307,10 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       widget.onEvent(RendererReady());
       _reportLocation(doc.pageCount);
       _emitOutline(doc);
+      // Register for display-space export so "识别本页" works here too; the
+      // reader only ever holds this through the renderer-agnostic interface.
+      ref.read(activePdfRendererControllerProvider.notifier).state =
+          _imageSource;
       unawaited(_detectCapabilities(renderer));
 
       // The scroll surface only exists once the build above has run, so a
@@ -2215,16 +2242,28 @@ final class _CanvasPageState extends State<_CanvasPage> {
   /// directly — routing them through page space would apply /Rotate a second
   /// time on rotated pages.
   List<_AnnotationBox> _annotationBoxes(Size viewSize) {
+    final bands = _lineBands();
     final out = <_AnnotationBox>[];
     for (final annotation in widget.annotations) {
       if (annotation.locator.page != widget.pageIndex + 1) continue;
-      for (final rect in annotation.locator.selectionRects) {
-        if (rect.width <= 0 || rect.height <= 0) continue;
-
-        // A multi-line selection can persist as one tall box; collapse it to a
-        // single readable band, matching the WebView renderer. F-02 lands in
-        // S5; until then this is the same approximation the WebView uses.
-        final height = rect.height > 0.055 ? 0.022 : rect.height;
+      final raw = <PdfLineRect>[
+        for (final rect in annotation.locator.selectionRects)
+          if (rect.width > 0 && rect.height > 0)
+            PdfLineRect(
+              page: widget.pageIndex + 1,
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            ),
+      ];
+      if (raw.isEmpty) continue;
+      // F-02: trim every band to the text line it belongs to. A stored box
+      // outlives the geometry that produced it, so a note saved as one tall
+      // rectangle would otherwise paint over the line below it. Runs per
+      // annotation so each painted band keeps its own colour and id.
+      final rects = prepareAnnotationRects(raw, lineBands: (_) => bands);
+      for (final rect in rects) {
         out.add(
           _AnnotationBox(
             annotationId: annotation.id,
@@ -2232,7 +2271,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
               rect.x * viewSize.width,
               rect.y * viewSize.height,
               rect.width * viewSize.width,
-              height * viewSize.height,
+              rect.height * viewSize.height,
             ),
             color: annotation.color,
             underline: annotation.style == AnnotationStyle.underline,
@@ -2241,6 +2280,28 @@ final class _CanvasPageState extends State<_CanvasPage> {
       }
     }
     return out;
+  }
+
+  /// This page's text lines as 0..1 bands, from text already in hand.
+  ///
+  /// Deliberately does not extract: painting runs on the frame path, and a
+  /// full content walk there would stall the scroll. Without cached text the
+  /// bands are empty and the pipeline falls back to its single-line cap, which
+  /// is what the bridge does when it has no line reference either.
+  List<PdfLineBand> _lineBands() {
+    final text = widget.renderer.cachedTextOf(widget.pageIndex);
+    if (text == null || text.runs.isEmpty) return const [];
+    final geometry = _geometryFor(_pageSize);
+    final height = _pageSize.height;
+    if (height <= 0) return const [];
+    return lineBandsForPage([
+      for (final run in text.runs)
+        if (run.bounds.width > 0 && run.bounds.height > 0)
+          () {
+            final rect = geometry.toViewRect(run.bounds);
+            return (top: rect.top / height, bottom: rect.bottom / height);
+          }(),
+    ]);
   }
 
   /// OCR text-layer boxes for a scanned page, in view coordinates.
@@ -2816,3 +2877,45 @@ Color _annotationColor(AnnotationColor color) => switch (color) {
   AnnotationColor.red => const Color(0x66E57373),
   AnnotationColor.purple => const Color(0x66BA68C8),
 };
+
+/// [PdfPageImageSource] over an open [PdfCanvasView].
+///
+/// Holds the view, not the renderer: the view replaces its renderer when the
+/// document is reopened, and the reader must keep exporting from whatever is
+/// open now. All page math is 1-based here because that is what OCR reports.
+final class _CanvasPageImageSource implements PdfPageImageSource {
+  _CanvasPageImageSource(this._view);
+
+  final _PdfCanvasViewState _view;
+
+  @override
+  Future<Uint8List?> exportPageImage({
+    required int pageNumber,
+    double quality = 0.86,
+  }) {
+    final renderer = _view._renderer;
+    if (renderer == null) return Future<Uint8List?>.value();
+    return renderer.exportPageImage(pageNumber - 1);
+  }
+
+  @override
+  Future<List<int>> getVisiblePages({int? fallbackPage}) async {
+    final renderer = _view._renderer;
+    final fallback = fallbackPage == null || fallbackPage < 1
+        ? _view._currentPage + 1
+        : fallbackPage;
+    if (renderer == null) return [fallback];
+    // One page is on screen at a time in continuous mode; a spread shows two
+    // and OCR should cover both, matching what the reader is looking at.
+    if (_view._displayMode(renderer.pageCount) != PdfDisplayMode.double) {
+      return [fallback];
+    }
+    final start = _view._currentPage + 1;
+    final end = pdfSpreadFor(
+      pageIndex: _view._currentPage,
+      pageCount: renderer.pageCount,
+      mode: PdfDisplayMode.double,
+    ).end;
+    return [for (var page = start; page <= end + 1; page += 1) page];
+  }
+}

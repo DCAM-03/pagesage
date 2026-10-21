@@ -64,6 +64,42 @@ void main() {
       expect(await pending, isNull);
     });
 
+    test('exports a page as PNG bytes for OCR', () async {
+      final renderer = open(standard);
+      addTearDown(renderer.dispose);
+
+      final bytes = await renderer.exportPageImage(0);
+
+      // OCR needs a real bitmap with glyphs in it, not a placeholder: PNG
+      // signature, a megapixel-scale image, and far bigger than an empty page
+      // would compress to.
+      expect(bytes, isNotNull);
+      expect(bytes!.take(4), [0x89, 0x50, 0x4E, 0x47]);
+      expect(bytes.length, greaterThan(4096));
+    });
+
+    test('export is independent of the reader zoom', () async {
+      // OCR quality must not drop because the reader happens to be zoomed
+      // out; the export resolves its own density from the page size.
+      final renderer = open(standard);
+      addTearDown(renderer.dispose);
+
+      final first = await renderer.exportPageImage(0);
+      final second = await renderer.exportPageImage(0);
+
+      expect(first, isNotNull);
+      expect(second, isNotNull);
+      expect(first!.length, second!.length);
+    });
+
+    test('exporting an out-of-range page reports null', () async {
+      final renderer = open(standard);
+      addTearDown(renderer.dispose);
+
+      expect(await renderer.exportPageImage(-1), isNull);
+      expect(await renderer.exportPageImage(99), isNull);
+    });
+
     test('falls back to a local render without bytes', () async {
       final renderer = open(standard);
       final page = await renderer.renderPage(0);

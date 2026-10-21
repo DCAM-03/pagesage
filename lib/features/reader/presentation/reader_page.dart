@@ -2747,13 +2747,16 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 var exported = await pdfController.exportPageImage(
                   pageNumber: page,
                 );
-                if (exported == null || exported.bytes.isEmpty) {
+                if (exported == null || exported.isEmpty) {
+                  // A page that was still rasterising when the request
+                  // arrived comes back empty; one retry after it settles is
+                  // cheaper than making the user press the button again.
                   await Future<void>.delayed(const Duration(milliseconds: 180));
                   exported = await pdfController.exportPageImage(
                     pageNumber: page,
                   );
                 }
-                return exported?.bytes;
+                return exported;
               } on Object {
                 return null;
               }

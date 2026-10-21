@@ -319,6 +319,51 @@ final class PdfCanvasRenderer {
   /// annotation projection must all start from this instead of `cropBox`.
   Size displaySizeOf(int pageIndex) =>
       PdfPageRenderer.pageSize(_doc.page(pageIndex));
+
+  /// Rasterises [pageIndex] into PNG bytes for OCR.
+  ///
+  /// Renders at [targetWidth] logical pixels regardless of the reader's zoom:
+  /// OCR reads glyphs, so the image has to be big enough for the recogniser's
+  /// own threshold rather than matching whatever is on screen. The page
+  /// transform inside the replay already applies /Rotate, so the output has the
+  /// same orientation as the reader's view and OCR geometry needs no extra
+  /// correction.
+  ///
+  /// PNG rather than JPEG: the encoder is the only one available without a
+  /// platform channel, and lossless output avoids feeding compression
+  /// artefacts to a text recogniser.
+  Future<Uint8List?> exportPageImage(
+    int pageIndex, {
+    double targetWidth = 1600,
+  }) async {
+    if (_disposed) return null;
+    if (pageIndex < 0 || pageIndex >= pageCount) return null;
+    final size = displaySizeOf(pageIndex);
+    if (size.isEmpty) return null;
+    final ratio = (targetWidth / size.width).clamp(0.5, 6.0).toDouble();
+    ui.Image? image;
+    try {
+      final page = await renderPage(pageIndex);
+      if (page == null) return null;
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.scale(ratio);
+      canvas.drawPicture(page.picture);
+      page.dispose();
+      final picture = recorder.endRecording();
+      image = await picture.toImage(
+        (size.width * ratio).round(),
+        (size.height * ratio).round(),
+      );
+      picture.dispose();
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      return data?.buffer.asUint8List();
+    } on Object {
+      return null;
+    } finally {
+      image?.dispose();
+    }
+  }
 }
 
 /// A rendered page: the point-space picture plus the display size it covers.

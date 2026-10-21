@@ -871,3 +871,73 @@ S4 三项的起点并不一致，先说清楚，否则容易把「已存在」�
 - 闪烁只标出**第一个**命中词（最多取 4 个 quad）。若摘录跨行且跨页，只闪当前页那一部分。
 - 链接只识别 `/Link`；表单域（`/Widget`）与 `Highlight` 等标注仍不参与点击。
 - `mailto:` 已放行但未在 Linux 上实测（本机未配置邮件客户端），失败时走「无法打开链接」提示。
+
+## 22. S5 施工记录：导出接口 / F-02 跨行裁剪（2026-10-21）
+
+### 22.1 先修正计划里的施工前状态
+
+§S5 把「Canvas `exportPageImage` 用 `PdfPageExport.exportPage`」写成待办，实际情况是：
+
+| 项 | 开工前状态 |
+| --- | --- |
+| `PdfPageExport` | 是 WebView 链路的产物（`pdf_renderer_controller.dart`），4 个尺寸字段（`width` / `height` / `imageWidth` / `imageHeight`）**从未被任何调用方读取**，宿主只用 `.bytes` |
+| OCR 导出 | 只有 WebView 能做。canvas 渲染器**没有**导出方法，所以「识别本页」在 canvas 上是死按钮 |
+| F-02 跨行裁剪 | bridge 有 4 个函数处理，Dart 侧**一个都没有**。canvas 的标注绘制只有一句 `rect.height > 0.055 ? 0.022 : height` 的近似 |
+
+### 22.2 导出接口
+
+新增 `lib/renderers/pdf/pdf_page_image_source.dart`：
+
+```dart
+abstract interface class PdfPageImageSource {
+  Future<Uint8List?> exportPageImage({required int pageNumber, double quality});
+  Future<List<int>> getVisiblePages({int? fallbackPage});
+}
+```
+
+- `PdfRendererController`（WebView）`implements` 它，`exportPageImage` 直接返回 `Uint8List?`——`PdfPageExport` 类**删除**，宿主 `exported?.bytes` 改为直接返回值，`!exported.isEmpty` 的判断同步调整。
+- `activePdfRendererControllerProvider` 类型从 `PdfRendererController?` 改为 `PdfPageImageSource?`。读者只依赖能力，S7 删掉 WebView 时不需要改这个调用点。
+- Canvas 侧 `PdfCanvasRenderer.exportPageImage(pageIndex)`：worker 取 picture → `PictureRecorder` 按 `targetWidth = 1600` 缩放重绘 → `toImage` → PNG。**不跟随阅读器缩放**：OCR 读字形，图像密度要满足识别器阈值，而不是屏幕当前比例。PNG 而非 JPEG——无损编码，不把压缩伪影喂给识别器，且不需要平台通道。
+
+验收点：`test/renderers/pdf/pdf_canvas_contract_test.dart` 新增 3 项（PNG 签名 + 体积、两次导出字节数一致、越界页返回 null）。
+
+### 22.3 F-02 跨行裁剪移植
+
+新增 `lib/renderers/pdf/pdf_annotation_lines.dart`，把 bridge 的 `mergeSameLineRects` / `lineBandsForPage` / `snapRectsToLineBands` / `clampStripToBand` / `preventAdjacentBleed` 移植成可测的纯函数，入口 `prepareAnnotationRects(rects, lineBands:)`。
+
+移植中保留的四个关键行为（都是 bridge 经过实际修补得来的）：
+
+1. **按视觉行聚类，不按 x 顺序合并**。选区的逐词矩形在 x 上交错，按 x 顺序合并会留下同一行的多个框，把一行画两遍。
+2. **中位数取 top / height**，不取并集。旧数据里单个矩形常带数倍于真实行高的高度，取并集会让整个标注变胖。
+3. **跨多行的矩形按覆盖行拆分，不是只留最近的一行**。读者标的那几行都要保留。
+4. **相邻行裁剪只从下边缘缩短上行**，且只在下一行是**真正的下一行**时（`pitch >= max(h1, h2) * 0.7`）才裁——否则亚行抖动会被当成下一行，把高亮压成细条。
+
+**移植时的实际偏差与修正**：第一次实现把「压到 0.022」的阈值写成了 `0.022`，而 bridge 是 `h > 0.055` 才压。这会让任何 0.022 以上的框先被压扁，逐行拆分分支永远进不去，等于把第 3 条行为整个关掉。测试直接暴露了这一点（3 行框只出 1 条），已改回 `0.055 → 0.022`。
+
+行带来源：canvas 用 `renderer.cachedTextOf(pageIndex).runs` 的 `bounds` 经 `PdfPageGeometry.toViewRect` 投影成 0..1。**刻意不在这里抽取文本**——绘制在帧路径上，一次内容流遍历会卡住滚动。没有缓存文本时行带为空，管线退回单行封顶，与 bridge 拿不到行引用时的行为一致。
+
+接入点：`_CanvasPageState._annotationBoxes`。原先的 `0.055 → 0.022` 近似删除，改为逐标注调用 `prepareAnnotationRects`（逐标注而非整体，保证每条高亮保留自己的颜色与 id）。
+
+### 22.4 验证结果
+
+- `flutter analyze`：0 error、0 warning；3 条 info 全在 `poc_pdf_canvas/`。
+- `flutter test`：**322 项通过、2 项跳过、0 失败**（S4 为 302；S5 新增 17 项 F-02 纯函数 + 3 项导出）。
+- `test/renderers/pdf/pdf_annotation_lines_test.dart` 17 项覆盖：两行拆分、mega-box 折叠、无行引用的封顶、超行高吸附、上漂吸附、短框保持、78% pitch 上限、相邻行 seam 裁剪、全宽框丢弃、空输入；行聚类、页隔离、离群高度不传染；行带聚类与越界框过滤。
+
+### 22.5 施工中发现并修掉的缺陷
+
+- **`dispose()` 里用 `ref` 会抛异常**：注册 OCR 导出源后，我在 `dispose` 里用 `ref.read(...)` 反注册，触发 Riverpod 的「Using ref when a widget is about to or has been unmounted is unsafe」，整套测试 35 项连坐失败。改为在 `_open` 里把 `StateController` 存进字段，`dispose` 只用该字段。这个错误只有跑完整测试才会暴露——单文件测试不会卸载到触发路径。
+
+### 22.6 未在本轮完成的 S5 项
+
+| 计划项 | 状态 |
+| --- | --- |
+| 标注投影按显示页尺寸 | **本已正确**：`annotation.locator.selectionRects` 是 0..1 的显示页坐标，代码直接乘 `viewSize`，未走页面空间，不存在重复 /Rotate |
+| 按 z 逆序命中 | 已实现（`_emitAnnotationTap` 遍历 `.reversed`） |
+| `RendererAnnotationSelected` 带全局 `sourceRect` | 已实现 |
+| OCR 块参与选区（矩形命中 + 文本拼接） | **未做**，见 §4.7 |
+| `ReaderRendererHostConfig.ocrOverlayToken` | 已存在（canvas 侧已响应 token 变化） |
+| OCR 后能力上报（`search=false` / `textSelection=true`） | **未做** |
+| 假 OCR 引擎（仅测试） | **未做**；Linux 上 `StubOcrEngine` 仍 `supportsPdfPageOcr => false` |
+
+后三项需要在 Linux 上有一条可跑的 OCR 管线才有验证价值，计划把它们与 S7 的真机验证一起排。
