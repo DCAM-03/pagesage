@@ -4781,14 +4781,19 @@ final class _ContextTabChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? colorScheme.surface : Colors.transparent,
-      elevation: selected ? 0.4 : 0,
-      shadowColor: colorScheme.shadow.withValues(alpha: 0.10),
-      borderRadius: BorderRadius.circular(AppRadius.full),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.full),
-        onTap: onTap,
+    return InkWell(
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          // The selected tab is the one that paints the rule under itself;
+          // the others keep the space so the row does not jump.
+          border: Border(
+            bottom: BorderSide(
+              color: selected ? colorScheme.primary : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
@@ -4919,41 +4924,33 @@ final class _DesktopContextPane extends StatelessWidget {
                 ],
               ),
             ),
+            // Flat tabs over one hairline, same as the AI panel's own
+            // 提问 / 历史 strip. As a bordered pill this stacked a pill
+            // inside a pill directly above another pill bar, which is what
+            // made the rail read as a column of frames.
             Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.x3,
-                0,
-                AppSpacing.x3,
-                AppSpacing.x3,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x3),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colorScheme.surfaceSubtle.withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(AppRadius.full),
-                  border: Border.all(
-                    color: colorScheme.appBorder.withValues(alpha: 0.85),
+                  border: Border(
+                    bottom: BorderSide(
+                      color: colorScheme.appBorder.withValues(alpha: 0.9),
+                    ),
                   ),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: Row(
-                    children: [
-                      for (final tab in _ReaderContextTab.values)
-                        Expanded(
-                          child: _ContextTabChip(
-                            tab: tab,
-                            selected: activeTab == tab,
-                            onTap: () => onTabChanged(tab),
-                          ),
+                child: Row(
+                  children: [
+                    for (final tab in _ReaderContextTab.values)
+                      Expanded(
+                        child: _ContextTabChip(
+                          tab: tab,
+                          selected: activeTab == tab,
+                          onTap: () => onTabChanged(tab),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
               ),
-            ),
-            Divider(
-              height: 1,
-              color: colorScheme.appBorder.withValues(alpha: 0.9),
             ),
             Expanded(child: _buildTab(context)),
           ],

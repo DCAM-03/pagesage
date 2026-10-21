@@ -141,7 +141,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Pick the folder range: the passage comes from 乙书, not this book.
-    await tester.tap(find.byType(DropdownButtonFormField<AiContextRange>));
+    await tester.tap(find.byTooltip('上下文范围'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('文件夹关联').last);
     await tester.pumpAndSettle();

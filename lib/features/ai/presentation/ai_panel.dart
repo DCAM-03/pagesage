@@ -338,21 +338,20 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                 ),
               ],
               SizedBox(height: sectionGap),
-              Text(
-                '快捷动作',
-                style: textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.x1),
+              // Six outlined chips were six more boxes for six phrases that
+              // only fill the prompt. Text buttons in a wrap say the same and
+              // leave the box count for things that hold a value.
               Wrap(
-                spacing: 6,
-                runSpacing: 6,
+                // Tight enough that the six stay on one line in a rail this
+                // narrow; a lone word wrapping onto a second line reads as a
+                // layout bug, not as a set of choices.
+                spacing: AppSpacing.x1,
+                runSpacing: 0,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   for (final action in _kPromptActions)
                     _AiPromptChip(
                       label: action.label,
-                      prompt: action.prompt,
                       compact: embedded,
                       onPressed: () {
                         _editedPrompt = action.prompt;
@@ -383,17 +382,11 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                   }
                 },
                 decoration: InputDecoration(
-                  labelText: '问题',
                   hintText: '解释、翻译或自定义提问…',
                   isDense: embedded,
+                  // The box stays: this is the one thing in the rail that
+                  // really is an input. It is just not another card.
                   border: const OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.x1),
-              Text(
-                '仅发送上方文本，不会上传整本书。',
-                style: textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
               if (_loading) ...[
@@ -1077,36 +1070,36 @@ final class _AiPanelTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // A segmented pill inside a pill-shaped tab bar was two rounded boxes
+    // doing one job. Flat labels over a hairline read the same and stop the
+    // rail from looking like a stack of containers.
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(AppRadius.full),
-        border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+        border: Border(
+          bottom: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+          ),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(3),
-        child: Row(
-          children: [
-            Expanded(
-              child: _AiPanelTabChip(
-                label: '提问',
-                icon: Icons.edit_note_outlined,
-                selected: tab == _AiPanelTab.compose,
-                onTap: () => onChanged(_AiPanelTab.compose),
-              ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _AiPanelTabChip(
+              label: '提问',
+              icon: Icons.edit_note_outlined,
+              selected: tab == _AiPanelTab.compose,
+              onTap: () => onChanged(_AiPanelTab.compose),
             ),
-            Expanded(
-              child: _AiPanelTabChip(
-                label: '历史',
-                icon: Icons.history,
-                selected: tab == _AiPanelTab.history,
-                onTap: () => onChanged(_AiPanelTab.history),
-              ),
+          ),
+          Expanded(
+            child: _AiPanelTabChip(
+              label: '历史',
+              icon: Icons.history,
+              selected: tab == _AiPanelTab.history,
+              onTap: () => onChanged(_AiPanelTab.history),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1128,14 +1121,21 @@ final class _AiPanelTabChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? colorScheme.surface : Colors.transparent,
-      borderRadius: BorderRadius.circular(AppRadius.full),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.full),
-        onTap: onTap,
+    return InkWell(
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            // Selected state is a rule under the label, not a filled pill:
+            // the border already under the bar is where it lands.
+            bottom: BorderSide(
+              color: selected ? colorScheme.primary : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1155,6 +1155,93 @@ final class _AiPanelTabChip extends StatelessWidget {
                       ? colorScheme.primary
                       : colorScheme.onSurfaceVariant,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The context-range selector, sized to sit in a heading line.
+///
+/// A full-width outlined dropdown took a third of the card's height to show
+/// one short word, and its box plus the card's box plus the chips' boxes is
+/// what made the rail read as a stack of frames. This is the same control
+/// (and the same `DropdownButton` semantics, reachable from a keyboard) with
+/// the box reduced to the rule under the text.
+final class _AiRangeDropdown extends StatelessWidget {
+  const _AiRangeDropdown({
+    required this.value,
+    required this.enabled,
+    required this.canLoadSource,
+    required this.onChanged,
+    super.key,
+  });
+
+  final AiContextRange value;
+  final bool enabled;
+
+  /// False when no book file is behind the panel, so ranges that read the
+  /// book cannot do what their labels promise.
+  final bool canLoadSource;
+  final ValueChanged<AiContextRange> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return PopupMenuButton<AiContextRange>(
+      enabled: enabled,
+      tooltip: '上下文范围',
+      initialValue: value,
+      onSelected: onChanged,
+      position: PopupMenuPosition.under,
+      itemBuilder: (context) => [
+        for (final range in AiContextRange.values)
+          PopupMenuItem<AiContextRange>(
+            value: range,
+            // Retrieval ranges read the index rather than the file, so they
+            // stay available without a path; they report an empty index
+            // themselves when nothing is indexed.
+            enabled:
+                enabled &&
+                (range.usesRetrieval || canLoadSource || !range.needsBookText),
+            child: Row(
+              children: [
+                Icon(range == value ? Icons.check : null, size: 16),
+                if (range == value) const SizedBox(width: 6),
+                Text(range.label),
+              ],
+            ),
+          ),
+      ],
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.9),
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                value.label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: enabled
+                      ? colorScheme.onSurface
+                      : colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Icon(
+                Icons.arrow_drop_down,
+                size: 16,
+                color: colorScheme.onSurfaceVariant,
               ),
             ],
           ),
@@ -1228,173 +1315,148 @@ final class _AiContextCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final aiAccent = colorScheme.aiAccent;
-    final pad = compact ? AppSpacing.x2 : AppSpacing.x3;
     final visible = references
         .where((reference) => reference.text.trim().isNotEmpty)
         .toList(growable: false);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: aiAccent.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: aiAccent.withValues(alpha: 0.18)),
+    // No card around the block. The rail is one narrow column, and a tinted,
+    // bordered box holding a bordered dropdown holding bordered chips is the
+    // "cards inside cards" the design system rules out. What stays is the
+    // only part that has to look like a control — the range selector — and
+    // the text itself; hierarchy comes from spacing and weight.
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? AppSpacing.x1 : 0,
+        vertical: compact ? AppSpacing.x1 : 0,
       ),
-      child: Padding(
-        padding: EdgeInsets.all(pad),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.privacy_tip_outlined,
+                color: aiAccent,
+                size: compact ? 15 : 16,
+              ),
+              SizedBox(width: 6),
+              Text(
+                // The range name used to sit in its own chip beside the title
+                // and then again in the dropdown. Once, in the control that
+                // changes it, is enough.
+                '将发送的文本',
+                style: textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              // Edit acts on the blocks this heading introduces, and a lone
+              // button on its own row was the last thing keeping the rail a
+              // stack of rows.
+              _AiEditToggle(expanded: expanded, onPressed: onToggleExpand),
+              const SizedBox(width: AppSpacing.x2),
+              _AiRangeDropdown(
+                // A FormField keeps the value from its own `didChange`, so a
+                // failed read that falls back would leave the selector
+                // claiming the range the panel just declined to send. The
+                // version makes it rebuild from the panel's own state on
+                // every attempt.
+                key: ValueKey(rangeVersion),
+                value: range,
+                enabled: !loadingSource,
+                canLoadSource: canLoadSource,
+                onChanged: onRangeChanged,
+              ),
+            ],
+          ),
+          SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
+          // One line of plain text instead of two bordered chips: the word
+          // count and the jump target are facts to read, not controls.
+          Text(
+            [
+              description,
+              if (locationLabel != null && locationLabel!.trim().isNotEmpty)
+                '回跳：$locationLabel',
+            ].join(' · '),
+            style: textTheme.labelSmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (loadingSource || retrievalStatus != null) ...[
+            const SizedBox(height: AppSpacing.x1),
             Row(
               children: [
-                Icon(
-                  Icons.privacy_tip_outlined,
-                  color: aiAccent,
-                  size: compact ? 16 : 18,
-                ),
-                SizedBox(width: compact ? 6 : AppSpacing.x2),
+                // A static icon rather than a spinner: the read is short,
+                // and an indeterminate animation would keep any tree that
+                // contains the panel from ever settling.
+                Icon(Icons.hourglass_empty, size: 12, color: aiAccent),
+                const SizedBox(width: AppSpacing.x1),
                 Expanded(
                   child: Text(
-                    '将发送的文本',
-                    style:
-                        (compact ? textTheme.labelLarge : textTheme.titleSmall)
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                    retrievalStatus ?? '正在读取…',
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
-                _MetaChip(label: range.label, color: aiAccent),
               ],
             ),
-            SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
-            DropdownButtonFormField<AiContextRange>(
-              // A FormField keeps the value from its own `didChange`, so a
-              // failed read that falls back would leave the selector claiming
-              // the range the panel just declined to send. The version makes
-              // it rebuild from the panel's own state on every attempt.
-              key: ValueKey(rangeVersion),
-              initialValue: range,
-              isDense: true,
+          ],
+          const SizedBox(height: AppSpacing.x1),
+          if (visible.isEmpty && !loadingSource)
+            Text(
+              '还没有可发送的文本',
               style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurface,
+                color: colorScheme.onSurfaceVariant,
               ),
-              decoration: const InputDecoration(
-                labelText: '上下文范围',
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-              items: AiContextRange.values
-                  .map(
-                    (value) => DropdownMenuItem(
-                      value: value,
-                      // Ranges that read the book are off when there is no
-                      // file behind the panel; a range that cannot do what it
-                      // says is worse than one that is disabled.
-                      // Retrieval ranges work off the index, not the file, so
-                      // they stay available even without a path. They say so
-                      // themselves when nothing is indexed.
-                      enabled:
-                          value.usesRetrieval ||
-                          canLoadSource ||
-                          !value.needsBookText,
-                      child: Text(value.label),
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: loadingSource
+            ),
+          for (final reference in visible)
+            _AiReferenceRow(
+              key: ValueKey(reference.id),
+              reference: reference,
+              expanded: expanded,
+              compact: compact,
+              canRemove: visible.length > 1 || !reference.isSelection,
+              onChanged: (value) => onReferenceChanged(reference.id, value),
+              onRemove: () => onRemoveReference(reference.id),
+              onOpen: reference.locator == null
                   ? null
-                  : (value) {
-                      if (value != null) {
-                        onRangeChanged(value);
-                      }
-                    },
+                  : () => onOpenReference(reference),
             ),
-            SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
-            Wrap(
-              spacing: AppSpacing.x1,
-              runSpacing: AppSpacing.x1,
-              children: [
-                _MetaChip(
-                  label: description,
-                  color: colorScheme.onSurfaceVariant,
-                  subtle: true,
-                ),
-                if (locationLabel != null && locationLabel!.trim().isNotEmpty)
-                  _MetaChip(
-                    label: '回跳：$locationLabel',
-                    color: colorScheme.onSurfaceVariant,
-                    subtle: true,
-                  ),
-              ],
-            ),
-            if (loadingSource || retrievalStatus != null) ...[
-              const SizedBox(height: AppSpacing.x1),
-              Row(
-                children: [
-                  // A static icon rather than a spinner: the read is short,
-                  // and an indeterminate animation would keep any tree that
-                  // contains the panel from ever settling.
-                  Icon(Icons.hourglass_empty, size: 12, color: aiAccent),
-                  const SizedBox(width: AppSpacing.x1),
-                  Expanded(
-                    child: Text(
-                      retrievalStatus ?? '正在读取…',
-                      style: textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+          if (truncated) ...[
             const SizedBox(height: AppSpacing.x1),
-            if (visible.isEmpty && !loadingSource)
-              Text(
-                '还没有可发送的文本',
-                style: textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            for (final reference in visible)
-              _AiReferenceRow(
-                key: ValueKey(reference.id),
-                reference: reference,
-                expanded: expanded,
-                compact: compact,
-                canRemove: visible.length > 1 || !reference.isSelection,
-                onChanged: (value) => onReferenceChanged(reference.id, value),
-                onRemove: () => onRemoveReference(reference.id),
-                onOpen: reference.locator == null
-                    ? null
-                    : () => onOpenReference(reference),
-              ),
-            if (truncated) ...[
-              const SizedBox(height: AppSpacing.x1),
-              Text(
-                '原文较长，已截取选区附近 '
-                '${ContextBuilder.maxSourceChars} 字以内发送',
-                style: textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: onToggleExpand,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                icon: Icon(
-                  expanded ? Icons.expand_less : Icons.edit_outlined,
-                  size: 16,
-                ),
-                label: Text(
-                  expanded ? '收起' : '编辑文本',
-                  style: textTheme.labelMedium,
-                ),
+            Text(
+              '原文较长，已截取选区附近 '
+              '${ContextBuilder.maxSourceChars} 字以内发送',
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
             ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Turns the reference list into editable fields, from the heading line.
+final class _AiEditToggle extends StatelessWidget {
+  const _AiEditToggle({required this.expanded, required this.onPressed});
+
+  final bool expanded;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return IconButton(
+      tooltip: expanded ? '收起编辑' : '编辑文本',
+      onPressed: onPressed,
+      visualDensity: VisualDensity.compact,
+      iconSize: 16,
+      icon: Icon(
+        expanded ? Icons.expand_less : Icons.edit_outlined,
+        color: colorScheme.onSurfaceVariant,
       ),
     );
   }
@@ -1566,27 +1628,32 @@ final class _AiReferenceRow extends StatelessWidget {
 final class _AiPromptChip extends StatelessWidget {
   const _AiPromptChip({
     required this.label,
-    required this.prompt,
     required this.onPressed,
     this.compact = false,
   });
 
   final String label;
-  final String prompt;
   final VoidCallback onPressed;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    // Action chips only fill the prompt — no sticky selected/check state.
-    return ActionChip(
-      visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 6, vertical: 0),
-      labelPadding: EdgeInsets.symmetric(horizontal: compact ? 4 : 6),
-      avatar: Icon(Icons.auto_awesome_outlined, size: compact ? 14 : 16),
-      label: Text(label, style: Theme.of(context).textTheme.labelMedium),
+    // Plain text: these fill the prompt and hold no state, so they do not
+    // need to look like containers.
+    return TextButton(
       onPressed: onPressed,
+      style: TextButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        minimumSize: const Size(0, 32),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 6),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
     );
   }
 }
@@ -1614,76 +1681,68 @@ final class _AiAnswerBlock extends StatelessWidget {
       fontSize: compact ? 12 : 13,
       height: 1.4,
     );
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(
-          alpha: compact ? 0.22 : 0.3,
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.7),
-        ),
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(compact ? AppSpacing.x2 : AppSpacing.x3),
-        child: MarkdownBody(
-          data: answer,
-          selectable: true,
-          styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-            p: bodyStyle,
-            pPadding: EdgeInsets.only(bottom: compact ? 6 : 8),
-            h1: bodyStyle?.copyWith(
-              fontSize: compact ? 15 : 16,
-              fontWeight: FontWeight.w700,
-              height: 1.3,
+    // No frame around the answer: the design system asks for reading
+    // typography here, and a tinted box turns a reply into another panel of
+    // the rail. The 「回答」 label above already says what the text is.
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: compact ? AppSpacing.x1 : 0),
+      child: MarkdownBody(
+        data: answer,
+        selectable: true,
+        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+          p: bodyStyle,
+          pPadding: EdgeInsets.only(bottom: compact ? 6 : 8),
+          h1: bodyStyle?.copyWith(
+            fontSize: compact ? 15 : 16,
+            fontWeight: FontWeight.w700,
+            height: 1.3,
+          ),
+          h2: bodyStyle?.copyWith(
+            fontSize: compact ? 14 : 15,
+            fontWeight: FontWeight.w700,
+            height: 1.3,
+          ),
+          h3: bodyStyle?.copyWith(
+            fontSize: compact ? 13.5 : 14.5,
+            fontWeight: FontWeight.w700,
+            height: 1.3,
+          ),
+          h1Padding: EdgeInsets.only(top: compact ? 4 : 6, bottom: 4),
+          h2Padding: EdgeInsets.only(top: compact ? 4 : 6, bottom: 4),
+          h3Padding: EdgeInsets.only(top: compact ? 2 : 4, bottom: 2),
+          listBullet: bodyStyle,
+          listIndent: compact ? 16 : 20,
+          blockquote: secondaryStyle,
+          blockquotePadding: EdgeInsets.only(
+            left: compact ? 8 : 10,
+            top: 2,
+            bottom: 2,
+          ),
+          code: textTheme.labelSmall?.copyWith(
+            fontFamily: 'monospace',
+            fontSize: compact ? 12 : 12.5,
+            color: colorScheme.onSurface,
+            backgroundColor: colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.55,
             ),
-            h2: bodyStyle?.copyWith(
-              fontSize: compact ? 14 : 15,
-              fontWeight: FontWeight.w700,
-              height: 1.3,
-            ),
-            h3: bodyStyle?.copyWith(
-              fontSize: compact ? 13.5 : 14.5,
-              fontWeight: FontWeight.w700,
-              height: 1.3,
-            ),
-            h1Padding: EdgeInsets.only(top: compact ? 4 : 6, bottom: 4),
-            h2Padding: EdgeInsets.only(top: compact ? 4 : 6, bottom: 4),
-            h3Padding: EdgeInsets.only(top: compact ? 2 : 4, bottom: 2),
-            listBullet: bodyStyle,
-            listIndent: compact ? 16 : 20,
-            blockquote: secondaryStyle,
-            blockquotePadding: EdgeInsets.only(
-              left: compact ? 8 : 10,
-              top: 2,
-              bottom: 2,
-            ),
-            code: textTheme.labelSmall?.copyWith(
-              fontFamily: 'monospace',
-              fontSize: compact ? 12 : 12.5,
-              color: colorScheme.onSurface,
-              backgroundColor: colorScheme.surfaceContainerHighest.withValues(
-                alpha: 0.55,
+          ),
+          codeblockPadding: EdgeInsets.all(compact ? 8 : 10),
+          codeblockDecoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+          blockquoteDecoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(
+                color: colorScheme.primary.withValues(alpha: 0.55),
+                width: 2,
               ),
             ),
-            codeblockPadding: EdgeInsets.all(compact ? 8 : 10),
-            codeblockDecoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            blockquoteDecoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                  color: colorScheme.primary.withValues(alpha: 0.55),
-                  width: 2,
-                ),
-              ),
-            ),
-            horizontalRuleDecoration: BoxDecoration(
-              border: Border(
-                top: BorderSide(
-                  color: colorScheme.outlineVariant.withValues(alpha: 0.7),
-                ),
+          ),
+          horizontalRuleDecoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.7),
               ),
             ),
           ),
@@ -1883,22 +1942,28 @@ final class _AiHistoryCard extends StatelessWidget {
                   height: 1.4,
                 ),
               ),
-              const SizedBox(height: AppSpacing.x2),
+              const SizedBox(height: AppSpacing.x1),
+              // The whole card already opens the question, so a separate
+              // 「载入提问」 button only repeated the tap. What is left is the
+              // three things a tap cannot do.
               Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(onPressed: onOpen, child: const Text('载入提问')),
                   IconButton(
                     tooltip: '复制回答',
+                    visualDensity: VisualDensity.compact,
                     onPressed: onCopy,
                     icon: const Icon(Icons.copy_outlined, size: 18),
                   ),
                   IconButton(
                     tooltip: '保存为笔记',
+                    visualDensity: VisualDensity.compact,
                     onPressed: onSaveNote,
                     icon: const Icon(Icons.note_add_outlined, size: 18),
                   ),
                   IconButton(
                     tooltip: '跳回原文',
+                    visualDensity: VisualDensity.compact,
                     onPressed: onJump,
                     icon: const Icon(Icons.near_me_outlined, size: 18),
                   ),
@@ -1906,42 +1971,6 @@ final class _AiHistoryCard extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _MetaChip extends StatelessWidget {
-  const _MetaChip({
-    required this.label,
-    required this.color,
-    this.subtle = false,
-  });
-
-  final String label;
-  final Color color;
-  final bool subtle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.x2,
-        vertical: AppSpacing.x1,
-      ),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: subtle ? 0.07 : 0.12),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Text(
-        label,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w700,
         ),
       ),
     );

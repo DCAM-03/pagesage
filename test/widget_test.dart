@@ -1109,17 +1109,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('上下文范围'), findsOneWidget);
+    expect(find.byTooltip('上下文范围'), findsOneWidget);
     expect(find.text('发送'), findsOneWidget);
 
     // The reader hands the panel its book file, so the ranges that read a
     // page or chapter are available. Before the wiring they were offered but
     // silently sent the selection instead.
-    await tester.tap(find.byType(DropdownButtonFormField<AiContextRange>));
+    await tester.tap(find.byTooltip('上下文范围'));
     await tester.pumpAndSettle();
     final ranges = tester
-        .widgetList<DropdownMenuItem<AiContextRange>>(
-          find.byType(DropdownMenuItem<AiContextRange>),
+        .widgetList<PopupMenuItem<AiContextRange>>(
+          find.byType(PopupMenuItem<AiContextRange>),
         )
         .toList(growable: false);
     expect(ranges, isNotEmpty);

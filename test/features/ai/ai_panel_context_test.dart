@@ -152,7 +152,8 @@ Widget _panel(
 }
 
 Future<void> _pickRange(WidgetTester tester, String label) async {
-  await tester.tap(find.byType(DropdownButtonFormField<AiContextRange>));
+  // The range control is a text-sized popup menu, not a full-width dropdown.
+  await tester.tap(find.byTooltip('上下文范围'));
   await tester.pumpAndSettle();
   await tester.tap(find.text(label).last);
   await tester.pumpAndSettle();
@@ -209,7 +210,7 @@ void main() {
     await _pickChapter(tester);
     expect(find.textContaining('段落乙'), findsOneWidget);
 
-    await tester.tap(find.byType(DropdownButtonFormField<AiContextRange>));
+    await tester.tap(find.byTooltip('上下文范围'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('仅选中文本').last);
     await tester.pumpAndSettle();
@@ -229,14 +230,15 @@ void main() {
     await tester.pumpWidget(_panel(null, source));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(DropdownButtonFormField<AiContextRange>));
+    await tester.tap(find.byTooltip('上下文范围'));
     await tester.pumpAndSettle();
 
     final items = tester
-        .widgetList<DropdownMenuItem<AiContextRange>>(
-          find.byType(DropdownMenuItem<AiContextRange>),
+        .widgetList<PopupMenuItem<AiContextRange>>(
+          find.byType(PopupMenuItem<AiContextRange>),
         )
         .toList(growable: false);
+    expect(items, hasLength(AiContextRange.values.length));
     for (final item in items) {
       // Retrieval ranges read the index rather than the file, so they stay
       // available; they report an empty index themselves when it is empty.
@@ -331,7 +333,7 @@ void main() {
     await tester.pumpWidget(_panel('book.epub', _StubSource(text: '章节正文内容')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('编辑文本'));
+    await tester.tap(find.byTooltip('编辑文本'));
     await tester.pumpAndSettle();
 
     final editor = find.byType(TextField).first;

@@ -41,6 +41,7 @@ void main() {
     if (!_updateScreenshots) {
       return;
     }
+    await _loadScreenshotFonts();
     // ignore: avoid_print
     print('Screenshot run started. filter=$_screenshotFilter');
 
@@ -197,6 +198,25 @@ void main() {
     );
     await _captureIfSelected(
       tester,
+      fileName: 'reader-ai-rail-desktop.png',
+      size: const Size(1440, 960),
+      route: '/book/book-epub/reader',
+      outputDir: outputDir,
+      data: data.copyWith(
+        settings: const ReaderSettings(desktopContextOpen: true),
+      ),
+      settle: const Duration(seconds: 2),
+      afterPump: (tester) async {
+        await tester.tap(find.text('AI').last);
+        // The pane animates open and the panel reads its context, so settle
+        // on frames rather than on a quiet tree.
+        for (var i = 0; i < 8; i += 1) {
+          await tester.pump(const Duration(milliseconds: 250));
+        }
+      },
+    );
+    await _captureIfSelected(
+      tester,
       fileName: 'mobile-360-reader-ai-large-text.png',
       size: const Size(360, 640),
       route: '/book/book-epub/reader',
@@ -205,8 +225,16 @@ void main() {
       data: data,
       settle: const Duration(milliseconds: 250),
       afterPump: (tester) async {
-        await tester.tap(find.text('AI'));
-        await tester.pumpAndSettle();
+        // A narrow, large-text window keeps AI one level down in 更多. The
+        // sheet slides up, so it has to finish before its rows are tappable.
+        await tester.tap(find.text('更多'));
+        for (var i = 0; i < 6; i += 1) {
+          await tester.pump(const Duration(milliseconds: 250));
+        }
+        await tester.tap(find.text('AI 助手'));
+        for (var i = 0; i < 8; i += 1) {
+          await tester.pump(const Duration(milliseconds: 250));
+        }
       },
     );
     await _captureIfSelected(
@@ -255,6 +283,41 @@ void main() {
       settle: const Duration(seconds: 2),
     );
   });
+}
+
+/// CJK and icon glyphs for the captures.
+///
+/// The test runner's default font has no CJK coverage and no icon glyphs, so
+/// without this every Chinese label renders as tofu and every icon as a box —
+/// useless for judging a layout.
+Future<void> _loadScreenshotFonts() async {
+  Future<void> load(String family, String path) async {
+    final file = File(path);
+    if (!file.existsSync()) return;
+    await (FontLoader(family)
+          ..addFont(Future.value(ByteData.sublistView(file.readAsBytesSync()))))
+        .load();
+  }
+
+  await load(
+    'NotoSansCJK',
+    '/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc',
+  );
+  // The runner is `<sdk>/bin/cache/artifacts/engine/<os>/flutter_tester`, so
+  // the artifacts directory sits three levels up — no hard-coded SDK path.
+  final artifacts = Directory(Platform.resolvedExecutable).parent.parent.parent;
+  await load(
+    'MaterialIcons',
+    '${artifacts.path}/material_fonts/MaterialIcons-Regular.otf',
+  );
+}
+
+/// The same theme with every text style on the loaded CJK family.
+ThemeData _withScreenshotFont(ThemeData theme) {
+  return theme.copyWith(
+    textTheme: theme.textTheme.apply(fontFamily: 'NotoSansCJK'),
+    primaryTextTheme: theme.primaryTextTheme.apply(fontFamily: 'NotoSansCJK'),
+  );
 }
 
 Future<void> _captureIfSelected(
@@ -320,10 +383,12 @@ Future<void> _captureAppPage(
           child: MaterialApp(
             title: 'PageSage',
             debugShowCheckedModeBanner: false,
-            theme: highContrast ? AppTheme.highContrast() : AppTheme.light(),
-            darkTheme: AppTheme.dark(),
-            highContrastTheme: AppTheme.highContrast(),
-            highContrastDarkTheme: AppTheme.highContrast(),
+            theme: _withScreenshotFont(
+              highContrast ? AppTheme.highContrast() : AppTheme.light(),
+            ),
+            darkTheme: _withScreenshotFont(AppTheme.dark()),
+            highContrastTheme: _withScreenshotFont(AppTheme.highContrast()),
+            highContrastDarkTheme: _withScreenshotFont(AppTheme.highContrast()),
             themeMode: data.settings.appThemeMode,
             home: _pageForRoute(route, data),
           ),
