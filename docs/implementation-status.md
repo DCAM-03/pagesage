@@ -25,7 +25,7 @@
 | US-005 | 添加书签 | [x] | 添加/删除/跳转/备注入口存在 |
 | US-006 | 书籍和笔记全局搜索 | [x] | FTS 索引 + 搜索页 + 跳转 |
 | US-007 | 划线和写笔记 | [x] | 标注渲染、笔记页、阅读器 Notebook |
-| US-008 | 划词问 AI | [x] | 用户主动触发、上下文范围可见 |
+| US-008 | 划词问 AI | [x] | 用户主动触发；四种上下文范围均已取真实页/章全文（`AiContextSource`，见 `docs/12-ai-retrieval-strategy.md` §7.1） |
 | US-009 | AI 回答保存为笔记 | [x] | AI 面板可保存；可被搜索索引 |
 | US-010 | 导出笔记 | [x] | 设置页：Markdown / Notebook / 标注 JSON / 书签 CSV / AI Markdown |
 | US-011 | 扫描文件夹批量导入 | [x] | 书库「扫描文件夹」+ 递归发现 EPUB/PDF |
@@ -92,6 +92,13 @@ PDF 渲染迁移（`docs/10-pdf-renderer-migration.md`，2026-10-21）：
 - `flutter_inappwebview` 与 `assets/renderer/pdf/` 已移出依赖与包体。
 - **划词修复（2026-10-21，见 `11-pdf-canvas-implementation-plan.md` §25）**：`positionNear` 按 run 包围盒评分，在排版复杂的书上 3–27% 的点落到非指针所在行（最远 729pt）。改为 em 空间基线带判定 + 同行 run 合并 + 行内水平距离决胜；真实书网格复测错行 0.0%。顺带修掉前页/正文页尺寸不同导致的逐行偏移、连点失效、跨页拖选不滚动。
 - **待办**：S8 收口——Windows/Android 手工回归、旋转页标注、夜间标注配色、真机帧时间与峰值内存。
+
+AI 检索层（`docs/12-ai-retrieval-strategy.md`，2026-10-21）：
+- **选型已定**：全书 / 文件夹关联采用「结构感知的词法检索」（复用 FTS5 + EPUB 目录树 / PDF 大纲），**不采用 DCI，不引入向量 RAG**。
+- 依据：DCI 在 Android 无 shell 不可行；实测同准确率下 token 高 338×、成本高 17.5×、延迟 4–20×；论文自述语料从 10 万增至 40 万文档时准确率跌至 37.5%。向量 RAG 需 100MB+ 嵌入模型与两个原生依赖，对 3,499 块的语料规模不划算。
+- **发现断链缺陷**：AI 面板「前后段落 / 当前章节 / 当前页」三项范围从未生效——`ContextBuilder.build()` 的 `availableText` 生产代码从未传入。
+- **第 1 步已完成**：`AiPanel(bookPath, isEpub)` → `AiContextSource`（磁盘读一页 PDF / 一章 EPUB）→ `availableText`；读不到或本页无文字时明确提示并退回「仅选中文本」。US-008 恢复 `[x]`。
+- 实施顺序：① 修断链 → ② 引用区 UI → ③ 多轮对话（需 `threadId` 迁移）→ ④ 全书关联 → ⑤ 文件夹关联（依赖跨书跳转）。
 
 ---
 

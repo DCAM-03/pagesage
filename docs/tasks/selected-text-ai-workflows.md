@@ -27,7 +27,7 @@
 ## 实现任务
 
 - [x] 定义 `ContextBuilder`，按 selected text 和 locator 获取上下文。
-- [x] 支持上下文范围：仅选中文本、前后段落、当前章节、当前页。
+- [x] 支持上下文范围：仅选中文本、前后段落、当前章节、当前页 — **2026-10-21 已修通：`AiPanel(bookPath, isEpub)` → `AiContextSource` 从磁盘读页/章全文 → `ContextBuilder(availableText: …)`。详见 `docs/12-ai-retrieval-strategy.md` §7.1**
 - [x] 生成用户可读的上下文范围说明。
 - [x] AI 面板展示选中文本摘要、范围、输入框和回答区。
 - [x] 隐私设置开启时发送前弹确认框。
@@ -73,7 +73,7 @@
 ## 验收标准
 
 - [x] 用户选中文本后能打开 AI 面板。
-- [x] 发送前能看到上下文范围。
+- [x] 发送前能看到上下文范围 — **范围标签、来源（页码/章节标题）与字数说明均显示；读取期间下拉禁用**。
 - [x] 默认不会发送整本书。
 - [x] 请求可取消。
 - [x] 回答可保存为笔记。
@@ -93,3 +93,19 @@
 - 依赖：TASK-11 文本选择，TASK-12 笔记，TASK-14 搜索索引，TASK-15 AI Provider，TASK-18 隐私策略。
 - 风险：上下文构造如果过宽会违背隐私预期，必须默认最小范围。
 - 风险：AI 流式响应和取消需要避免资源泄露。
+
+## 后续扩展（2026-10-21 记录）
+
+用户提出两项超出本任务范围的能力：**全书关联提问**与**同文件夹多书关联**。
+
+- **技术选型已确定**：采用「结构感知的词法检索」（复用 FTS5 + 书籍目录树），不采用 DCI，不引入向量 RAG。依据、实测数据与完整论证见 `docs/12-ai-retrieval-strategy.md`。
+- **发现前置缺陷**：本任务的「上下文范围」四项中，**「前后段落 / 当前章节 / 当前页」从未真正生效**。`ContextBuilder.build()` 的 `availableText` 参数在生产代码里从未传入（`grep availableText lib/` 只命中定义），`_applyContextRange` 调用时缺该参数，因此切换范围是空操作。上游 `excerpt` 另被截断至 120 字符，连完整段落都取不到。
+- **第 1 步已完成（2026-10-21）**：断链修通，页/章范围取真实全文。新增
+  `ai_context_range.dart`（范围枚举独立）、`ai_context_source.dart`（从磁盘读一页 PDF 或一章 EPUB），
+  `ContextBuilder` 增加 `_boundedChapter` 超长章节居中截取。读不到书文件或本页无文字时明确提示并退回
+  「仅选中文本」，不把选区冒充整页。测试见 `test/features/ai/ai_context_source_test.dart` 与
+  `context_builder_test.dart` 的 `chapter ranges` 组。
+- **未加入 `wholeBook` 枚举**：此时加入只能返回当前章节，会立刻复现刚修掉的「标签承诺、内容不符」缺陷。
+  全书/文件夹范围在第 4 步连同检索一起落地。
+- 上述两项扩展的验收标准需在引用内容可回显检查（第 2 步）之后才可制定。
+

@@ -13,6 +13,8 @@ import '../../../domain/ai/ai_models.dart';
 import '../../../domain/books/reading_position.dart';
 import '../../../domain/notes/note.dart';
 import '../../../renderers/epub/epub_jump.dart';
+import '../application/ai_context_range.dart';
+import '../application/ai_context_source.dart';
 import '../application/ai_providers.dart';
 import '../application/context_builder.dart';
 
@@ -22,6 +24,8 @@ final class AiPanel extends ConsumerStatefulWidget {
     required this.bookId,
     required this.locator,
     required this.initialContext,
+    this.bookPath,
+    this.isEpub = false,
     this.onJumpTo,
     this.onNoteSaved,
     this.embedded = false,
@@ -31,6 +35,15 @@ final class AiPanel extends ConsumerStatefulWidget {
   final String bookId;
   final ReadingLocator? locator;
   final String? initialContext;
+
+  /// Where to read page or chapter text from when the range asks for it.
+  ///
+  /// Null when the panel was opened without a book on disk (search results
+  /// from a deleted file, a preview), in which case the wider ranges fall back
+  /// to the selection rather than pretending to have read the chapter.
+  final String? bookPath;
+
+  final bool isEpub;
   final ValueChanged<ReadingLocator>? onJumpTo;
   final VoidCallback? onNoteSaved;
   final bool embedded;
@@ -60,7 +73,48 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   String? _error;
   bool _loading = false;
   bool _contextExpanded = false;
+
+  /// True while a page or chapter is being read for a wider context range.
+  bool _loadingContext = false;
+
+  /// Title of the page or chapter the context was read from, when it was.
+  String? _contextSourceTitle;
+
+  /// Why a wider range could not be loaded, shown next to the context card.
+  ///
+  /// Kept apart from [_error]: that banner offers "设置" and "复制" because it
+  /// speaks about the AI provider, and neither helps when the book file is
+  /// simply unreadable.
+  String? _contextNotice;
+
+  /// Discards a read whose page the reader has already left.
+  int _loadToken = 0;
+
+  /// Bumped on every range attempt so the selector redraws from the panel.
+  ///
+  /// A `FormField` keeps the value it was given by `didChange` until its
+  /// `initialValue` changes. When a wider range fails and the panel falls back
+  /// to the selection, `_contextRange` returns to the value it already had, so
+  /// nothing would tell the selector to drop the label it was just handed.
+  int _rangeVersion = 0;
+
+  /// The reader's selection, kept apart from the editable context box.
+  ///
+  /// Widening the range replaces the box's text with the page or chapter.
+  /// Without this, switching back to "仅选中文本" restored whatever the box
+  /// held at that moment — the chapter — so the narrowest range could never
+  /// be reached again once a wide one was picked. It is refreshed from the
+  /// box while that range is still the selection, so an edited snippet
+  /// survives the same round trip.
+  String _selectionText = '';
+
   _AiPanelTab _tab = _AiPanelTab.compose;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectionText = _contextController.text.trim();
+  }
 
   @override
   void dispose() {
@@ -83,9 +137,20 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     if (_loading) {
       return;
     }
+    if (_loadingContext) {
+      // The read in flight was for the page the reader has just left. Let it
+      // finish into nothing rather than labelling the new selection with the
+      // old chapter. A build follows this call, so no setState is needed.
+      _loadToken++;
+      _loadingContext = false;
+      _contextSourceTitle = null;
+    }
     final current = _contextController.text;
     final canReplace =
         current.trim().isEmpty ||
+        // Text a wide range put in the box is not the reader's, so it must not
+        // block the arrival of a selection from the page they are on now.
+        _contextRange != AiContextRange.selectedText ||
         current == (oldWidget.initialContext ?? '') ||
         current == oldContext;
     if (!canReplace) {
@@ -101,7 +166,14 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       return;
     }
     _contextController.text = widget.initialContext ?? '';
+    _selectionText = _contextController.text.trim();
     setState(() {
+      // A new selection starts from the narrowest range again: the old one
+      // was read for the previous page, and silently reusing it would send
+      // the chapter the reader has since left.
+      _contextRange = AiContextRange.selectedText;
+      _contextSourceTitle = null;
+      _contextNotice = null;
       _contextDescription = const ContextBuilder()
           .build(
             selectedText: widget.initialContext ?? '',
@@ -184,6 +256,10 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                 description: _contextDescription,
                 text: _contextController.text,
                 range: _contextRange,
+                rangeVersion: _rangeVersion,
+                sourceTitle: _contextSourceTitle,
+                loadingSource: _loadingContext,
+                canLoadSource: widget.bookPath != null,
                 locationLabel: const ContextBuilder().locationLabel(
                   widget.locator,
                 ),
@@ -195,6 +271,15 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                 onContextChanged: _refreshContextDescription,
                 onRangeChanged: _applyContextRange,
               ),
+              if (_contextNotice != null) ...[
+                const SizedBox(height: AppSpacing.x1),
+                Text(
+                  _contextNotice!,
+                  style: textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
               SizedBox(height: sectionGap),
               Text(
                 '快捷动作',
@@ -354,15 +439,22 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   Widget _buildActionBar() {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final busy = _loading || _loadingContext;
         final sendButton = FilledButton.icon(
-          onPressed: _loading ? null : _ask,
+          onPressed: busy ? null : _ask,
           icon: _loading
               ? const SizedBox.square(
                   dimension: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.send_outlined),
-          label: Text(_loading ? '生成中' : '发送'),
+          label: Text(
+            _loading
+                ? '生成中'
+                : _loadingContext
+                ? '读取中'
+                : '发送',
+          ),
         );
         if (!_loading) {
           return SizedBox(width: double.infinity, child: sendButton);
@@ -394,6 +486,9 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   }
 
   Future<void> _ask() async {
+    if (_loading || _loadingContext) {
+      return;
+    }
     final contextText = _contextController.text.trim();
     final prompt = _promptController.text.trim();
     if (contextText.isEmpty || prompt.isEmpty) {
@@ -411,7 +506,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       setState(() => _error = '请先在设置中配置 AI Provider、模型与 API Key');
       return;
     }
-    if (contextText.length > 12000) {
+    if (contextText.length > ContextBuilder.maxSourceChars) {
       setState(() => _error = '上下文过长，请缩短选区或改用更短范围后再发送');
       return;
     }
@@ -559,17 +654,105 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
   }
 
-  void _applyContextRange(AiContextRange range) {
+  /// Switches the context range and loads the text that range needs.
+  ///
+  /// This is the call that used to be a no-op. It built the context without
+  /// ever supplying `availableText`, so every range produced exactly the
+  /// selection again — the dropdown changed its label and nothing else. The
+  /// selection is kept aside in `_selectionText` so switching back to
+  /// "仅选中文本" restores the original rather than yesterday's chapter.
+  Future<void> _applyContextRange(AiContextRange range) async {
+    final selection = _selectionText;
+    // A failed read falls back to the range the panel was already on, which
+    // leaves `initialValue` unchanged — and a `FormField` would keep showing
+    // the range the reader just picked. A fresh key each attempt rebuilds it
+    // from `_contextRange`.
+    setState(() => _rangeVersion++);
+    if (!range.needsBookText) {
+      final built = const ContextBuilder().build(
+        selectedText: selection,
+        range: range,
+        locator: widget.locator,
+      );
+      setState(() {
+        _contextRange = range;
+        _contextController.text = built.text;
+        _contextDescription = built.description;
+        _contextSourceTitle = null;
+        _contextNotice = null;
+      });
+      return;
+    }
+
+    final path = widget.bookPath;
+    if (path == null) {
+      // The dropdown disables these ranges when there is no file, so this is
+      // only reachable from a caller that bypassed it. Say so rather than
+      // quietly sending the selection under a wider label.
+      setState(() => _contextNotice = '无法读取书籍文件，已退回仅发送选中文本');
+      return;
+    }
+
+    setState(() {
+      _loadingContext = true;
+      _contextNotice = null;
+    });
+    final token = ++_loadToken;
+    final ContextSource? loaded;
+    try {
+      loaded = await _loadSource(range, path);
+    } on BookUnreadableException {
+      if (!mounted || token != _loadToken) return;
+      setState(() => _loadingContext = false);
+      await _applyContextRange(AiContextRange.selectedText);
+      if (!mounted) return;
+      setState(() => _contextNotice = '无法读取书籍文件，已退回仅发送选中文本');
+      return;
+    }
+    if (!mounted || token != _loadToken) return;
+    if (loaded == null) {
+      // The file opened but this page or chapter has no text (a scanned page,
+      // a cover image). Staying on the wide range would send the bare
+      // selection under a label promising the page.
+      final notice =
+          '这一${range == AiContextRange.currentPage ? '页' : '章'}没有可读文字，已退回仅发送选中文本';
+      setState(() => _loadingContext = false);
+      await _applyContextRange(AiContextRange.selectedText);
+      if (!mounted) return;
+      setState(() => _contextNotice = notice);
+      return;
+    }
+    // Read out of `loaded` before the closure: promotion does not survive
+    // being captured, and the setState callback runs later.
+    final source = loaded;
     final built = const ContextBuilder().build(
-      selectedText: widget.initialContext ?? _contextController.text,
+      selectedText: selection,
       range: range,
       locator: widget.locator,
+      availableText: source.text,
     );
     setState(() {
+      _loadingContext = false;
       _contextRange = range;
       _contextController.text = built.text;
       _contextDescription = built.description;
+      _contextSourceTitle = source.title;
     });
+  }
+
+  /// Reads the range's text, letting [BookUnreadableException] through.
+  ///
+  /// Swallowing it here would turn a corrupt or missing book into "this page
+  /// has no text", which sends the reader looking in the wrong place.
+  Future<ContextSource?> _loadSource(AiContextRange range, String path) {
+    return ref
+        .read(aiContextSourceProvider)
+        .load(
+          range: range,
+          bookPath: path,
+          locator: widget.locator,
+          isEpub: widget.isEpub,
+        );
   }
 
   void _refreshContextDescription(String value) {
@@ -578,7 +761,15 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       range: _contextRange,
       locator: widget.locator,
     );
-    setState(() => _contextDescription = built.description);
+    setState(() {
+      _contextDescription = built.description;
+      // Hand edits belong to the selection; text that arrived from a page or
+      // chapter read does not, or widening twice would keep the chapter as
+      // the "selection" the next widening centres on.
+      if (_contextRange == AiContextRange.selectedText) {
+        _selectionText = value.trim();
+      }
+    });
   }
 
   Future<void> _copyAnswer() async {
@@ -750,6 +941,10 @@ final class _AiContextCard extends StatelessWidget {
     required this.onContextChanged,
     required this.onRangeChanged,
     this.locationLabel,
+    this.sourceTitle,
+    this.rangeVersion = 0,
+    this.loadingSource = false,
+    this.canLoadSource = true,
     this.compact = false,
   });
 
@@ -757,6 +952,19 @@ final class _AiContextCard extends StatelessWidget {
   final String text;
   final AiContextRange range;
   final String? locationLabel;
+
+  /// Where the text was read from — a page number or a chapter title.
+  final String? sourceTitle;
+
+  /// Changes whenever the panel tries a range, to rebuild the selector.
+  final int rangeVersion;
+
+  /// True while the page or chapter is being read off disk.
+  final bool loadingSource;
+
+  /// False when the panel has no file to read, so wide ranges cannot work.
+  final bool canLoadSource;
+
   final bool expanded;
   final bool compact;
   final VoidCallback onToggleExpand;
@@ -769,7 +977,11 @@ final class _AiContextCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final aiAccent = colorScheme.aiAccent;
-    final preview = text.trim().isEmpty ? '还没有可发送的文本' : text.trim();
+    final preview = loadingSource
+        ? '正在读取…'
+        : text.trim().isEmpty
+        ? '还没有可发送的文本'
+        : text.trim();
     final pad = compact ? AppSpacing.x2 : AppSpacing.x3;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -803,6 +1015,11 @@ final class _AiContextCard extends StatelessWidget {
             ),
             SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
             DropdownButtonFormField<AiContextRange>(
+              // A FormField keeps the value from its own `didChange`, so a
+              // failed read that falls back would leave the selector claiming
+              // the range the panel just declined to send. The version makes
+              // it rebuild from the panel's own state on every attempt.
+              key: ValueKey(rangeVersion),
               initialValue: range,
               isDense: true,
               style: textTheme.bodySmall?.copyWith(
@@ -817,15 +1034,21 @@ final class _AiContextCard extends StatelessWidget {
                   .map(
                     (value) => DropdownMenuItem(
                       value: value,
+                      // Ranges that read the book are off when there is no
+                      // file behind the panel; a range that cannot do what it
+                      // says is worse than one that is disabled.
+                      enabled: canLoadSource || !value.needsBookText,
                       child: Text(value.label),
                     ),
                   )
                   .toList(growable: false),
-              onChanged: (value) {
-                if (value != null) {
-                  onRangeChanged(value);
-                }
-              },
+              onChanged: loadingSource
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        onRangeChanged(value);
+                      }
+                    },
             ),
             SizedBox(height: compact ? AppSpacing.x1 : AppSpacing.x2),
             Wrap(
@@ -837,6 +1060,12 @@ final class _AiContextCard extends StatelessWidget {
                   color: colorScheme.onSurfaceVariant,
                   subtle: true,
                 ),
+                if (sourceTitle != null && sourceTitle!.trim().isNotEmpty)
+                  _MetaChip(
+                    label: '来源：$sourceTitle',
+                    color: colorScheme.onSurfaceVariant,
+                    subtle: true,
+                  ),
                 if (locationLabel != null && locationLabel!.trim().isNotEmpty)
                   _MetaChip(
                     label: '回跳：$locationLabel',

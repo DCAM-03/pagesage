@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
+import 'package:pagesage/features/ai/application/ai_context_range.dart';
 import 'package:pagesage/features/ai/application/context_builder.dart';
 
 void main() {
@@ -42,4 +43,95 @@ void main() {
       expect(builder.locationLabel(ReadingLocator.pdf(page: 12)), '第 12 页');
     },
   );
+
+  group('chapter ranges', () {
+    test('send the chapter text rather than the selection', () {
+      final context = const ContextBuilder().build(
+        selectedText: '目标句子',
+        range: AiContextRange.currentChapter,
+        availableText: '开头段落\n\n目标句子在这里\n\n结尾段落',
+      );
+
+      expect(context.text, contains('开头段落'));
+      expect(context.text, contains('结尾段落'));
+      expect(context.description, contains('当前章节'));
+    });
+
+    test('fall back to the selection when no chapter text was loaded', () {
+      final context = const ContextBuilder().build(
+        selectedText: '目标句子',
+        range: AiContextRange.currentChapter,
+      );
+
+      expect(context.text, '目标句子');
+    });
+
+    test('cut a long chapter to the request ceiling instead of failing', () {
+      final paragraph = '这是一个很长的段落，用来把章节撑过预算。\n\n';
+      final chapter = List.filled(900, paragraph).join();
+      expect(chapter.length, greaterThan(ContextBuilder.maxSourceChars));
+
+      final context = const ContextBuilder().build(
+        selectedText: '目标句子',
+        range: AiContextRange.currentChapter,
+        availableText: chapter,
+      );
+
+      expect(
+        context.text.length,
+        lessThanOrEqualTo(ContextBuilder.maxSourceChars),
+      );
+      expect(context.text, isNotEmpty);
+    });
+
+    test('centre the window on the selection when the chapter is cut', () {
+      final filler = List.filled(600, '填充文字' * 10).join('\n\n');
+      final marker = '只在中间出现的定位句';
+      final chapter = '$filler\n\n$marker\n\n$filler';
+      expect(chapter.length, greaterThan(ContextBuilder.maxSourceChars));
+
+      final context = const ContextBuilder().build(
+        selectedText: marker,
+        range: AiContextRange.currentChapter,
+        availableText: chapter,
+      );
+
+      expect(context.text, contains(marker));
+      expect(
+        context.text.length,
+        lessThanOrEqualTo(ContextBuilder.maxSourceChars),
+      );
+    });
+
+    test('a chapter with no blank lines is still cut to the ceiling', () {
+      // One endless paragraph: the surrounding-paragraph range would return
+      // the whole thing, and `_ask` would then refuse to send it.
+      final chapter = '没有空行的长文' * 2000;
+      expect(chapter.length, greaterThan(ContextBuilder.maxSourceChars));
+
+      final context = const ContextBuilder().build(
+        selectedText: '没有空行的长文',
+        range: AiContextRange.surroundingParagraphs,
+        availableText: chapter,
+      );
+
+      expect(
+        context.text.length,
+        lessThanOrEqualTo(ContextBuilder.maxSourceChars),
+      );
+      expect(context.text, isNotEmpty);
+    });
+
+    test('a short chapter passes through unchanged', () {
+      const chapter = '短章节正文';
+
+      final context = const ContextBuilder().build(
+        selectedText: '选中的字',
+        range: AiContextRange.currentChapter,
+        availableText: chapter,
+      );
+
+      expect(context.text, chapter);
+    });
+  });
 }

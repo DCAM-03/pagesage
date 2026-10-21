@@ -22,6 +22,7 @@ import 'package:pagesage/domain/books/tag.dart';
 import 'package:pagesage/domain/ai/ai_models.dart';
 import 'package:pagesage/domain/notes/note.dart';
 import 'package:pagesage/domain/search/search_models.dart';
+import 'package:pagesage/features/ai/application/ai_context_range.dart';
 import 'package:pagesage/features/reader/presentation/reader_page.dart';
 import 'package:pagesage/features/library/presentation/library_page.dart';
 import 'package:pagesage/features/search/presentation/search_page.dart';
@@ -1110,6 +1111,23 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('上下文范围'), findsOneWidget);
     expect(find.text('发送'), findsOneWidget);
+
+    // The reader hands the panel its book file, so the ranges that read a
+    // page or chapter are available. Before the wiring they were offered but
+    // silently sent the selection instead.
+    await tester.tap(find.byType(DropdownButtonFormField<AiContextRange>));
+    await tester.pumpAndSettle();
+    final ranges = tester
+        .widgetList<DropdownMenuItem<AiContextRange>>(
+          find.byType(DropdownMenuItem<AiContextRange>),
+        )
+        .toList(growable: false);
+    expect(ranges, isNotEmpty);
+    expect(
+      ranges.every((item) => item.enabled),
+      isTrue,
+      reason: 'a book with a library path can supply every range',
+    );
   });
 
   testWidgets('desktop reader keyboard shortcuts open panels and actions', (

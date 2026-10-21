@@ -804,6 +804,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                               width: contextWidth,
                               child: _DesktopContextPane(
                                 bookId: widget.bookId,
+                                bookPath: book.libraryFilePath,
+                                isEpub: book.format == BookFormat.epub,
                                 activeTab: _desktopContextTab,
                                 searchQuery: _rendererSearchQuery,
                                 currentLocator:
@@ -3126,6 +3128,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     final location = _currentLocation;
     final progress = ref.read(readerProgressProvider(widget.bookId)).value;
     final selectedText = _selectedText;
+    final book = ref.read(readerBookProvider(widget.bookId)).value;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -3133,6 +3136,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       builder: (context) => _ReaderBottomSheetFrame(
         child: AiPanel(
           bookId: widget.bookId,
+          bookPath: book?.libraryFilePath,
+          isEpub: book?.format == BookFormat.epub,
           locator:
               locatorOverride ??
               selectedText?.locator ??
@@ -4827,10 +4832,17 @@ final class _DesktopContextPane extends StatelessWidget {
     required this.onTabChanged,
     required this.onAction,
     required this.onAskAi,
+    this.bookPath,
+    this.isEpub = true,
     this.onNoteSaved,
   });
 
   final String bookId;
+
+  /// The book on disk, so the AI panel can read a page or chapter.
+  final String? bookPath;
+
+  final bool isEpub;
   final _ReaderContextTab activeTab;
   final String? searchQuery;
   final ReadingLocator? currentLocator;
@@ -4969,6 +4981,8 @@ final class _DesktopContextPane extends StatelessWidget {
       ),
       _ReaderContextTab.ai => AiPanel(
         bookId: bookId,
+        bookPath: bookPath,
+        isEpub: isEpub,
         locator: selectedLocator ?? currentLocator,
         initialContext: selectedText ?? currentLocator?.excerpt,
         onJumpTo: onPreviewResult,

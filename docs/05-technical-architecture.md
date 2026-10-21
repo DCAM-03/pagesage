@@ -525,7 +525,20 @@ Provider 实现：
 - page number。
 - book metadata。
 
-### 13.3 安全
+**已修复（2026-10-21）**：`availableText` 断链已接通。`ReaderPage` 把 `bookPath` / `isEpub` 传给 `AiPanel`，面板经 `AiContextSource` 从磁盘读一页 PDF（`PdfTextExtractor.reflowPage`，走 isolate）或一章 EPUB（`EpubDocumentLoader`），再交给 `ContextBuilder.build(availableText: …)`。超长章节由 `_boundedChapter` 以选区为中心截到 `maxSourceChars`，不再报错；读不到书文件或本页无文字时明确提示并退回「仅选中文本」。方案与后续步骤见 `docs/12-ai-retrieval-strategy.md` §7.1、§9。
+
+### 13.3 全书 / 文件夹检索
+
+不做向量索引，采用「结构感知的词法检索」：
+
+- 复用 `SearchChunks`（1200 字分块，带 locator）与 FTS5 bm25；
+- 复用 `SearchDao.search()` 已有的 `bookId` / `categoryId` / `tagIds` 过滤；
+- 用 EPUB `EpubTocItem` 树与 PDF `PdfOutline` 做结构重排与邻近扩展；
+- 检索结果必须回显为可检查、可增删的引用清单，满足「上下文范围显式」约束。
+
+否决 DCI 与向量 RAG 的实测依据见 `docs/12-ai-retrieval-strategy.md`。
+
+### 13.4 安全
 
 - API Key 存 secure storage。
 - 普通日志不记录密钥。
