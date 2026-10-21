@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The paper field of the app icon, so the adaptive foreground can be the
+         planes alone on any device shape. -->
+    <color name="ic_launcher_background">#F2EFE7</color>
+</resources>

@@ -31,8 +31,14 @@ PageSage 的图片资源用于增强空状态、品牌识别和发布物料，�
 assets/
   images/
     brand/
-      app-icon-source.png
-      app-logo-horizontal.png
+      app-icon-source.png        # 1024，浅色版，带圆角底
+      app-icon-source-dark.png   # 1024，深色版
+      app-icon-source.svg        # 矢量源，浅色版
+      app-icon-source-dark.svg
+      app-logo-mark.png          # 512，带底的品牌图
+      app-logo-mark-dark.png
+      app-mark-light.png         # 512，透明底，供应用内标题栏使用
+      app-mark-dark.png
     empty-states/
       empty-library.png
       empty-search.png
@@ -52,45 +58,78 @@ assets/
       screenshot-ai.png
 ```
 
+平台图标不放在 `assets/` 下：
+
+- `linux/icons/dev.pagesage.pagesage-*.png`：hicolor 各尺寸，由
+  `tool/install_desktop_entry.sh` 安装到 `~/.local/share/icons/hicolor/`。
+- `android/app/src/main/res/mipmap-*/ic_launcher.png` 与
+  `mipmap-anydpi-v26/ic_launcher.xml`（adaptive icon）。
+- `windows/runner/resources/app_icon.ico`。
+- `web/icons/`、`web/favicon.png`。
+
+### 2.1 Linux 桌面集成
+
+Linux 不在发布目标里（`docs/07-roadmap.md` 仍是 Android + Windows），但本机
+开发与手动验证都在 Linux 上跑，所以任务栏必须正确：
+
+- **Wayland 下没有 `_NET_WM_ICON` 可读**，二进制路径也不是图标名。runner 不显式
+  设置图标名时，合成器只能退回图标主题里的通用兜底——也就是本机看到的橙色 W
+  （Breeze 的 `wayland.svg`）。
+- `linux/runner/my_application.cc` 调 `gtk_window_set_icon_name()` 与
+  `gtk_window_set_default_icon_name()`，二者都指向 `dev.pagesage.pagesage`。
+- 还要有 `.desktop` 文件与 hicolor 图标，否则名字解析不到东西：
+  `linux/dev.pagesage.pagesage.desktop` + `tool/install_desktop_entry.sh`。
+- 这套只在开发机上安装，不构成新的发布平台承诺。
+
 ## 3. App 图标
 
 用途：
 
-- Android launcher。
+- Android launcher（含 adaptive icon）。
 - Windows app icon。
-- 任务栏。
+- Linux 桌面条目与任务栏。
+- Web favicon 与 PWA 图标。
 - 安装包。
 
-视觉方向：
+视觉方向（v3，2026-10-21 重做）：
 
-- 打开的书页。
-- 页边批注。
-- 轻微智能感。
-- 简洁，缩小后仍可读。
+- **抽象的两块页片**，在中缝相遇，像从上方看到的一本打开的书。
+  不画书脊、书页纹理、装饰高光。
+- **墨黑与纸白互为底与形**，浅色与深色各一套，切换主题时图标的对比关系不变。
+- 一个高饱和点睛色：浅色用珊瑚红 `#E8502C`，深色用青柠绿 `#C9F24F`。
+- 纯矢量，无渐变、无投影、无 3D。16 px 仍可辨。
 
-尺寸：
+配色：
 
-- 源图：1024 x 1024。
-- 后续生成平台尺寸。
+| 位置 | 浅色版 | 深色版 |
+| --- | --- | --- |
+| 底 | 纸白 `#F2EFE7` | 墨黑 `#121416` |
+| 左页 | 墨黑 `#14171A` | 纸白 `#F6F3EA` |
+| 右页（点睛） | 珊瑚红 `#E8502C` | 青柠绿 `#C9F24F` |
 
-Prompt：
+生成方式：**不要手工导出位图。**
 
-```text
-Use case: logo-brand
-Asset type: app icon source
-Primary request: PageSage app icon for a local-first intelligent ebook reader
-Subject: an open book page with a subtle page-margin annotation mark and a small intelligent sparkle
-Style/medium: polished modern app icon, vector-friendly 3D illustration
-Composition/framing: centered symbol, simple silhouette, readable at small sizes
-Color palette: warm off-white paper, deep graphite, restrained teal accent
-Constraints: no text, no watermark, no brand logos, no busy background
+```bash
+python3 tool/generate_app_icons.py
+./tool/install_desktop_entry.sh   # Linux：装 .desktop 与 hicolor 图标
 ```
+
+脚本 `tool/generate_app_icons.py` 是唯一几何来源，一次产出品牌源图、Linux
+hicolor 全套、Android 五档 launcher + adaptive 前景、Windows `.ico`、
+Web 图标。4 倍超采样后 Lanczos 缩放，斜边在 16 px 仍然干净。
 
 验收：
 
-- 64 x 64 下仍能看出是阅读器。
+- 16 x 16 下仍能看出是展开的两页。
 - 不包含文字。
-- 不使用复杂渐变背景。
+- 不用渐变，不用投影。
+- 浅色与深色两套在同一桌面背景下都能立即分辨。
+
+### 3.1 旧图标
+
+v2（蓝色底 + 米黄写实翻页书）已归档到
+`docs/generated/brand-archive-v2/`。不再使用：写实插画风格与低饱和暗绿
+在任务栏里看起来像十年前的图标。
 
 ## 4. 空书库插画
 

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=PageSage
+GenericName=Reader
+Comment=Local-first EPUB and PDF reader
+Exec=pagesage %U
+Icon=dev.pagesage.pagesage
+Terminal=false
+Categories=Office;Viewer;
+Keywords=epub;pdf;reader;book;
+StartupNotify=true
+StartupWMClass=dev.pagesage.pagesage
+MimeType=application/epub+zip;application/pdf;

@@ -270,10 +270,15 @@ final class _BrandHeader extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadius.lg),
             child: Image.asset(
-              'assets/images/brand/app-logo-mark.png',
+              // Two marks, one per brightness: the planes are ink on paper in
+              // the light theme and paper on ink in the dark one, so a single
+              // file would vanish into one of the two backgrounds.
+              Theme.of(context).brightness == Brightness.dark
+                  ? 'assets/images/brand/app-mark-dark.png'
+                  : 'assets/images/brand/app-mark-light.png',
               width: 36,
               height: 36,
-              fit: BoxFit.cover,
+              fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) => DecoratedBox(
                 decoration: BoxDecoration(
                   color: colorScheme.accentSubtle,

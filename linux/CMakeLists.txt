@@ -121,6 +121,15 @@ install(CODE "
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
+# Desktop entry and icons, so the shell can show PageSage rather than the
+# theme's generic glyph. The bundle is a plain directory, not an installed
+# package: install.sh copies these into the per-user locations that the icon
+# theme and the .desktop lookup actually read.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/dev.pagesage.pagesage.desktop"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/desktop" COMPONENT Runtime)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../linux/icons/"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/icons" COMPONENT Runtime)
+
 # Install the AOT library on non-Debug builds only.
 if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"

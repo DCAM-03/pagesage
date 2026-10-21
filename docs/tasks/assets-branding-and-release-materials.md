@@ -30,8 +30,8 @@
 - [ ] 建立 `assets/images/empty-states/`。
 - [ ] 建立 `assets/images/covers/`。
 - [ ] 建立 `assets/images/store/`。
-- [ ] 生成或设计 `app-icon-source.png`，1024 x 1024。
-- [ ] 生成 Android 和 Windows 所需图标尺寸。
+- [x] 生成或设计 `app-icon-source.png`，1024 x 1024（v3，见 `docs/assets-plan.md` §3）。
+- [x] 生成 Android 和 Windows 所需图标尺寸（`tool/generate_app_icons.py`）。
 - [ ] 生成空书库插画，适配浅色和深色 UI。
 - [ ] 生成空搜索和空笔记插画。
 - [ ] 生成 AI 面板空状态插画。

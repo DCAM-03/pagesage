@@ -42,14 +42,25 @@ static void my_application_activate(GApplication* application) {
     }
   }
 #endif
+  // The window must name its icon explicitly under Wayland. There is no
+  // _NET_WM_ICON to read, and the binary path is not an icon name, so without
+  // this the compositor falls back to the theme's generic "wayland" glyph —
+  // an orange W that looks like nothing to do with this app.
+  //
+  // The name has to match the .desktop file and the file under hicolor, both
+  // installed by the Debian packaging step; the plain name and the reverse-DNS
+  // id are both set because GTK prefers one and KWin the other.
+  gtk_window_set_icon_name(window, "dev.pagesage.pagesage");
+  gtk_window_set_default_icon_name("dev.pagesage.pagesage");
+
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "pagesage");
+    gtk_header_bar_set_title(header_bar, "PageSage");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "pagesage");
+    gtk_window_set_title(window, "PageSage");
   }
 
   gtk_window_set_default_size(window, 1280, 720);
