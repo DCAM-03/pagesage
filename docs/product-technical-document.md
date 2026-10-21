@@ -99,14 +99,17 @@ Web 可以作为后续只读或轻量版，但不建议作为首发重点。原�
 - 本地文件选择：file_picker
 - 路径管理：path_provider
 - 权限管理：permission_handler
-- WebView：
-  - Android：webview_flutter 或 flutter_inappwebview
-  - Windows：WebView2 方案，优先验证 webview_windows 或 Flutter WebView 插件兼容性
+- WebView：（未采用——两个阅读器均为 Flutter-native，见 §5.2 说明）
 - 本地安全存储：flutter_secure_storage
 - 日志：logger 或 talker
 - 崩溃记录：本地日志优先，后续可选 Sentry
 
 ### 5.2 阅读渲染
+
+> **已过时（2026-10-21）**：现行实现是 EPUB 与 PDF 都走 Flutter-native 渲染。
+> EPUB 使用 Flutter 原生 renderer，PDF 使用 `pdf_graphics` + Flutter Canvas；
+> 文中 epub.js / PDF.js / WebView 方案未采用。见 `docs/05-technical-architecture.md`
+> §11.4 与 `docs/10-pdf-renderer-migration.md`。
 
 - EPUB：epub.js
 - PDF：PDF.js

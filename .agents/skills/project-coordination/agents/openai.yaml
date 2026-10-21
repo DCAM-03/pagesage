@@ -1,0 +1,6 @@
+interface:
+  display_name: "Project Coordination"
+  short_description: "Coordinate delivery and independent contract closure"
+  default_prompt: "Use $project-coordination to plan, dispatch, or independently accept this project work with a Contract Closure Matrix."
+policy:
+  allow_implicit_invocation: true

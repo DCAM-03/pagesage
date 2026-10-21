@@ -2,8 +2,8 @@
 
 版本：0.1
 日期：2026-10-01
-状态：技术决策已验证，迁移待实施
-适用范围：`lib/renderers/pdf/`、Linux 平台支持
+状态：**已实施**（S0–S7 完成，2026-10-21；WebView 渲染器与 PDF.js 资源已删除）
+适用范围：`lib/renderers/pdf/`
 
 ## 1. 决策摘要
 
@@ -181,26 +181,35 @@ CJK 表意文字判为分隔符，「嵌」字两侧都是边界 → 区间为�
 
 ## 7. 影响范围与未验证项
 
+> **2026-10-21 收尾说明**：S0–S7 已按下列清单完成。实际落地与当初预估的差异是：`pdf_renderer_view.dart` / `pdf_renderer_controller.dart` / `pdf_renderer_server.dart` **全部删除**而非改造（能力并入 `pdf_canvas_view.dart` 与 `pdf_canvas_renderer.dart`），`lib/renderers/common/renderer_command.dart` 与 `web_renderer_helpers.dart` 也一并删除。施工记录见 `11-pdf-canvas-implementation-plan.md` §12–§24。
+
 ### 7.1 受影响文件
 
 ```text
-lib/renderers/pdf/pdf_renderer_view.dart        主要改造对象
-lib/renderers/pdf/pdf_renderer_controller.dart  命令下发改为直调解释器
-lib/renderers/pdf/pdf_renderer_server.dart      删除
-assets/renderer/pdf/*                            删除
-lib/core/search/pdf_text_extractor.dart          适配 pdf_graphics 5.x API
-lib/features/reader/presentation/reader_page.dart 选区 overlay 依赖 WebView DOM，需重写
+lib/renderers/pdf/pdf_canvas_view.dart           WebView 视图的替代者（滚动/选区/搜索/标注/链接）
+lib/renderers/pdf/pdf_canvas_renderer.dart      页面解释、缓存、导出位图
+lib/renderers/pdf/pdf_page_tint.dart            主题纸色与夜间滤镜
+lib/renderers/pdf/pdf_annotation_lines.dart     F-02 跨行裁剪（自 bridge.js 移植）
+lib/renderers/pdf/pdf_outline.dart              大纲
+lib/renderers/pdf/pdf_links.dart                GoTo / URI 链接
+lib/renderers/pdf/pdf_renderer_view.dart        已删除
+lib/renderers/pdf/pdf_renderer_controller.dart  已删除
+lib/renderers/pdf/pdf_renderer_server.dart      已删除
+lib/renderers/common/renderer_command.dart      已删除（唯一实现者是 WebView 控制器）
+lib/renderers/common/web_renderer_helpers.dart  已删除
+assets/renderer/pdf/*                           已删除
+lib/features/reader/presentation/reader_page.dart PDF 分支直接构造 PdfCanvasView
 ```
 
-`RendererEvent` 契约（`lib/renderers/common/renderer_event.dart`）**无需改动**——现有事件设计与 `text` + `quads` 输出结构对应。
+`RendererEvent` 契约（`lib/renderers/common/renderer_event.dart`）沿用原有设计，只做了增量扩展（S4 增加 `RendererExternalLinkRequested`，`RendererOutlineItem` 增加 `offsetFraction`）。
 
 ### 7.2 未验证项（迁移期间需覆盖）
 
-- 大文档（数百页）滚动性能
-- 注释 overlay 在 Canvas 上的叠加与命中测试
-- 扫描版 PDF（现有 OCR 链路与新渲染器的衔接）
-- Windows / Android 平台回归（Linux 可用不代表另两端无回归）
-- 表格、公式、复杂版式的还原度
+- 大文档（数百页）滚动性能 — Linux 已有基线（§23.4），**真机帧时间仍缺**
+- 注释 overlay 在 Canvas 上的叠加与命中测试 — 已实现并有 widget 测试；旋转页投影待 S8 手工确认
+- 扫描版 PDF（现有 OCR 链路与新渲染器的衔接）— 导出接口已就绪；Linux 无真实 OCR 引擎，真实识别待 Android/Windows
+- Windows / Android 平台回归 — **待 S8 手工矩阵**（Linux 可用不代表另两端无回归）
+- 表格、公式、复杂版式的还原度 — 待人工目视
 
 ## 8. 复现方式
 

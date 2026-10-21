@@ -1008,3 +1008,75 @@ abstract interface class PdfPageImageSource {
 - **峰值内存**：同上，需要 DevTools 或 `flutter run --profile` 观测。
 - **夜间模式标注不被反色的验收**：已由「滤镜只包图像」的结构保证，并写在 §23.2；但缺少一条视觉回归测试（widget test 无法断言最终像素颜色而不引入 golden 文件）。计划在 S8 手工矩阵里目视确认。
 - 旋转页标注投影验收仍未做（`/Rotate 90` 页上的标注渲染），与 S5 遗留项一同排期。
+
+## 24. S7 施工记录：平台切换与删除 WebView（2026-10-21）
+
+### 24.1 切换
+
+`reader_page.dart` 的 `_DefaultRendererHost` 原按平台二选一：Linux 走 `PdfCanvasView`，Windows/Android 走 WebView。现在 PDF 分支无条件构造 `PdfCanvasView`。
+
+理由写在代码注释里：WebView 之所以曾经是 Windows/Android 的默认，是因为**只有它有选区、搜索与标注叠加**；canvas 渲染器在 S3–S6 补齐这三项后，保留两条路径只意味着两套 bug。
+
+### 24.2 删除清单
+
+| 文件 | 说明 |
+| --- | --- |
+| `lib/renderers/pdf/pdf_renderer_view.dart` | WebView 视图 |
+| `lib/renderers/pdf/pdf_renderer_controller.dart` | 命令下发（`PdfPageExport` 已在 S5 移除） |
+| `lib/renderers/pdf/pdf_renderer_server.dart` | 本地 loopback HTTP 服务 |
+| `lib/renderers/common/renderer_command.dart` | 唯一实现者是上面的控制器 |
+| `lib/renderers/common/web_renderer_helpers.dart` | 仅 PDF 链路使用 |
+| `assets/renderer/pdf/`（5 个文件，约 1.5 MB） | `viewer.html` / `viewer.css` / `bridge.js` / `pdf.min.js` / `pdf.worker.min.js` |
+| `test/renderers/pdf/pdf_renderer_server_test.dart` | 随实现删除 |
+| `test/renderers/common/web_renderer_helpers_test.dart` | 随实现删除 |
+| `flutter_inappwebview`（`pubspec.yaml`） | 依赖移除 |
+
+`RendererEvent` 契约保留：EPUB 渲染器仍在用，S4 还给它加了 `RendererExternalLinkRequested`。
+
+### 24.3 平台注册文件
+
+`flutter pub get` 后复查了四端生成文件，`flutter_inappwebview` 无残留：
+
+- `linux/flutter/generated_plugin_registrant.cc` — 只剩 `url_launcher_linux` 等
+- `windows/flutter/generated_plugin_registrant.cc` — 只剩 `url_launcher_windows`
+- `android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java` — 只剩 `file_picker` / `url_launcher`
+- `macos` / `web` 无该引用
+
+唯一残留是 `android/build/reports/problems/problems-report.html` 里的旧构建报告文本，属构建产物，不入库。
+
+### 24.4 发布门禁随删除收紧
+
+`test/tool/release_readiness_test.dart` 原把 PDF.js 五个文件写成**发布必须项**，删除后必然红。改动方向是把门禁从「必须存在」翻转为「必须不存在」，而不是简单删掉断言：
+
+- `_requiredPubspecAssetDirs` 去掉 `assets/renderer/pdf/`；新增 `assets/renderer/` **目录内不得有任何文件**的断言，并断言 `pubspec.yaml` 不含该前缀。
+- 构建产物检查改为只校验图片资源，测试名从「include packaged renderer and image assets」改为「include packaged image assets」。
+- **一处刻意留白**：没有给已存在的 APK/AAB 加「包内不得含 renderer 资产」的反向断言。这两类检查本就设计成「产物不存在则 skip」，旧产物在重建前必然含旧资产，加反向断言只会让门禁在没有新构建时误报。源码与 `pubspec` 的反向断言已经覆盖了真实风险（有人把目录和资源加回来）。
+
+### 24.5 文档与许可同步
+
+| 文件 | 改动 |
+| --- | --- |
+| `10-pdf-renderer-migration.md` | 状态改「已实施」；§7.1 改为实际落地清单（三个文件是**删除**而非改造）；§7.2 未验证项逐条标注现状 |
+| `05-technical-architecture.md` | 技术选型表 PDF 行、§11.4 全节重写；§17 打包规则、§18 Spike 标注为历史 |
+| `02`/`03` | 无需改动（未写死渲染器实现） |
+| `product-technical-document.md` | §5.1 WebView 行、§5.2 阅读渲染加过时说明 |
+| `tasks/pdf-reader.md` | 约束、功能范围、实现任务、文件清单、验证记录 |
+| `tasks/in-book-search.md`、`tasks/annotations-and-highlights.md`、`tasks/reader-settings-and-appearance.md` | 受影响文件清单里的 `bridge.js` / `viewer.css` 换成 Canvas 对应文件 |
+| `tasks/packaging-release-and-operations.md` | 打包对象从 renderer 静态资源改为图片与字体；去掉 WebView2 运行时依赖说明 |
+| `v1-experience-freeze.md` | F-01 改为「由结构保证」；F-02 注明已移植并有 17 项测试 |
+| `implementation-status.md` | 新增迁移小结与 S8 待办 |
+| `docs/licenses.md` | 删 `flutter_inappwebview`，补 `dart_pdf_editor` 与 `url_launcher` |
+| `docs/generated/third-party-licenses.md` | 重新生成（143 个包，`flutter_inappwebview` 全部消失） |
+| `settings_page.dart` 许可文案 | 同步删除 `flutter_inappwebview`，补 `dart_pdf_editor` |
+
+### 24.6 验证结果
+
+- `flutter analyze`：0 error、0 warning；仅 3 条 info 全在 `poc_pdf_canvas/`。
+- `flutter test`：**327 项通过、2 项跳过、0 失败**（跳过项是 Windows 构建产物与 Android APK/AAB 不存在）。
+- `flutter_inappwebview` 不再出现在 `pubspec.lock`。
+
+### 24.7 未完成（不在本轮范围）
+
+- **`poc_pdf_canvas/` 的样本迁移**（计划 §S7 步骤 5）：`test/fixtures/pdf/` 目前仍为空。样本涉及权威来源甄别与 `make_samples.dart` 的字体缺失跳过逻辑，单独一轮处理；当前测试全部依赖运行时生成的临时 PDF，不受影响。
+- **Windows / Android 手工回归**：本轮只删代码，未在另两端跑真机。删代码本身是安全的（Linux 自动化全绿），但「另两端无回归」这个结论必须由 S8 手工矩阵给出，不能由 Linux 推断。
+- 计划 §S8 的全部自动化与手工收口项。

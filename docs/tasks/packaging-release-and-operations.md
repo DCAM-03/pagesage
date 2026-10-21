@@ -8,7 +8,7 @@
 
 - 来源：`docs/01-product-requirements.md`、`docs/05-technical-architecture.md`、`docs/07-roadmap.md`。
 - 不做：自动更新系统、云端崩溃上报默认开启、应用商店账号操作。
-- 约束：发布包包含 renderer 静态资源；不把测试书籍打入生产包。
+- 约束：发布包包含图片与字体资源；不把测试书籍打入生产包。（WebView renderer 静态资源已随 S7 删除，不再需要打包。）
 
 ## 功能范围
 
@@ -17,7 +17,7 @@
 - 版本号和构建号。
 - Android 签名配置。
 - Windows 图标和发布包。
-- renderer 资源打包校验。
+- 图片与字体资源打包校验；确认没有残留 renderer 静态资源。
 - 开源许可清单。
 - 隐私说明。
 - 更新日志。
@@ -30,7 +30,7 @@
 - [ ] 配置 Android release signing，密钥不入库。
 - [ ] 配置 Android `flutter build apk` 和 `flutter build appbundle`。
 - [ ] 配置 Windows `flutter build windows`。
-- [ ] 确认 EPUB/PDF renderer assets 被 release 包包含。
+- [x] 确认 Epub/PDF 渲染所需的资源已随包处理（PDF 渲染器已无静态资源）。
 - [ ] 确认图片资源和图标被 release 包包含。
 - [ ] 生成开源许可清单。
 - [x] 编写隐私说明，明确本地优先、AI 主动触发、API key 安全存储。
@@ -47,7 +47,6 @@
 - `android/app/build.gradle` 或对应 Gradle 配置
 - `android/`
 - `windows/`
-- `assets/renderer/`
 - `assets/images/`
 - `docs/release-checklist.md`
 - `docs/privacy.md`
@@ -66,14 +65,14 @@
 - 关于页显示版本号、构建号、开源许可、隐私说明入口。
 - 本地诊断导出需要用户主动触发。
 - 生产环境危险调试入口隐藏。
-- Windows 发布包应能在干净机器上启动并找到 WebView2 依赖说明。
+- Windows 发布包应能在干净机器上启动（不再依赖 WebView2 运行时）。
 
 ## 验收标准
 
 - [ ] Android release APK 可构建。
 - [ ] Android AAB 可构建。
 - [ ] Windows release build 可构建。
-- [ ] 发布包中包含 renderer 静态资源。
+- [ ] 发布包中包含图片与字体资源。
 - [ ] 关于页显示版本和许可入口。
 - [ ] 隐私说明存在并与产品行为一致。
 - [ ] 测试书籍不在生产包中。
@@ -95,5 +94,4 @@
 
 - 依赖：TASK-18 隐私安全，TASK-22 资源，TASK-23 质量门禁。
 - 风险：签名密钥和发布凭据不能入库。
-- 风险：renderer 资源遗漏会导致 release 包能启动但无法阅读。
-- 风险：Windows WebView2 运行时缺失时需要清晰说明。
+- 风险：图片/字体资源遗漏会导致界面缺图或回退字体。

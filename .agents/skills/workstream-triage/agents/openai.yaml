@@ -1,0 +1,6 @@
+interface:
+  display_name: "Workstream Triage"
+  short_description: "Anchor active work and prevent scope drift"
+  default_prompt: "Use $workstream-triage to identify the active workstream and reconcile what remains."
+policy:
+  allow_implicit_invocation: true

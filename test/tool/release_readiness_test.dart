@@ -5,20 +5,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:archive/archive_io.dart';
 
 const _requiredPubspecAssetDirs = [
-  'assets/renderer/pdf/',
   'assets/images/brand/',
   'assets/images/empty-states/',
   'assets/images/covers/',
   'assets/images/store/',
 ];
 
-const _requiredPdfRendererAssets = [
-  'assets/renderer/pdf/viewer.html',
-  'assets/renderer/pdf/viewer.css',
-  'assets/renderer/pdf/bridge.js',
-  'assets/renderer/pdf/pdf.min.js',
-  'assets/renderer/pdf/pdf.worker.min.js',
-];
+/// Path prefix of the WebView renderer's JS/CSS, deleted in S7.
+///
+/// The release gate keeps checking for its *absence* so a stale asset directory
+/// or a pubspec entry cannot quietly come back.
+const _removedRendererAssetPrefix = 'assets/renderer/';
 
 const _requiredImageAssets = [
   'assets/images/brand/app-icon-source.svg',
@@ -76,8 +73,16 @@ void main() {
       );
     }
 
-    _expectAssetsExist(repo, _requiredPdfRendererAssets);
     _expectAssetsExist(repo, _requiredImageAssets);
+    final webRendererDir = Directory('${repo.path}/assets/renderer');
+    expect(
+      webRendererDir.existsSync()
+          ? webRendererDir.listSync(recursive: true)
+          : const <FileSystemEntity>[],
+      isEmpty,
+      reason: 'the WebView renderer assets were deleted in S7',
+    );
+    expect(pubspec, isNot(contains(_removedRendererAssetPrefix)));
 
     expect(pubspec, isNot(contains('.codex-run')));
     expect(pubspec, isNot(contains('manual-samples')));
@@ -205,7 +210,7 @@ void main() {
     expect(missingTooltips, isEmpty);
   });
 
-  test('Windows build outputs include packaged renderer and image assets', () {
+  test('Windows build outputs include packaged image assets', () {
     final repo = Directory.current;
     var checkedAnyBuild = false;
     for (final mode in ['Debug', 'Release']) {
@@ -225,10 +230,7 @@ void main() {
         continue;
       }
       checkedAnyBuild = true;
-      _expectAssetsExist(buildAssets, [
-        ..._requiredPdfRendererAssets,
-        ..._requiredImageAssets,
-      ]);
+      _expectAssetsExist(buildAssets, _requiredImageAssets);
       final notices = File(
         '${buildAssets.path}${Platform.pathSeparator}NOTICES.Z',
       );
@@ -240,7 +242,7 @@ void main() {
     }
   });
 
-  test('Android debug APK includes packaged renderer and image assets', () {
+  test('Android debug APK includes packaged image assets', () {
     final repo = Directory.current;
     final apk = File(
       [
@@ -260,7 +262,7 @@ void main() {
     _expectAndroidPackageAssets(apk);
   });
 
-  test('Android release APK includes packaged renderer and image assets', () {
+  test('Android release APK includes packaged image assets', () {
     final repo = Directory.current;
     final apk = File(
       [
@@ -280,7 +282,7 @@ void main() {
     _expectAndroidPackageAssets(apk);
   });
 
-  test('Android release AAB includes packaged renderer and image assets', () {
+  test('Android release AAB includes packaged image assets', () {
     final repo = Directory.current;
     final aab = File(
       [
@@ -329,10 +331,7 @@ void _expectAssetsExist(Directory root, Iterable<String> assets) {
 void _expectAndroidPackageAssets(File packageFile) {
   final archive = ZipDecoder().decodeBytes(packageFile.readAsBytesSync());
   final entries = {for (final file in archive.files) file.name: file};
-  for (final asset in [
-    ..._requiredPdfRendererAssets,
-    ..._requiredImageAssets,
-  ]) {
+  for (final asset in _requiredImageAssets) {
     final packagePath = 'base/assets/flutter_assets/$asset';
     final entry =
         entries['assets/flutter_assets/$asset'] ?? entries[packagePath];

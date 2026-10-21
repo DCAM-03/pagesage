@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,7 +29,6 @@ import '../../../renderers/pdf/pdf_canvas_view.dart';
 import '../../../renderers/pdf/pdf_zoom.dart';
 import '../../../renderers/epub/epub_jump.dart';
 import '../../../renderers/epub/epub_renderer_view.dart';
-import '../../../renderers/pdf/pdf_renderer_view.dart';
 import '../../ai/presentation/ai_panel.dart';
 import '../../import/application/import_intent.dart';
 import '../../ocr/application/ocr_page_controller.dart';
@@ -6915,47 +6913,28 @@ final class _DefaultRendererHost extends StatelessWidget {
         jumpToken: config.jumpToken,
         onEvent: config.onEvent,
       ),
-      // Linux has no flutter_inappwebview implementation (its separate Linux
-      // package needs WPE WebKit, which desktop distros do not ship), so it
-      // renders through pdf_graphics instead. Other platforms keep the WebView
-      // renderer until selection, search and annotation overlays are ported.
+      // One renderer for every platform now. The WebView backend rendered
+      // PDFs on Windows and Android because it was the only one with
+      // selection, search and annotation overlays; the canvas renderer has
+      // all three, so keeping two paths would just mean two sets of bugs.
       // See docs/10-pdf-renderer-migration.md.
-      BookFormat.pdf =>
-        Platform.isLinux
-            ? PdfCanvasView(
-                key: ValueKey('pdf-canvas-${config.book.id}-${config.version}'),
-                book: config.book,
-                settings: config.settings,
-                initialProgress: config.progress,
-                annotations: config.annotations,
-                ocrOverlayPage: config.ocrOverlayPage,
-                ocrOverlayBlocks: config.ocrOverlayBlocks,
-                ocrOverlayToken: config.ocrOverlayToken,
-                searchQuery: config.searchQuery,
-                focusLocator: config.focusLocator,
-                jumpToken: config.jumpToken,
-                clearSearchHighlightsVersion:
-                    config.clearSearchHighlightsVersion,
-                clearSelectionVersion: config.clearSelectionVersion,
-                onZoomChanged: config.onZoomChanged,
-                onEvent: config.onEvent,
-              )
-            : PdfRendererView(
-                key: ValueKey('pdf-${config.book.id}-${config.version}'),
-                book: config.book,
-                settings: config.settings,
-                initialProgress: config.progress,
-                annotations: config.annotations,
-                searchQuery: config.searchQuery,
-                focusLocator: config.focusLocator,
-                clearSearchHighlightsVersion:
-                    config.clearSearchHighlightsVersion,
-                jumpToken: config.jumpToken,
-                ocrOverlayToken: config.ocrOverlayToken,
-                ocrOverlayPage: config.ocrOverlayPage,
-                ocrOverlayBlocks: config.ocrOverlayBlocks,
-                onEvent: config.onEvent,
-              ),
+      BookFormat.pdf => PdfCanvasView(
+        key: ValueKey('pdf-canvas-${config.book.id}-${config.version}'),
+        book: config.book,
+        settings: config.settings,
+        initialProgress: config.progress,
+        annotations: config.annotations,
+        ocrOverlayPage: config.ocrOverlayPage,
+        ocrOverlayBlocks: config.ocrOverlayBlocks,
+        ocrOverlayToken: config.ocrOverlayToken,
+        searchQuery: config.searchQuery,
+        focusLocator: config.focusLocator,
+        jumpToken: config.jumpToken,
+        clearSearchHighlightsVersion: config.clearSearchHighlightsVersion,
+        clearSelectionVersion: config.clearSelectionVersion,
+        onZoomChanged: config.onZoomChanged,
+        onEvent: config.onEvent,
+      ),
     };
   }
 }

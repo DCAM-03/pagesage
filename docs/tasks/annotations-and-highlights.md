@@ -45,7 +45,8 @@
 - `lib/features/reader/application/reader_controller.dart`
 - `lib/renderers/epub/epub_renderer_view.dart`
 - `lib/renderers/common/renderer_event.dart`
-- `assets/renderer/pdf/bridge.js`
+- `lib/renderers/pdf/pdf_canvas_view.dart`
+- `lib/renderers/pdf/pdf_annotation_lines.dart`
 - `test/features/reader/annotations_test.dart`
 
 ## 数据与接口

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Axis IAM Terraform Engineering"
+  short_description: "Engineer Axis IAM Terraform Provider changes"
+  default_prompt: "Use $iam-terraform-engineering to implement or review this Axis IAM change."
+policy:
+  allow_implicit_invocation: true

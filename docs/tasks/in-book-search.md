@@ -41,15 +41,14 @@
 - `lib/features/reader/presentation/widgets/in_book_search_panel.dart`
 - `lib/features/reader/application/reader_controller.dart`
 - `lib/features/reader/application/in_book_search_controller.dart`
-- `lib/renderers/common/renderer_command.dart`
 - `lib/renderers/common/renderer_event.dart`
 - `lib/renderers/epub/epub_renderer_view.dart`
-- `assets/renderer/pdf/bridge.js`
+- `lib/renderers/pdf/pdf_canvas_view.dart`（搜索由 `searchQuery` 属性驱动，命中以 `RendererSearchResults` 事件回抛）
 - `test/features/reader/in_book_search_test.dart`
 
 ## 数据与接口
 
-- `RendererCommand.search` payload 包含 query 和可选限制。
+- 渲染器搜索：宿主向 `PdfCanvasView` 传 `searchQuery`（上限 200 条命中），命中以 `RendererSearchResults` 事件回抛；EPUB 走 `RendererCommand.search`。
 - `RendererEvent.searchResults` payload 包含：
   - query。
   - total。

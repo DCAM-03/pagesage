@@ -1087,7 +1087,7 @@ final class _AboutPageSageCard extends StatelessWidget {
         content: const SingleChildScrollView(
           child: Text(
             '发布前应以 pubspec.lock 为准重新生成完整第三方许可清单。\n\n'
-            '主要依赖许可包括：Flutter SDK 使用 BSD-3-Clause；Riverpod、Drift、sqlite3_flutter_libs、file_picker 使用 MIT；go_router 和 flutter_secure_storage 使用 BSD-3-Clause；flutter_inappwebview、archive、pdf_document、pdf_graphics、pdf_cos 使用 Apache-2.0。\n\n'
+            '主要依赖许可包括：Flutter SDK 使用 BSD-3-Clause；Riverpod、Drift、sqlite3_flutter_libs、file_picker 使用 MIT；go_router、flutter_secure_storage 和 url_launcher 使用 BSD-3-Clause；archive、dart_pdf_editor、pdf_document、pdf_graphics、pdf_cos 使用 Apache-2.0。\n\n'
             'Windows 与 Android 包内需要包含第三方许可文本。许可或诊断文件不得包含 API key、用户书籍正文、AI 请求正文或本地数据库内容。',
           ),
         ),

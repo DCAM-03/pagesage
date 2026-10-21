@@ -46,7 +46,7 @@
 - `lib/app/theme/app_theme.dart`
 - `lib/app/theme/reader_theme.dart`
 - `lib/renderers/epub/epub_renderer_view.dart`
-- `assets/renderer/pdf/viewer.css`
+- `lib/renderers/pdf/pdf_page_tint.dart`
 - `test/domain/books/`
 - `test/features/settings/`
 

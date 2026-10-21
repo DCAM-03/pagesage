@@ -1,0 +1,6 @@
+interface:
+  display_name: "API Contract Sync"
+  short_description: "Align backend, frontend, mocks, and SDK contracts"
+  default_prompt: "Use $api-contract-sync to align an API contract across its backend source and all frontend, mock, generated-client, and SDK consumers."
+policy:
+  allow_implicit_invocation: true

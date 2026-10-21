@@ -16,10 +16,10 @@ dart run tool/generate_third_party_licenses.dart
 - Drift：MIT。
 - sqlite3_flutter_libs：MIT。
 - file_picker：MIT。
-- flutter_inappwebview：Apache-2.0。
 - flutter_secure_storage：BSD-3-Clause。
 - archive：Apache-2.0。
-- pdf_document / pdf_graphics / pdf_cos：Apache-2.0。
+- dart_pdf_editor / pdf_document / pdf_graphics / pdf_cos：Apache-2.0。
+- url_launcher：BSD-3-Clause。
 
 ## 发布要求
 

@@ -7,13 +7,12 @@
 ## 来源与边界
 
 - 来源：`docs/02-feature-spec.md`、`docs/03-interaction-spec.md`、`docs/05-technical-architecture.md`、`docs/06-data-model.md`。
-- 不做：扫描版 PDF OCR、DRM 绕过、手写批注。
-- 约束：PDF renderer 使用 PDF.js；业务数据由 Dart 保存。
+- 不做：DRM 绕过、手写批注。
+- 约束：PDF renderer 使用 `pdf_graphics` + Flutter Canvas（2026-10-21 起；原 PDF.js + WebView 已删除，见 `docs/10-pdf-renderer-migration.md`）；业务数据由 Dart 保存。
 
 ## 功能范围
 
-- PDF.js 静态资源管理。
-- 本地 PDF 打开。
+- 本地 PDF 打开（页面解释、缓存与 worker 预取）。
 - 页码、scroll offset、zoom 回传。
 - 连续滚动、单页、双页模式。
 - 适合宽度、适合页面、固定缩放比例。
@@ -26,9 +25,9 @@
 
 ## 实现任务
 
-- [x] 确认 `assets/renderer/pdf/` 资源随包发布。
-- [x] 建立 `PdfRendererController`，实现通用 renderer 接口。
-- [x] 本地文件通过安全的本地访问方式提供给 PDF.js。
+- [x] ~~确认 `assets/renderer/pdf/` 资源随包发布~~ — 资源已随 S7 删除。
+- [x] 建立渲染器控制接口，PDF 分支统一使用 `PdfCanvasView`。
+- [x] 本地文件直接由 Dart 读取解释，不再经本地 HTTP 服务暴露给 JS。
 - [x] 回传当前页、总页数、scroll offset、zoom、progress。
 - [x] 打开时按 locator 恢复页码、滚动和缩放。
 - [x] 支持连续滚动默认模式。
@@ -43,15 +42,13 @@
 
 ## 涉及模块和文件
 
-- `lib/renderers/pdf/pdf_renderer_view.dart`
-- `lib/renderers/pdf/pdf_renderer_server.dart`
-- `lib/renderers/common/renderer_command.dart`
+- `lib/renderers/pdf/pdf_canvas_view.dart`
+- `lib/renderers/pdf/pdf_canvas_renderer.dart`
+- `lib/renderers/pdf/pdf_page_tint.dart`
+- `lib/renderers/pdf/pdf_annotation_lines.dart`
+- `lib/renderers/pdf/pdf_outline.dart`
+- `lib/renderers/pdf/pdf_links.dart`
 - `lib/renderers/common/renderer_event.dart`
-- `assets/renderer/pdf/viewer.html`
-- `assets/renderer/pdf/bridge.js`
-- `assets/renderer/pdf/viewer.css`
-- `assets/renderer/pdf/pdf.min.js`
-- `assets/renderer/pdf/pdf.worker.min.js`
 - `lib/features/reader/application/reader_controller.dart`
 - `test/renderers/pdf/`
 
@@ -84,13 +81,13 @@
 - `dart format .`
 - `flutter analyze`
 - `flutter test`
-- 本轮已验证：`node --check assets/renderer/pdf/bridge.js`、`dart format lib test`、`flutter analyze`、`flutter test -r expanded`、`flutter build windows --debug`。
-- 当前实现说明：PDF 使用本地 loopback HTTP 服务提供 PDF.js viewer 与书籍文件；已支持多页 canvas 渲染、连续滚动默认模式、单页显示、桌面/平板双页显示、页码按钮、缩放加减、适合宽度、适合页面、100%/125%/150% 缩放预设、桌面 `Ctrl + 鼠标滚轮` 缩放、locator 恢复、文本层状态事件、renderer `search(query)`、`goTo` 命令、PDF outline 解析、无 outline 时页码目录替代，以及加密/损坏 PDF 的明确错误提示。
-- 手动样本：标准 PDF、大 PDF、扫描版 PDF、损坏 PDF、带 outline PDF、无 outline PDF。
-- 平台验证：Windows 和 Android 打开、滚动、缩放、页码恢复。
+- 本轮已验证（2026-10-21，S7）：`dart format .`、`flutter analyze`（0 error / 0 warning，仅 3 条 `poc_pdf_canvas/` info）、`flutter test`（327 通过 / 2 跳过）。
+- 当前实现说明：PDF 由 `pdf_graphics` 在 Flutter Canvas 上直接绘制，无 WebView、无本地 loopback HTTP 服务。已支持连续滚动与单页/双页分页、页码跳转、0.5–3.0 连续缩放与四种缩放模式、桌面 `Ctrl + 鼠标滚轮`、locator 恢复（像素 `scrollOffset` + 页内比例 `pageOffsetFraction`）、文本选区（含 CJK 与旋转页）、书内搜索高亮、outline 与内部/外部链接、永久标注高亮（含 F-02 跨行裁剪）、主题纸色与夜间滤镜，以及加密/损坏/单页失败的分级错误提示。
+- 手动样本：标准 PDF、大 PDF、扫描版 PDF、损坏 PDF、带 outline 与链接 PDF。
+- 平台验证：**Linux 自动化已覆盖；Windows/Android 手工回归待 S8 执行。**
 
 ## 依赖与风险
 
 - 依赖：TASK-05 阅读器核心，TASK-08 阅读设置，TASK-13 书内搜索。
-- 风险：PDF.js 本地文件访问和 worker 加载在不同平台存在差异。
+- 风险：着色器/位图缓存占用内存，超大页（A0、高 DPI 扫描件）需在真机观察峰值内存。
 - 风险：PDF 文本层缺失会影响搜索、划词和 AI，需要在 UI 中明确降级。

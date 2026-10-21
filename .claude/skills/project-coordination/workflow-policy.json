@@ -1,0 +1,77 @@
+{
+  "schema_version": 2,
+  "task_lifecycles": [
+    "Planned",
+    "Dispatched",
+    "Implementing",
+    "Ready for Acceptance",
+    "Accepted",
+    "Blocked"
+  ],
+  "allowed_lifecycle_transitions": {
+    "Planned": ["Dispatched", "Blocked"],
+    "Dispatched": ["Implementing", "Blocked"],
+    "Implementing": ["Ready for Acceptance", "Blocked"],
+    "Ready for Acceptance": ["Implementing", "Accepted", "Blocked"],
+    "Accepted": ["Blocked"],
+    "Blocked": ["Planned", "Dispatched", "Implementing", "Ready for Acceptance"]
+  },
+  "implementation_states": ["DESIGN_ONLY", "CONTRACT_ONLY", "STUB_ONLY", "IMPLEMENTED"],
+  "validation_evidence": ["UNVERIFIED", "TOOLING_PASS", "RUNTIME_PASS", "E2E_PASS", "BLOCKED"],
+  "status_by_validation_evidence": {
+    "UNVERIFIED": ["DESIGN_ONLY", "CONTRACT_ONLY", "STUB_ONLY", "BLOCKED"],
+    "TOOLING_PASS": ["TOOLING_ONLY"],
+    "RUNTIME_PASS": ["RUNTIME_PASS"],
+    "E2E_PASS": ["E2E_PASS"],
+    "BLOCKED": ["BLOCKED"]
+  },
+  "validation_phases": [
+    "1_EXECUTION_FOCUSED",
+    "2_INDEPENDENT_ACCEPTANCE",
+    "3_IMPACT_REGRESSION",
+    "4_MERGE_READINESS"
+  ],
+  "phase_results": ["NOT_STARTED", "PASS", "FAIL", "BLOCKED", "NOT_APPLICABLE"],
+  "phase_not_applicable_allowed": ["3_IMPACT_REGRESSION", "4_MERGE_READINESS"],
+  "active_session_states": ["RESERVED", "DISPATCHED", "ACTIVE", "IDLE_INCOMPLETE", "BLOCKED"],
+  "terminal_session_states": ["ACCEPTED", "CHANGES_REQUIRED", "COMPLETED", "UNAVAILABLE", "CORRUPTED"],
+  "session_scopes": ["same-session", "delegated-subagent", "separate-user-session", "review-only"],
+  "recovery_classifications": [
+    "NONE",
+    "TRANSIENT_TOOL_FAILURE",
+    "DELIVERY_CHANNEL_MISMATCH",
+    "TELEMETRY_GAP",
+    "RESULT_CHANNEL_CONFLICT",
+    "ORIGIN_UNAVAILABLE",
+    "CONTEXT_CORRUPTION"
+  ],
+  "delivery_states": ["NOT_SENT", "PENDING", "CONFIRMED", "CHANNEL_MISMATCH"],
+  "continuation_policy": {
+    "stable_slot_required": true,
+    "effective_completion_requires": [
+      "new_response",
+      "independent_execution_evidence",
+      "observable_repository_or_record_effect"
+    ],
+    "no_effect_results": ["EMPTY_FINAL", "STALE_REPLAY", "NO_EFFECT_COMPLETION"],
+    "same_session_transports": ["one_bounded_continuation"],
+    "replacement_requires": [
+      "same_session_transports_exhausted",
+      "explicit_user_authorization",
+      "duplicate_dispatch_gate"
+    ]
+  },
+  "phase_roles": {
+    "phase1": "execution",
+    "remediation": "execution",
+    "phase2": "acceptance",
+    "phase3": "acceptance",
+    "phase4": "acceptance"
+  },
+  "limits": {
+    "max_task_lines": 500,
+    "max_recovery_attempts_without_change": 2,
+    "max_direct_delivery_attempts": 1,
+    "max_parallel_compile_test_workers": 16
+  }
+}

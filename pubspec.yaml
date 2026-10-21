@@ -14,7 +14,6 @@ dependencies:
   file_picker: ^12.3.0
   flutter:
     sdk: flutter
-  flutter_inappwebview: ^6.1.5
   flutter_markdown: ^0.7.7+1
   flutter_riverpod: ^3.3.2
   flutter_secure_storage: ^11.2.0
@@ -50,7 +49,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/renderer/pdf/
     - assets/images/brand/
     - assets/images/empty-states/
     - assets/images/covers/

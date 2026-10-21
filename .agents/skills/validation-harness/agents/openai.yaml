@@ -1,0 +1,6 @@
+interface:
+  display_name: "Validation Harness"
+  short_description: "Define focused evidence and audit contract closure"
+  default_prompt: "Use $validation-harness to define focused verification, audit affected-contract closure, and record implementation state plus validation evidence."
+policy:
+  allow_implicit_invocation: true

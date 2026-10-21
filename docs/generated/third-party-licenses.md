@@ -49,14 +49,6 @@
 | `file_picker_platform_interface` | `3.4.0` | `transitive` | `hosted` | `LICENSE` |
 | `file_picker_web` | `3.1.0` | `transitive` | `hosted` | `LICENSE` |
 | `fixnum` | `1.1.1` | `transitive` | `hosted` | `LICENSE` |
-| `flutter_inappwebview` | `6.1.5` | `direct main` | `hosted` | `LICENSE` |
-| `flutter_inappwebview_android` | `1.1.3` | `transitive` | `hosted` | `LICENSE` |
-| `flutter_inappwebview_internal_annotations` | `1.3.0` | `transitive` | `hosted` | `LICENSE` |
-| `flutter_inappwebview_ios` | `1.1.2` | `transitive` | `hosted` | `LICENSE` |
-| `flutter_inappwebview_macos` | `1.1.2` | `transitive` | `hosted` | `LICENSE` |
-| `flutter_inappwebview_platform_interface` | `1.3.0+1` | `transitive` | `hosted` | `LICENSE` |
-| `flutter_inappwebview_web` | `1.1.2` | `transitive` | `hosted` | `LICENSE` |
-| `flutter_inappwebview_windows` | `0.6.0` | `transitive` | `hosted` | `LICENSE` |
 | `flutter_lints` | `6.0.0` | `direct dev` | `hosted` | `LICENSE` |
 | `flutter_markdown` | `0.7.7+1` | `direct main` | `hosted` | `LICENSE` |
 | `flutter_riverpod` | `3.4.3` | `direct main` | `hosted` | `LICENSE` |
@@ -139,7 +131,7 @@
 | `term_glyph` | `1.2.2` | `transitive` | `hosted` | `LICENSE` |
 | `test_api` | `0.7.11` | `transitive` | `hosted` | `LICENSE` |
 | `typed_data` | `1.4.0` | `transitive` | `hosted` | `LICENSE` |
-| `url_launcher` | `6.3.2` | `transitive` | `hosted` | `LICENSE` |
+| `url_launcher` | `6.3.2` | `direct main` | `hosted` | `LICENSE` |
 | `url_launcher_android` | `6.3.33` | `transitive` | `hosted` | `LICENSE` |
 | `url_launcher_ios` | `6.4.2` | `transitive` | `hosted` | `LICENSE` |
 | `url_launcher_linux` | `3.2.3` | `transitive` | `hosted` | `LICENSE` |

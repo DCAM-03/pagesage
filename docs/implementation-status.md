@@ -81,10 +81,16 @@ MOBI/AZW、云同步、账号、DRM 绕过、在线书店、iOS/macOS/Linux 首�
 - `createImportedBook` 按 hash 兜底去重；取消导入时清理已插入的孤儿书籍记录。
 
 v1.0 体验冻结落地（`docs/v1-experience-freeze.md`，2026-07-17）：
-- **F-01** 单 chrome：PDF WebView HTML `#toolbar` 全端隐藏，操作走 Flutter。
+- **F-01** 单 chrome：PDF 阅读器只有 Flutter 工具栏/状态栏，操作走 Flutter。
 - **F-03/S-B** 扫描/OCR 页标注 SnackBar 与状态条标明「近似定位」。
 - **F-06** capability 区分 `nativeTextLayer` / `ocrTextLayer`；OCR 入口按 native 控制。
 - F-02 文本 PDF 精确标注仍需手测勾选；扫描印刷级贴字仍延后。
+
+PDF 渲染迁移（`docs/10-pdf-renderer-migration.md`，2026-10-21）：
+- WebView/PDF.js 渲染器已删除，PDF 由 `pdf_graphics` 在 Flutter Canvas 上直接绘制。
+- S0–S7 完成：几何/缩放、滚动与分页、选区、搜索/大纲/链接、导出与 F-02、主题与失败分级、平台切换与删除。
+- `flutter_inappwebview` 与 `assets/renderer/pdf/` 已移出依赖与包体。
+- **待办**：S8 收口——Windows/Android 手工回归、旋转页标注、夜间标注配色、真机帧时间与峰值内存。
 
 ---
 

@@ -27,7 +27,7 @@ PageSage 的技术架构需要满足：
 | ORM | Drift |
 | 全文搜索 | SQLite FTS5 |
 | EPUB 渲染 | Flutter-native renderer |
-| PDF 渲染 | PDF.js + WebView（迁移中，见 `10-pdf-renderer-migration.md`） |
+| PDF 渲染 | `pdf_graphics` + Flutter Canvas（见 `10-pdf-renderer-migration.md`） |
 | MOBI/AZW 转换 | 暂缓 |
 | 本地文件 | path_provider + file_picker |
 | 安全存储 | flutter_secure_storage |
@@ -408,29 +408,37 @@ lib/renderers/epub/epub_renderer_view.dart
 
 ### 11.4 PDF Renderer
 
-> **迁移中。** 当前实现为 PDF.js + WebView，其上游 `flutter_inappwebview` 无 Linux
-> 平台实现，且 Linux 版依赖 WPE WebKit（Fedora 不提供），现有方案在 Linux 上
-> 不可运行。已决定迁移到 `pdf_graphics` 5.1.1 + Flutter Canvas，验证结论与
-> 实现约束见 `10-pdf-renderer-migration.md`。下文描述的是**当前**实现，迁移
-> 完成后需同步更新本节与第 1 节技术选型表。
+**已迁移（2026-10-21）。** PDF 由 `pdf_graphics` 5.1.1 直接解释并在 Flutter Canvas
+上绘制，不再使用 WebView/PDF.js。历史上这条链路押在 `flutter_inappwebview` 上，
+而该插件没有 Linux 平台实现、Linux 版又依赖 Fedora 不提供的 WPE WebKit，所以
+迁移是必需项而非优化项；决策与验证过程见 `10-pdf-renderer-migration.md`，
+逐阶段施工记录见 `11-pdf-canvas-implementation-plan.md`。
 
-资源：
+组成：
 
 ```text
-assets/renderer/pdf/viewer.html
-assets/renderer/pdf/pdf.min.js
-assets/renderer/pdf/pdf.worker.min.js
-assets/renderer/pdf/bridge.js
+lib/renderers/pdf/pdf_canvas_view.dart         视图：滚动/分页/选区/搜索高亮/标注/链接
+lib/renderers/pdf/pdf_canvas_renderer.dart     解释器：页面缓存、worker、位图导出
+lib/renderers/pdf/pdf_page_tint.dart           主题纸色与夜间滤镜
+lib/renderers/pdf/pdf_annotation_lines.dart    F-02 永久标注跨行裁剪
+lib/renderers/pdf/pdf_outline.dart             大纲扁平化
+lib/renderers/pdf/pdf_links.dart               GoTo / URI 链接
 ```
 
 能力：
 
-- open PDF。
-- page jump。
-- zoom。
-- report page/offset。
-- text selection。
-- search。
+- open PDF（含加密/损坏分级错误）。
+- page jump、连续滚动与单页/双页分页。
+- zoom（0.5–3.0 连续，四种模式）。
+- report page/offset（`scrollOffset` 像素 + `pageOffsetFraction` 页内比例）。
+- text selection（含 CJK 单字与旋转页）。
+- search（全文命中高亮，最多 200 条）。
+- annotations / highlights（含 F-02 跨行裁剪）。
+- outline 与内部/外部链接（外链只上抛事件，由宿主确认后交给系统浏览器）。
+- 导出页面位图（`PdfPageImageSource`，供 OCR 使用）。
+
+**没有 JS 桥**：渲染器不写业务数据，位置、标注、进度都由 Dart 侧持久化——这条
+约束在迁移后依然成立，只是从「JS 不写」变成了「视图不写」。
 
 ## 12. 搜索架构
 
@@ -633,12 +641,16 @@ flutter build windows
 
 规则：
 
-- 发布包中包含 renderer 静态资源。
+- 发布包中包含打包的图片与字体资源。
 - 不把测试书籍打入生产包。
 - 许可证文件随包发布。
 - Calibre/MOBI 转换暂缓，不随当前发布包处理。
 
 ## 18. 第一个技术 Spike
+
+> **历史记录。** 本节记录 M0 当时的 Spike 计划，其中「PDF WebView + PDF.js」部分
+> 已被 `10-pdf-renderer-migration.md` 取代（2026-10-21 完成）。保留原文是为了
+> 说明当时的验收目标，不作为当前实现说明。
 
 目标：
 
@@ -650,8 +662,8 @@ flutter build windows
 2. 接入 EPUB 原生解析和渲染组件。
 3. 打开本地 EPUB。
 4. Dart renderer 回传当前位置。
-5. 接入 PDF WebView。
-6. 放入最小 PDF.js viewer。
+5. 接入 PDF WebView。<!-- 已被 Canvas 渲染器取代，见 §11.4 -->
+6. 放入最小 PDF.js viewer。<!-- 已删除 -->
 7. 打开本地 PDF。
 8. JS 回传页码。
 
