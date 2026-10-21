@@ -99,7 +99,8 @@ AI 检索层（`docs/12-ai-retrieval-strategy.md`，2026-10-21）：
 - **发现断链缺陷**：AI 面板「前后段落 / 当前章节 / 当前页」三项范围从未生效——`ContextBuilder.build()` 的 `availableText` 生产代码从未传入。
 - **第 1 步已完成**：`AiPanel(bookPath, isEpub)` → `AiContextSource`（磁盘读一页 PDF / 一章 EPUB）→ `availableText`；读不到或本页无文字时明确提示并退回「仅选中文本」。US-008 恢复 `[x]`。
 - **第 2 步已完成**：发送内容改为引用清单（`ai_context_reference.dart`）：每段可看来源与字数、可跳回原文、可移除、可逐段编辑；多段带 `【来源】` 标题，隐私确认框逐段列出。
-- 实施顺序：① 修断链 → ② 引用区 UI → ③ 多轮对话（需 `threadId` 迁移）→ ④ 全书关联 → ⑤ 文件夹关联（依赖跨书跳转）。
+- **第 3 步已完成**：多轮对话。`AiRequest.history` 携带本会话此前各轮，上下文只挂在开篇一轮；`ai_conversations.thread_id` 归组，Drift v3 → v4 新增该列（旧会话置空、不猜历史）。换选区/换范围/删引用都会断开会话。
+- 实施顺序：① 修断链 → ② 引用区 UI → ③ 多轮对话（已完成）→ ④ 全书关联 → ⑤ 文件夹关联（依赖跨书跳转）。
 
 ---
 

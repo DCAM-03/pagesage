@@ -358,6 +358,7 @@ final class _FakeAiConversationRepository implements AiConversationRepository {
     String? contextText,
     required String answer,
     String? sourceText,
+    String? threadId,
   }) async {
     return AiConversation(
       id: id ?? 'ai-new',

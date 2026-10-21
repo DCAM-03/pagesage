@@ -270,6 +270,7 @@ final class _FakeAiConversationRepository implements AiConversationRepository {
     String? contextText,
     required String answer,
     String? sourceText,
+    String? threadId,
   }) async {
     final conversation = AiConversation(
       id: id ?? 'conversation-${saved.length + 1}',

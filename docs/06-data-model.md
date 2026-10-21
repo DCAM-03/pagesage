@@ -247,6 +247,7 @@ PDF locator：
 | answer | text | not null | 回答 |
 | source_text | text | nullable | 选中文本 |
 | note_id | text | nullable | 保存为笔记后的 id |
+| thread_id | text | nullable | 同一上下文下的多轮对话归组；升级前旧行为 null，按单轮展示 |
 | created_at | integer | not null | 创建时间 |
 
 索引：
@@ -258,6 +259,11 @@ PDF locator：
 
 - 不保存 API Key。
 - 用户可清空本表。
+
+迁移：
+
+- schemaVersion 3 → 4 新增 `thread_id`（`migrator.addColumn`），不清数据。
+- 旧会话不回填线程 id：事后按时间或文本相近度归组只是猜测，猜错比不归组更糟。
 
 ## 12. search_chunks
 

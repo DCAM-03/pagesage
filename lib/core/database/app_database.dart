@@ -154,6 +154,13 @@ class AiConversations extends Table {
   TextColumn get noteId => text().nullable()();
   IntColumn get createdAt => integer()();
 
+  /// Groups consecutive turns asked against the same context.
+  ///
+  /// Null on rows written before this column existed: they are single turns,
+  /// and the history view shows them as such rather than inventing a thread.
+  /// Their `id` is a usable thread key of its own if it is ever needed.
+  TextColumn get threadId => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -1241,7 +1248,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1264,6 +1271,12 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 3) {
         await migrator.createTable(ocrPages);
+      }
+      if (from < 4) {
+        // Follow-up turns need to be grouped. Existing rows stay single-turn:
+        // grouping them after the fact would guess at which ones belong
+        // together, and a wrong guess is worse than an ungrouped history.
+        await migrator.addColumn(aiConversations, aiConversations.threadId);
       }
       await _createIndexesAndFts();
     },

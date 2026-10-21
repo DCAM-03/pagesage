@@ -65,6 +65,7 @@ final class AiConversation {
     this.contextText,
     this.sourceText,
     this.noteId,
+    this.threadId,
   });
 
   final String id;
@@ -77,7 +78,22 @@ final class AiConversation {
   final String answer;
   final String? sourceText;
   final String? noteId;
+
+  /// Turns asked against the same context share this.
+  ///
+  /// Null on conversations saved before threads existed; they are single
+  /// turns, and the history shows them that way.
+  final String? threadId;
+
   final int createdAt;
+}
+
+/// One earlier exchange in the same thread.
+final class AiThreadTurn {
+  const AiThreadTurn({required this.prompt, required this.answer});
+
+  final String prompt;
+  final String answer;
 }
 
 final class AiRequest {
@@ -85,11 +101,18 @@ final class AiRequest {
     required this.prompt,
     required this.contextText,
     required this.settings,
+    this.history = const [],
   });
 
   final String prompt;
   final String contextText;
   final AiSettings settings;
+
+  /// Earlier turns of the same thread, oldest first, not counting this one.
+  ///
+  /// The context travels once, in the first message; repeating it per turn
+  /// would multiply the most expensive part of the request.
+  final List<AiThreadTurn> history;
 }
 
 final class AiChunk {
@@ -186,6 +209,7 @@ abstract interface class AiConversationRepository {
     String? contextText,
     required String answer,
     String? sourceText,
+    String? threadId,
   });
 
   Future<void> linkNote({

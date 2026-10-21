@@ -833,6 +833,7 @@ final class DriftAiConversationRepository implements AiConversationRepository {
     String? contextText,
     required String answer,
     String? sourceText,
+    String? threadId,
   }) async {
     final resolvedLocator = locator == null
         ? null
@@ -850,6 +851,7 @@ final class DriftAiConversationRepository implements AiConversationRepository {
       contextText: contextText,
       answer: answer,
       sourceText: sourceText,
+      threadId: threadId,
       createdAt: DateTime.now().millisecondsSinceEpoch,
     );
     await _dao.insertConversation(
@@ -863,6 +865,7 @@ final class DriftAiConversationRepository implements AiConversationRepository {
         contextText: Value(conversation.contextText),
         answer: conversation.answer,
         sourceText: Value(conversation.sourceText),
+        threadId: Value(conversation.threadId),
         createdAt: conversation.createdAt,
       ),
     );
@@ -903,6 +906,7 @@ final class DriftAiConversationRepository implements AiConversationRepository {
       answer: row.answer,
       sourceText: row.sourceText,
       noteId: row.noteId,
+      threadId: row.threadId,
       createdAt: row.createdAt,
     );
   }

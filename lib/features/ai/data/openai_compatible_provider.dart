@@ -120,14 +120,27 @@ final class OpenAiCompatibleProvider implements AiProvider {
   }
 
   List<Map<String, String>> _messages(AiRequest request) {
+    final history = request.history;
+    // The context is attached once, to the turn that opens the thread. Later
+    // turns send their own prompt only — repeating a book passage per turn
+    // would grow the request linearly in the size of that passage.
+    final openingPrompt = history.isEmpty
+        ? request.prompt
+        : history.first.prompt;
     return [
       if (request.settings.systemPrompt.trim().isNotEmpty)
         {'role': 'system', 'content': request.settings.systemPrompt.trim()},
       {
         'role': 'user',
         'content':
-            '上下文范围：用户手动提供的文本\n\n上下文：\n${request.contextText}\n\n问题：${request.prompt}',
+            '上下文范围：用户手动提供的文本\n\n上下文：\n${request.contextText}\n\n问题：$openingPrompt',
       },
+      for (var i = 0; i < history.length; i++) ...[
+        {'role': 'assistant', 'content': history[i].answer},
+        if (i + 1 < history.length)
+          {'role': 'user', 'content': history[i + 1].prompt},
+      ],
+      if (history.isNotEmpty) {'role': 'user', 'content': request.prompt},
     ];
   }
 

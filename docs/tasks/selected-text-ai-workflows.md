@@ -111,6 +111,11 @@
   每段可看来源与字数、可跳回原文、可移除、可逐段编辑；多段发送时每段带 `【来源】` 标题。
   隐私确认框逐段列出而非只报范围名。测试见 `test/features/ai/ai_context_reference_test.dart`
   与 `ai_panel_context_test.dart` 的引用清单用例。
+- **第 3 步已完成（2026-10-21）**：多轮对话。追问携带本会话此前各轮（`AiRequest.history`），
+  书籍正文只挂在开篇一轮，后续轮只发问题；`ai_conversations.thread_id` 归组，Drift v3 → v4 迁移。
+  上下文一变（换选区、换范围、删引用）即开新会话，避免模型拿着它没见过的正文作答。
+  测试见 `test/features/ai/ai_thread_messages_test.dart`（抓真实请求体）、`ai_panel_thread_test.dart`、
+  `test/core/database/ai_thread_migration_test.dart`。
 - 上述两项扩展的验收标准：引用清单（第 2 步）已具备回显能力，可据此制定。
   全书关联还缺检索与跨书跳转，见 `docs/12-ai-retrieval-strategy.md` §9 第 4、5 步。
 

@@ -4750,6 +4750,17 @@ class $AiConversationsTable extends AiConversations
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _threadIdMeta = const VerificationMeta(
+    'threadId',
+  );
+  @override
+  late final GeneratedColumn<String> threadId = GeneratedColumn<String>(
+    'thread_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -4763,6 +4774,7 @@ class $AiConversationsTable extends AiConversations
     sourceText,
     noteId,
     createdAt,
+    threadId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4854,6 +4866,12 @@ class $AiConversationsTable extends AiConversations
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('thread_id')) {
+      context.handle(
+        _threadIdMeta,
+        threadId.isAcceptableOrUnknown(data['thread_id']!, _threadIdMeta),
+      );
+    }
     return context;
   }
 
@@ -4907,6 +4925,10 @@ class $AiConversationsTable extends AiConversations
         DriftSqlType.int,
         data['${effectivePrefix}created_at'],
       )!,
+      threadId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thread_id'],
+      ),
     );
   }
 
@@ -4929,6 +4951,13 @@ class AiConversationRow extends DataClass
   final String? sourceText;
   final String? noteId;
   final int createdAt;
+
+  /// Groups consecutive turns asked against the same context.
+  ///
+  /// Null on rows written before this column existed: they are single turns,
+  /// and the history view shows them as such rather than inventing a thread.
+  /// Their `id` is a usable thread key of its own if it is ever needed.
+  final String? threadId;
   const AiConversationRow({
     required this.id,
     this.bookId,
@@ -4941,6 +4970,7 @@ class AiConversationRow extends DataClass
     this.sourceText,
     this.noteId,
     required this.createdAt,
+    this.threadId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4966,6 +4996,9 @@ class AiConversationRow extends DataClass
       map['note_id'] = Variable<String>(noteId);
     }
     map['created_at'] = Variable<int>(createdAt);
+    if (!nullToAbsent || threadId != null) {
+      map['thread_id'] = Variable<String>(threadId);
+    }
     return map;
   }
 
@@ -4992,6 +5025,9 @@ class AiConversationRow extends DataClass
           ? const Value.absent()
           : Value(noteId),
       createdAt: Value(createdAt),
+      threadId: threadId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(threadId),
     );
   }
 
@@ -5012,6 +5048,7 @@ class AiConversationRow extends DataClass
       sourceText: serializer.fromJson<String?>(json['sourceText']),
       noteId: serializer.fromJson<String?>(json['noteId']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
+      threadId: serializer.fromJson<String?>(json['threadId']),
     );
   }
   @override
@@ -5029,6 +5066,7 @@ class AiConversationRow extends DataClass
       'sourceText': serializer.toJson<String?>(sourceText),
       'noteId': serializer.toJson<String?>(noteId),
       'createdAt': serializer.toJson<int>(createdAt),
+      'threadId': serializer.toJson<String?>(threadId),
     };
   }
 
@@ -5044,6 +5082,7 @@ class AiConversationRow extends DataClass
     Value<String?> sourceText = const Value.absent(),
     Value<String?> noteId = const Value.absent(),
     int? createdAt,
+    Value<String?> threadId = const Value.absent(),
   }) => AiConversationRow(
     id: id ?? this.id,
     bookId: bookId.present ? bookId.value : this.bookId,
@@ -5056,6 +5095,7 @@ class AiConversationRow extends DataClass
     sourceText: sourceText.present ? sourceText.value : this.sourceText,
     noteId: noteId.present ? noteId.value : this.noteId,
     createdAt: createdAt ?? this.createdAt,
+    threadId: threadId.present ? threadId.value : this.threadId,
   );
   AiConversationRow copyWithCompanion(AiConversationsCompanion data) {
     return AiConversationRow(
@@ -5074,6 +5114,7 @@ class AiConversationRow extends DataClass
           : this.sourceText,
       noteId: data.noteId.present ? data.noteId.value : this.noteId,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      threadId: data.threadId.present ? data.threadId.value : this.threadId,
     );
   }
 
@@ -5090,7 +5131,8 @@ class AiConversationRow extends DataClass
           ..write('answer: $answer, ')
           ..write('sourceText: $sourceText, ')
           ..write('noteId: $noteId, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('threadId: $threadId')
           ..write(')'))
         .toString();
   }
@@ -5108,6 +5150,7 @@ class AiConversationRow extends DataClass
     sourceText,
     noteId,
     createdAt,
+    threadId,
   );
   @override
   bool operator ==(Object other) =>
@@ -5123,7 +5166,8 @@ class AiConversationRow extends DataClass
           other.answer == this.answer &&
           other.sourceText == this.sourceText &&
           other.noteId == this.noteId &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.threadId == this.threadId);
 }
 
 class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
@@ -5138,6 +5182,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
   final Value<String?> sourceText;
   final Value<String?> noteId;
   final Value<int> createdAt;
+  final Value<String?> threadId;
   final Value<int> rowid;
   const AiConversationsCompanion({
     this.id = const Value.absent(),
@@ -5151,6 +5196,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     this.sourceText = const Value.absent(),
     this.noteId = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.threadId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AiConversationsCompanion.insert({
@@ -5165,6 +5211,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     this.sourceText = const Value.absent(),
     this.noteId = const Value.absent(),
     required int createdAt,
+    this.threadId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        provider = Value(provider),
@@ -5184,6 +5231,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     Expression<String>? sourceText,
     Expression<String>? noteId,
     Expression<int>? createdAt,
+    Expression<String>? threadId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -5198,6 +5246,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
       if (sourceText != null) 'source_text': sourceText,
       if (noteId != null) 'note_id': noteId,
       if (createdAt != null) 'created_at': createdAt,
+      if (threadId != null) 'thread_id': threadId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -5214,6 +5263,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     Value<String?>? sourceText,
     Value<String?>? noteId,
     Value<int>? createdAt,
+    Value<String?>? threadId,
     Value<int>? rowid,
   }) {
     return AiConversationsCompanion(
@@ -5228,6 +5278,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
       sourceText: sourceText ?? this.sourceText,
       noteId: noteId ?? this.noteId,
       createdAt: createdAt ?? this.createdAt,
+      threadId: threadId ?? this.threadId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -5268,6 +5319,9 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     if (createdAt.present) {
       map['created_at'] = Variable<int>(createdAt.value);
     }
+    if (threadId.present) {
+      map['thread_id'] = Variable<String>(threadId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -5288,6 +5342,7 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
           ..write('sourceText: $sourceText, ')
           ..write('noteId: $noteId, ')
           ..write('createdAt: $createdAt, ')
+          ..write('threadId: $threadId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -8069,7 +8124,16 @@ class $$BooksTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$BooksTable, BookRow>(table),
+                  BaseReferences<_$AppDatabase, $BooksTable, BookRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -8304,7 +8368,16 @@ class $$CategoriesTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$CategoriesTable, CategoryRow>(table),
+                  BaseReferences<_$AppDatabase, $CategoriesTable, CategoryRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -8499,7 +8572,16 @@ class $$TagsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$TagsTable, TagRow>(table),
+                  BaseReferences<_$AppDatabase, $TagsTable, TagRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -8636,7 +8718,16 @@ class $$BookTagsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$BookTagsTable, BookTagRow>(table),
+                  BaseReferences<_$AppDatabase, $BookTagsTable, BookTagRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -8862,7 +8953,16 @@ class $$ReadingProgressTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$ReadingProgressTable, ReadingProgressRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $ReadingProgressTable,
+                    ReadingProgressRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -9123,7 +9223,16 @@ class $$BookmarksTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$BookmarksTable, BookmarkRow>(table),
+                  BaseReferences<_$AppDatabase, $BookmarksTable, BookmarkRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -9401,7 +9510,16 @@ class $$AnnotationsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$AnnotationsTable, AnnotationRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $AnnotationsTable,
+                    AnnotationRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -9696,7 +9814,16 @@ class $$NotesTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$NotesTable, NoteRow>(table),
+                  BaseReferences<_$AppDatabase, $NotesTable, NoteRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -9833,7 +9960,16 @@ class $$NoteTagsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$NoteTagsTable, NoteTagRow>(table),
+                  BaseReferences<_$AppDatabase, $NoteTagsTable, NoteTagRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -9867,6 +10003,7 @@ typedef $$AiConversationsTableCreateCompanionBuilder =
       Value<String?> sourceText,
       Value<String?> noteId,
       required int createdAt,
+      Value<String?> threadId,
       Value<int> rowid,
     });
 typedef $$AiConversationsTableUpdateCompanionBuilder =
@@ -9882,6 +10019,7 @@ typedef $$AiConversationsTableUpdateCompanionBuilder =
       Value<String?> sourceText,
       Value<String?> noteId,
       Value<int> createdAt,
+      Value<String?> threadId,
       Value<int> rowid,
     });
 
@@ -9946,6 +10084,11 @@ class $$AiConversationsTableFilterComposer
 
   ColumnFilters<int> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get threadId => $composableBuilder(
+    column: $table.threadId,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -10013,6 +10156,11 @@ class $$AiConversationsTableOrderingComposer
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get threadId => $composableBuilder(
+    column: $table.threadId,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AiConversationsTableAnnotationComposer
@@ -10060,6 +10208,9 @@ class $$AiConversationsTableAnnotationComposer
 
   GeneratedColumn<int> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get threadId =>
+      $composableBuilder(column: $table.threadId, builder: (column) => column);
 }
 
 class $$AiConversationsTableTableManager
@@ -10110,6 +10261,7 @@ class $$AiConversationsTableTableManager
                 Value<String?> sourceText = const Value.absent(),
                 Value<String?> noteId = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
+                Value<String?> threadId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AiConversationsCompanion(
                 id: id,
@@ -10123,6 +10275,7 @@ class $$AiConversationsTableTableManager
                 sourceText: sourceText,
                 noteId: noteId,
                 createdAt: createdAt,
+                threadId: threadId,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -10138,6 +10291,7 @@ class $$AiConversationsTableTableManager
                 Value<String?> sourceText = const Value.absent(),
                 Value<String?> noteId = const Value.absent(),
                 required int createdAt,
+                Value<String?> threadId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AiConversationsCompanion.insert(
                 id: id,
@@ -10151,10 +10305,20 @@ class $$AiConversationsTableTableManager
                 sourceText: sourceText,
                 noteId: noteId,
                 createdAt: createdAt,
+                threadId: threadId,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$AiConversationsTable, AiConversationRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $AiConversationsTable,
+                    AiConversationRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -10451,7 +10615,16 @@ class $$SearchChunksTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$SearchChunksTable, SearchChunkRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SearchChunksTable,
+                    SearchChunkRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -10613,7 +10786,16 @@ class $$AppSettingsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$AppSettingsTable, AppSettingRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $AppSettingsTable,
+                    AppSettingRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -10931,7 +11113,16 @@ class $$ImportTasksTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$ImportTasksTable, ImportTaskRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $ImportTasksTable,
+                    ImportTaskRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -11274,7 +11465,16 @@ class $$OcrPagesTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$OcrPagesTable, OcrPageRow>(table),
+                  BaseReferences<_$AppDatabase, $OcrPagesTable, OcrPageRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),

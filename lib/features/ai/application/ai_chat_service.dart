@@ -31,6 +31,8 @@ final class AiChatService {
     required String contextText,
     required String prompt,
     String? sourceText,
+    String? threadId,
+    List<AiThreadTurn> history = const [],
     void Function(String chunk)? onChunk,
     AiCancelToken? cancelToken,
   }) async {
@@ -42,6 +44,7 @@ final class AiChatService {
           prompt: prompt,
           contextText: contextText,
           settings: credentials.settings,
+          history: history,
         ),
         apiKey: credentials.apiKey,
         cancelToken: cancelToken,
@@ -71,6 +74,7 @@ final class AiChatService {
       contextText: contextText,
       answer: answer,
       sourceText: sourceText ?? contextText,
+      threadId: threadId,
     );
   }
 

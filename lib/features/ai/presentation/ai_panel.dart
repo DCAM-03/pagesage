@@ -70,6 +70,19 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
 
   AiConversation? _conversation;
   AiCancelToken? _cancelToken;
+
+  /// The thread the next question continues, if any.
+  ///
+  /// Set from the first answer in a context. A new selection or a different
+  /// reference list starts a new one: carrying turns across a changed context
+  /// would ask the model to reason about a passage it was never shown.
+  String? _threadId;
+
+  /// Earlier turns in this thread, oldest first.
+  final List<AiThreadTurn> _history = [];
+
+  List<AiThreadTurn> get _threadHistory =>
+      List<AiThreadTurn>.unmodifiable(_history);
   String _answer = '';
   String? _error;
   bool _loading = false;
@@ -116,6 +129,26 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       locator: widget.locator,
       isSelection: true,
     );
+  }
+
+  /// A thread id for the turn about to be sent.
+  ///
+  /// The panel names the thread rather than the service: the id has to be on
+  /// the row this request writes, and the service only learns about threads
+  /// through what it is handed.
+  static String _newThreadId() =>
+      'thread-${DateTime.now().microsecondsSinceEpoch}';
+
+  /// Drops the thread so the next question starts fresh.
+  ///
+  /// Called whenever the context changes shape — a new selection, a different
+  /// range, a removed reference. The old turns discussed text the next
+  /// question will not carry, and keeping them would invite the model to
+  /// answer from a passage it was not given this time.
+  void _startNewThread() {
+    _threadId = null;
+    _history.clear();
+    _conversation = null;
   }
 
   /// The selection currently in the list, if the reader has not dropped it.
@@ -187,10 +220,10 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       _contextRange = AiContextRange.selectedText;
       _contextTruncated = false;
       _contextNotice = null;
+      _startNewThread();
       if (nextContext != oldContext) {
         _answer = '';
         _error = null;
-        _conversation = null;
       }
     });
   }
@@ -551,6 +584,9 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
         return;
       }
     }
+    // A thread is named by its first turn; every later turn in the same
+    // context reuses it so the history can be regrouped.
+    final threadId = _threadId ?? _newThreadId();
     final cancelToken = AiCancelToken();
     setState(() {
       _loading = true;
@@ -569,6 +605,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
             contextText: contextText,
             prompt: prompt,
             sourceText: contextText,
+            threadId: threadId,
+            history: _threadHistory,
             cancelToken: cancelToken,
             onChunk: (chunk) {
               if (!mounted) {
@@ -580,6 +618,10 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       setState(() {
         _conversation = conversation;
         _answer = conversation.answer;
+        // The service mints the thread on the first turn and reuses it after,
+        // so this is the one place that learns the id.
+        _threadId = conversation.threadId ?? threadId;
+        _history.add(AiThreadTurn(prompt: prompt, answer: conversation.answer));
       });
     } on AiChatCancelledException catch (error) {
       setState(() {
@@ -635,6 +677,18 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
       _contextRange = AiContextRange.selectedText;
       _contextTruncated = false;
       _contextNotice = null;
+      // Continuing a stored thread keeps its name, so the follow-up is
+      // regrouped with the turns it belongs to. A conversation saved before
+      // threads existed has no id; the next question starts one.
+      _threadId = conversation.threadId;
+      _history
+        ..clear()
+        ..add(
+          AiThreadTurn(
+            prompt: conversation.prompt,
+            answer: conversation.answer,
+          ),
+        );
     });
   }
 
@@ -685,6 +739,9 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     // the range the reader just picked. A fresh key each attempt rebuilds it
     // from `_contextRange`.
     setState(() => _rangeVersion++);
+    if (_contextRange != range) {
+      setState(_startNewThread);
+    }
     if (!range.needsBookText) {
       setState(() {
         _contextRange = range;
@@ -793,6 +850,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
 
   void _removeReference(String id) {
     setState(() {
+      _startNewThread();
       _references.removeWhere((reference) => reference.id == id);
       // A range whose block the reader just dropped is no longer what is
       // being sent, so the selector must stop claiming it.
