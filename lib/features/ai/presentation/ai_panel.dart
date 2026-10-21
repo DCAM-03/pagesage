@@ -243,6 +243,20 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     });
   }
 
+  /// Puts a canned question into the prompt box.
+  ///
+  /// The edited prompt is what gets sent, so a quick action has to replace
+  /// the field, not just appear in it.
+  void _fillPrompt(String prompt) {
+    setState(() {
+      _editedPrompt = prompt;
+      _promptController.text = prompt;
+      _promptController.selection = TextSelection.collapsed(
+        offset: prompt.length,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final embedded = widget.embedded;
@@ -353,15 +367,12 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                     _AiPromptChip(
                       label: action.label,
                       compact: embedded,
-                      onPressed: () {
-                        _editedPrompt = action.prompt;
-                        _promptController.text = action.prompt;
-                        _promptController.selection = TextSelection.collapsed(
-                          offset: action.prompt.length,
-                        );
-                        setState(() {});
-                      },
+                      onPressed: () => _fillPrompt(action.prompt),
                     ),
+                  _AiPromptMoreMenu(
+                    actions: _kMorePromptActions,
+                    onSelected: _fillPrompt,
+                  ),
                 ],
               ),
               SizedBox(height: sectionGap),
@@ -1052,11 +1063,23 @@ final class _PromptAction {
   final String prompt;
 }
 
+/// The four that stay on one line.
+///
+/// A narrow rail at large text cannot hold six labels: the last two used to
+/// wrap onto a second row alone, which reads as a layout fault rather than a
+/// choice. These are the ones a reader reaches for most.
 const _kPromptActions = <_PromptAction>[
   _PromptAction('解释', '解释这段内容'),
   _PromptAction('总结', '总结这段内容'),
   _PromptAction('提炼要点', '提炼这段内容的要点'),
   _PromptAction('翻译', '把这段内容翻译成中文'),
+];
+
+/// The rest, behind 「更多」.
+///
+/// `docs/02-feature-spec.md` §10.3 lists these as quick actions, so they
+/// stay reachable — just not as a second row of the rail.
+const _kMorePromptActions = <_PromptAction>[
   _PromptAction('简单说明', '用更简单的话说明这段内容'),
   _PromptAction('生成问题', '基于这段内容生成 3 个值得继续思考的问题'),
 ];
@@ -1620,6 +1643,37 @@ final class _AiReferenceRow extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The quick actions that did not fit on the rail's one line.
+final class _AiPromptMoreMenu extends StatelessWidget {
+  const _AiPromptMoreMenu({required this.actions, required this.onSelected});
+
+  final List<_PromptAction> actions;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return PopupMenuButton<String>(
+      tooltip: '更多快捷动作',
+      position: PopupMenuPosition.under,
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        for (final action in actions)
+          PopupMenuItem<String>(
+            value: action.prompt,
+            child: Text(action.label),
+          ),
+      ],
+      // An icon, not a word: 「更多」 plus the arrow took the room the four
+      // main labels needed, and the row wrapped at large text.
+      child: Padding(
+        padding: const EdgeInsets.only(left: 2, top: 8, bottom: 8),
+        child: Icon(Icons.more_horiz, size: 18, color: colorScheme.primary),
       ),
     );
   }

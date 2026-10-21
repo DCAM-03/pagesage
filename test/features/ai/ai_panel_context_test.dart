@@ -346,6 +346,27 @@ void main() {
     expect(find.text('8 字'), findsOneWidget);
   });
 
+  testWidgets('the hidden quick actions are still reachable', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(480, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_panel('book.epub', _StubSource()));
+    await tester.pumpAndSettle();
+
+    // The rail keeps four labels and folds the rest into a menu, so the
+    // actions `docs/02-feature-spec.md` §10.3 lists must still be usable.
+    await tester.tap(find.byTooltip('更多快捷动作'));
+    await tester.pumpAndSettle();
+    expect(find.text('简单说明'), findsOneWidget);
+    expect(find.text('生成问题'), findsOneWidget);
+
+    await tester.tap(find.text('生成问题').last);
+    await tester.pumpAndSettle();
+
+    // Picking one fills the prompt box, exactly like a visible action does.
+    expect(find.text('基于这段内容生成 3 个值得继续思考的问题'), findsWidgets);
+  });
+
   testWidgets('the last reference cannot be dropped to nothing', (
     tester,
   ) async {
