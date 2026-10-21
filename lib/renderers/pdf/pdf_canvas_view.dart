@@ -1055,7 +1055,12 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     final renderer = _renderer;
     final rect = _pageGlobalRects[pageIndex];
     if (renderer == null || rect == null) return null;
-    final pageSize = renderer.displaySizeOf(0);
+    // This page's own size, not the document's first page. A book whose
+    // front matter is a different size from its body (匿名样本 01's pages 1-65 are
+    // 489pt wide against 483pt for the rest; the samples' cover pages differ
+    // by up to 2pt) would otherwise map every pointer position through the
+    // wrong scale, which offsets the caret by a growing amount down the page.
+    final pageSize = renderer.displaySizeOf(pageIndex);
     final painted = Size(
       pageSize.width * _layoutScale,
       pageSize.height * _layoutScale,
@@ -1103,9 +1108,14 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     if (!_selectionDragging) return;
     final anchor = _selectionAnchor;
     if (anchor == null) return;
+    // Scroll first, caret second. Dragging past the page edge is exactly when
+    // the view should follow, and at that moment the pointer is over no text,
+    // so a caret-first order returns before scrolling ever runs and the drag
+    // can never reach the next page. Resolving the caret again on the next
+    // move event picks up the page that has just scrolled under the pointer.
+    _ensureSelectionVisible(global);
     final caret = _caretAtGlobal(global, preferPage: anchor.page);
     if (caret == null) return;
-    _ensureSelectionVisible(global);
     if (caret.page == _selectionFocus?.page &&
         caret.index == _selectionFocus?.index) {
       return;
@@ -1120,17 +1130,17 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     _emitSelectionIfChanged(commit: true);
   }
 
-  /// A tap that did not hit an annotation: a live selection dismisses, an
-  /// otherwise plain tap selects the word under the pointer.
+  /// A tap that did not hit an annotation: a plain tap selects the word under
+  /// the pointer.
+  ///
+  /// A live selection is dismissed first, but the tap still selects: clicking
+  /// a second word with a selection up is how a reader moves the selection,
+  /// and every desktop reader treats it that way. Tapping inside the current
+  /// selection keeps it, so the toolbar can act on it.
   void _tapSelection(Offset global) {
     if (_selectionAnchor != null) {
-      // Tapping outside the selection dismisses it; tapping inside keeps it
-      // so the toolbar can act on it. The harness's menu already treats a
-      // second tap as a dismiss, so only clear when it is outside.
-      final inside = _selectionGlobalRects().any((r) => r.contains(global));
-      if (inside) return;
+      if (_selectionGlobalRects().any((r) => r.contains(global))) return;
       _clearSelection();
-      return;
     }
     final caret = _caretAtGlobal(global);
     if (caret == null) return;
@@ -1291,11 +1301,16 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     }
   }
 
-  /// Scrolls the selection into view when it leaves the viewport.
+  /// Scrolls the view when a drag is held outside it.
   ///
-  /// A drag that starts on one page and runs off the bottom of the window has
+  /// A drag that starts on one page and runs past the bottom of the window has
   /// to keep working, or cross-page selection is impossible in continuous
-  /// mode. Guarded so a stationary pointer cannot scroll forever.
+  /// mode. The scroll is applied directly rather than animated: a drag emits a
+  /// move event every frame, and an animation restarted on each one advances a
+  /// few pixels at most before being cancelled, so the view crawls and the
+  /// page the reader is dragging toward never arrives. The step grows with how
+  /// far outside the viewport the pointer is and is capped, so a pointer
+  /// parked below the window scrolls steadily instead of jumping pages.
   void _ensureSelectionVisible(Offset global) {
     final box = context.findRenderObject();
     if (box is! RenderBox || !box.hasSize) return;
@@ -1304,24 +1319,19 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     final top = 56.0;
     final bottom = height - 56;
     if (viewport.dy > top && viewport.dy < bottom) return;
-    final direction = viewport.dy <= top ? -1.0 : 1.0;
+    final below = viewport.dy > bottom;
+    final overshoot = below ? viewport.dy - bottom : top - viewport.dy;
+    final step = math.min(overshoot, 64.0) + 8.0;
     if (_scrollController.hasClients) {
       final position = _scrollController.position;
-      unawaited(
-        _scrollController.animateTo(
-          (position.pixels + direction * height * 0.5).clamp(
-            position.minScrollExtent,
-            position.maxScrollExtent,
-          ),
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-        ),
-      );
+      final target = (below ? position.pixels + step : position.pixels - step)
+          .clamp(position.minScrollExtent, position.maxScrollExtent);
+      if (target != position.pixels) _scrollController.jumpTo(target);
       return;
     }
     final controller = _pageController;
     if (controller != null && controller.hasClients) {
-      if (direction > 0) {
+      if (below) {
         unawaited(
           controller.nextPage(
             duration: const Duration(milliseconds: 200),

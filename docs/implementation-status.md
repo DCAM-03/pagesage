@@ -90,6 +90,7 @@ PDF 渲染迁移（`docs/10-pdf-renderer-migration.md`，2026-10-21）：
 - WebView/PDF.js 渲染器已删除，PDF 由 `pdf_graphics` 在 Flutter Canvas 上直接绘制。
 - S0–S7 完成：几何/缩放、滚动与分页、选区、搜索/大纲/链接、导出与 F-02、主题与失败分级、平台切换与删除。
 - `flutter_inappwebview` 与 `assets/renderer/pdf/` 已移出依赖与包体。
+- **划词修复（2026-10-21，见 `11-pdf-canvas-implementation-plan.md` §25）**：`positionNear` 按 run 包围盒评分，在排版复杂的书上 3–27% 的点落到非指针所在行（最远 729pt）。改为 em 空间基线带判定 + 同行 run 合并 + 行内水平距离决胜；真实书网格复测错行 0.0%。顺带修掉前页/正文页尺寸不同导致的逐行偏移、连点失效、跨页拖选不滚动。
 - **待办**：S8 收口——Windows/Android 手工回归、旋转页标注、夜间标注配色、真机帧时间与峰值内存。
 
 ---

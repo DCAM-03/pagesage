@@ -198,6 +198,143 @@ void main() {
     });
   });
 
+  group('hit testing', () {
+    late PdfCanvasRenderer renderer;
+
+    setUp(() => renderer = open(standard));
+
+    /// 1:1 controller, so widget y = 792 - page y and every expectation below
+    /// can be read straight off the sample's run boxes.
+    PdfSelectionController controller({int pageIndex = 0}) {
+      final pageSize = renderer.displaySizeOf(pageIndex);
+      return PdfSelectionController(
+        renderer: renderer,
+        pageIndex: pageIndex,
+        box: renderer.pageAt(pageIndex).cropBox,
+        rotation: renderer.pageAt(pageIndex).rotation,
+        paintSize: pageSize,
+        displayedSize: pageSize,
+        globalOrigin: Offset.zero,
+        pageSize: pageSize,
+      );
+    }
+
+    // standard-text.pdf page 1 draws two lines at 10.2pt pitch:
+    //   line 1  page y 726.75..739.75  widget y 52.25..65.25
+    //   line 2  page y 698.75..711.75  widget y 80.25..93.25
+    // so widget y 68 is the leading between them, and y > 96 is blank paper.
+    const line1 = 59.0;
+    const line2 = 87.0;
+    const leading = 68.0;
+
+    test('a tap on a line selects a word from that line', () {
+      // The defect this guards: `positionNear` scored by distance to a run's
+      // bounding box, so a tap on the second line could resolve into the
+      // first. 匿名样本 01, 匿名样本 03 and 匿名样本 02 each lost 60-72%
+      // of a grid of points this way, by up to 412pt.
+      final first = controller().selectionAtWord(const Offset(80, line1));
+      final second = controller().selectionAtWord(const Offset(80, line2));
+
+      expect(first?.text, startsWith('PageSage'));
+      expect(second?.text, startsWith('Generated'));
+    });
+
+    test('a tap in the leading goes to the nearer line', () {
+      final between = controller().selectionAtWord(const Offset(80, leading));
+
+      expect(between, isNotNull);
+      // 2.75pt below line 1's band, 12.25pt above line 2's.
+      expect(between!.text, startsWith('PageSage'));
+    });
+
+    test('a tap on blank paper below the text selects nothing', () {
+      // A tap identifies a word, so it must not guess one from halfway up the
+      // page: only a drag gets the nearest-line fallback.
+      expect(controller().selectionAtWord(const Offset(80, 400)), isNull);
+    });
+
+    test('a drag below the last line snaps to it instead of stopping', () {
+      final caret = controller().caretAt(const Offset(80, 400));
+
+      expect(caret, isNotNull);
+      expect(caret!.index, greaterThan(60));
+    });
+
+    test('a drag past the end of a line lands on its last character', () {
+      final inside = controller().caretAt(const Offset(400, line1));
+      final past = controller().caretAt(const Offset(610, line1));
+
+      expect(inside, isNotNull);
+      expect(past, isNotNull);
+      expect(past!.index, greaterThan(inside!.index));
+      expect(past.index, lessThanOrEqualTo(controller().pageText.length));
+    });
+
+    test('a point outside the page is not a drag point', () {
+      // The view clamps a pointer just off the page edge onto it; the
+      // controller only accepts the overshoot band the view already applied.
+      expect(controller().caretAt(const Offset(-200, line1)), isNull);
+    });
+
+    test('the caret follows the page it is given, not page 1', () {
+      // Both pages of this sample draw the same words at the same place, so
+      // only the caret's page field can tell them apart — but a controller
+      // built for page 2 must still resolve text rather than borrow page 1's.
+      final second = controller(pageIndex: 1).caretAt(const Offset(80, line1));
+      expect(second, isNotNull);
+      expect(second!.page, 1);
+    });
+
+    test('a tap on whitespace inside a long run selects nothing', () {
+      // The chinese-embedded sample has a heading run far wider than its
+      // glyphs' band; the point below it is blank paper and must stay blank.
+      final cjk = open(File('poc_pdf_canvas/samples/chinese-embedded.pdf'));
+      addTearDown(cjk.dispose);
+      final pageSize = cjk.displaySizeOf(0);
+      final text = PdfSelectionController(
+        renderer: cjk,
+        pageIndex: 0,
+        box: cjk.pageAt(0).cropBox,
+        rotation: cjk.pageAt(0).rotation,
+        paintSize: pageSize,
+        displayedSize: pageSize,
+        globalOrigin: Offset.zero,
+        pageSize: pageSize,
+      );
+      // Below the last line (page y 533 -> widget y 259) on a 842pt page.
+      expect(text.selectionAtWord(Offset(200, pageSize.height - 20)), isNull);
+    });
+
+    test('a tap on a line of several runs picks the run it is on', () {
+      // "本页使用真正嵌入的 CJK 字体，验证 pdf_graphics 的字形轮廓渲染路径。"
+      // is five runs on one line, so every one of them ties at zero vertical
+      // distance — and the first four are far apart horizontally. Ranking by
+      // vertical distance alone let the *first* run win, putting the caret at
+      // the far end of the line; the tie now breaks on the pointer's
+      // horizontal distance within the run.
+      final cjk = open(File('poc_pdf_canvas/samples/chinese-embedded.pdf'));
+      addTearDown(cjk.dispose);
+      final pageSize = cjk.displaySizeOf(0);
+      final text = PdfSelectionController(
+        renderer: cjk,
+        pageIndex: 0,
+        box: cjk.pageAt(0).cropBox,
+        rotation: cjk.pageAt(0).rotation,
+        paintSize: pageSize,
+        displayedSize: pageSize,
+        globalOrigin: Offset.zero,
+        pageSize: pageSize,
+      );
+      // "CJK" is the second of the line's five runs, spanning x 181..202 in
+      // page space; the line's band covers page y 725.8..743.3.
+      final tap = Offset(192, pageSize.height - (725.8 + 743.3) / 2);
+
+      final selection = text.selectionAtWord(tap);
+      expect(selection, isNotNull);
+      expect(selection!.text, 'CJK');
+    });
+  });
+
   group('rotated page geometry', () {
     late PdfCanvasRenderer renderer;
 

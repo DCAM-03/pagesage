@@ -658,6 +658,47 @@ void main() {
       expect(selection.text, contains('PageSage'));
     });
 
+    testWidgets('a drag held below the window keeps scrolling', (tester) async {
+      // The drag runs off the bottom of the viewport, which is exactly when
+      // the view has to follow. It used to animate half a screen per pointer
+      // move; a move event arrives every frame, each animation was cancelled
+      // by the next, and the list never advanced — so the caret stayed on
+      // page 1 and the drag could not reach page 2 at all.
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      final start = Offset(
+        rect.left + 76 * scale,
+        rect.top + (792 - 700) * scale,
+      );
+      final scrollable = tester.state<ScrollableState>(
+        find.byType(Scrollable).first,
+      );
+      expect(scrollable.position.pixels, 0);
+
+      await tester.runAsync(() async {
+        final gesture = await tester.startGesture(
+          start,
+          kind: PointerDeviceKind.mouse,
+        );
+        for (var i = 1; i <= 40; i++) {
+          // Long past the 900px viewport bottom, as a reader dragging to the
+          // next page does.
+          await gesture.moveTo(start + Offset(0, 1400 * (i / 40)));
+          await tester.pump(const Duration(milliseconds: 8));
+        }
+        await gesture.up();
+        await tester.pump(const Duration(milliseconds: 200));
+      });
+
+      expect(scrollable.position.pixels, greaterThan(0));
+      expect(result.events.whereType<RendererTextSelected>(), isNotEmpty);
+    });
+
     testWidgets('a scanned page says there is no selectable text', (
       tester,
     ) async {
