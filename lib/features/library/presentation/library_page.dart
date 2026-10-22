@@ -3578,6 +3578,9 @@ final class _BookActionsMenu extends ConsumerWidget {
     }
     await ref.read(searchRepositoryProvider).deleteByBook(book.id);
     await ref.read(bookRepositoryProvider).deleteBook(book.id);
+    // Pictures cut out of this book's pages are derived data; with the book
+    // gone they can never be rebuilt.
+    await ref.read(imageCacheStoreProvider).deleteBook(book.id);
   }
 
   Future<void> _deleteBookData(
@@ -3611,6 +3614,7 @@ final class _BookActionsMenu extends ConsumerWidget {
     await _deleteIfExists(book.coverPath);
     await ref.read(searchRepositoryProvider).deleteByBook(book.id);
     await ref.read(bookRepositoryProvider).deleteBook(book.id);
+    await ref.read(imageCacheStoreProvider).deleteBook(book.id);
   }
 
   Future<void> _moveCategory(

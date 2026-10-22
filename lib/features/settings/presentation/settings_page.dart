@@ -177,8 +177,10 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         onExportAnnotations: () => _exportAnnotations(context, ref),
         onExportBookmarks: () => _exportBookmarks(context, ref),
         onExportAi: () => _exportAiConversations(context, ref),
+        onExportImages: () => _exportImageAnnotations(context, ref),
         onBackup: () => _backupDatabase(context, ref),
         onRestore: () => _restoreDatabase(context, ref),
+        onClearCache: () => _clearImageCache(context, ref),
         onClearAi: () => _confirmClearAiHistory(context, ref),
         onDeleteAll: () => _confirmDeleteAllLocalData(context, ref),
         onTasks: () => Navigator.of(context).push(
@@ -391,6 +393,87 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         context,
       ).showSnackBar(const SnackBar(content: Text('导出失败')));
     }
+  }
+
+  Future<void> _exportImageAnnotations(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final targetPath = await ref
+        .read(filePickerServiceProvider)
+        .pickImageAnnotationsExportPath();
+    if (targetPath == null) {
+      return;
+    }
+    try {
+      final result = await _runTrackedTask<ImageAnnotationExportResult>(
+        ref,
+        type: PageSageTaskType.exportNotes,
+        plannedTargetPath: targetPath,
+        runningMessage: '正在导出图片批注',
+        successMessage: '图片批注已导出',
+        action: (cancelToken) => ref
+            .read(exportServiceProvider)
+            .exportImageAnnotations(
+              targetPath: targetPath,
+              cancelToken: cancelToken,
+            ),
+      );
+      if (!context.mounted) {
+        return;
+      }
+      final missing = result.missingCount;
+      _showFileResultSnackBar(
+        context,
+        ref,
+        message: missing == 0
+            ? '已导出 ${result.imageCount} 张图片'
+            : '已导出 ${result.imageCount} 张图片，$missing 张没有缓存',
+        file: result.markdownFile,
+      );
+    } catch (_) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('导出失败')));
+    }
+  }
+
+  /// Drop the cached pictures.
+  ///
+  /// They are derived from the books and can be cut out again, so this is
+  /// safe: the worst outcome is that the next export has fewer pictures to
+  /// copy and says so.
+  Future<void> _clearImageCache(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('清理图片缓存？'),
+        content: const Text('会删除从书页裁出的图片缓存。标注本身不受影响，需要时可以重新裁出。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('清理'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await ref.read(imageCacheStoreProvider).clear();
+    if (!context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('图片缓存已清理')));
   }
 
   Future<void> _backupDatabase(BuildContext context, WidgetRef ref) async {
@@ -896,8 +979,10 @@ final class _PrivacyDataCard extends StatelessWidget {
     required this.onExportAnnotations,
     required this.onExportBookmarks,
     required this.onExportAi,
+    required this.onExportImages,
     required this.onBackup,
     required this.onRestore,
+    required this.onClearCache,
     required this.onClearAi,
     required this.onDeleteAll,
     required this.onTasks,
@@ -908,8 +993,10 @@ final class _PrivacyDataCard extends StatelessWidget {
   final VoidCallback onExportAnnotations;
   final VoidCallback onExportBookmarks;
   final VoidCallback onExportAi;
+  final VoidCallback onExportImages;
   final VoidCallback onBackup;
   final VoidCallback onRestore;
+  final VoidCallback onClearCache;
   final VoidCallback onClearAi;
   final VoidCallback onDeleteAll;
   final VoidCallback onTasks;
@@ -958,6 +1045,12 @@ final class _PrivacyDataCard extends StatelessWidget {
                   subtitle: '导出 Markdown，不包含 API Key',
                   onTap: onExportAi,
                 ),
+                _SettingsActionTile(
+                  icon: Icons.image_outlined,
+                  title: '导出图片批注',
+                  subtitle: '导出 Markdown 与图片目录，图片相对路径引用',
+                  onTap: onExportImages,
+                ),
               ],
             ),
           ),
@@ -984,6 +1077,12 @@ final class _PrivacyDataCard extends StatelessWidget {
                   title: '任务中心',
                   subtitle: '查看导入、索引、导出和备份任务',
                   onTap: onTasks,
+                ),
+                _SettingsActionTile(
+                  icon: Icons.cleaning_services_outlined,
+                  title: '清理图片缓存',
+                  subtitle: '删除从书页裁出的图片缓存，标注不受影响',
+                  onTap: onClearCache,
                 ),
               ],
             ),

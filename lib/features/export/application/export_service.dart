@@ -7,10 +7,13 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/database/app_database.dart';
 import '../../../core/files/app_paths.dart';
+import '../../../core/files/image_cache_store.dart';
 import '../../../core/tasks/task_cancellation.dart';
 import '../../../domain/ai/ai_models.dart';
 import '../../../domain/annotations/annotation.dart';
+import '../../../domain/annotations/image_anchor.dart';
 import '../../../domain/books/bookmark.dart';
+import '../../../domain/books/book_repository.dart';
 import '../../../domain/books/reading_position.dart';
 import '../../../domain/notes/note.dart';
 
@@ -22,6 +25,35 @@ final class RestoreBackupResult {
 
   final String databasePath;
   final String rollbackPath;
+}
+
+/// What an image-annotation export produced.
+///
+/// The Markdown file and the picture folder are two things on disk, so the
+/// result names both: the caller has to be able to say where the pictures
+/// went, otherwise a reader who moved the Markdown loses them silently.
+final class ImageAnnotationExportResult {
+  const ImageAnnotationExportResult({
+    required this.markdownFile,
+    required this.imageDirectory,
+    required this.imageCount,
+    required this.missingCount,
+  });
+
+  /// The Markdown file that references the pictures.
+  final File markdownFile;
+
+  /// The folder holding the copied pictures.
+  final Directory imageDirectory;
+
+  /// How many pictures were written.
+  final int imageCount;
+
+  /// How many image annotations had no cached picture to copy.
+  ///
+  /// Non-zero means the export is incomplete, and the caller should say so
+  /// rather than let the reader believe every picture made it.
+  final int missingCount;
 }
 
 final class _NotebookExportEntry {
@@ -42,6 +74,21 @@ final class _NotebookExportEntry {
   final int timestamp;
 }
 
+final class _ImageExportSection {
+  const _ImageExportSection({
+    required this.annotation,
+    required this.bookTitle,
+    this.imagePath,
+  });
+
+  final Annotation annotation;
+  final String bookTitle;
+
+  /// Path of the picture relative to the Markdown file, or null when the
+  /// picture was never cached.
+  final String? imagePath;
+}
+
 final class ExportService {
   const ExportService({
     required AppPaths appPaths,
@@ -50,6 +97,8 @@ final class ExportService {
     required AnnotationRepository annotationRepository,
     required AiConversationRepository aiConversationRepository,
     required AppDatabase database,
+    required CachedImageStore imageCacheStore,
+    required BookRepository bookRepository,
   }) : this._(
          appPaths,
          noteRepository,
@@ -57,6 +106,8 @@ final class ExportService {
          annotationRepository,
          aiConversationRepository,
          database,
+         imageCacheStore,
+         bookRepository,
        );
 
   const ExportService._(
@@ -66,6 +117,8 @@ final class ExportService {
     this._annotationRepository,
     this._aiConversationRepository,
     this._database,
+    this._imageCacheStore,
+    this._bookRepository,
   );
 
   final AppPaths _appPaths;
@@ -74,6 +127,12 @@ final class ExportService {
   final AnnotationRepository _annotationRepository;
   final AiConversationRepository _aiConversationRepository;
   final AppDatabase _database;
+
+  /// Where the cut-out pictures live.
+  final CachedImageStore _imageCacheStore;
+
+  /// Needed to put a book title on each exported picture.
+  final BookRepository _bookRepository;
 
   Future<File> exportAllNotesMarkdown({
     String? targetPath,
@@ -168,6 +227,95 @@ final class ExportService {
       file,
       _renderAiConversations(conversations),
       cancelToken: cancelToken,
+    );
+  }
+
+  /// Export the image annotations as a Markdown file plus a folder of pictures.
+  ///
+  /// The pictures come from the app's cache: they were cut out of the pages
+  /// when the reader marked them, and they are copied next to the Markdown so
+  /// the export is a self-contained folder that any editor can open.
+  ///
+  /// An image annotation whose picture was never cached is still listed in the
+  /// Markdown, with its comment and its place in the book, but without a
+  /// picture. Dropping the entry instead would lose the comment, which is the
+  /// part the reader actually wrote.
+  Future<ImageAnnotationExportResult> exportImageAnnotations({
+    String? targetPath,
+    TaskCancelToken? cancelToken,
+  }) async {
+    cancelToken?.throwIfCancelled();
+    final annotations = await _annotationRepository.getAll();
+    cancelToken?.throwIfCancelled();
+    final imageAnnotations = annotations
+        .where(
+          (annotation) =>
+              annotation.target == AnnotationTarget.image &&
+              annotation.imageAnchor != null,
+        )
+        .toList();
+
+    final file = await _targetFile(
+      targetPath,
+      prefix: 'pagesage-images',
+      extension: 'md',
+    );
+    final imageDirectory = Directory(
+      p.join(
+        p.dirname(file.path),
+        '${p.basenameWithoutExtension(file.path)}_images',
+      ),
+    );
+
+    final bookIds = <String>{
+      for (final annotation in imageAnnotations) annotation.bookId,
+    };
+    final titles = <String, String>{};
+    for (final bookId in bookIds) {
+      cancelToken?.throwIfCancelled();
+      final book = await _bookRepository.getBook(bookId);
+      titles[bookId] = book?.title ?? '未知书籍';
+    }
+
+    var imageCount = 0;
+    var missingCount = 0;
+    final sections = <_ImageExportSection>[];
+
+    for (final annotation in imageAnnotations) {
+      cancelToken?.throwIfCancelled();
+      final anchor = annotation.imageAnchor!;
+      final cached = await _imageCacheStore.get(
+        bookId: annotation.bookId,
+        anchor: anchor,
+      );
+      String? relativePath;
+      if (cached == null) {
+        missingCount++;
+      } else {
+        await imageDirectory.create(recursive: true);
+        final name = '${CachedImageStore.fileNameFor(anchor)}.png';
+        final destination = File(p.join(imageDirectory.path, name));
+        await destination.writeAsBytes(await cached.readAsBytes(), flush: true);
+        relativePath = p.join(p.basename(imageDirectory.path), name);
+        imageCount++;
+      }
+      sections.add(
+        _ImageExportSection(
+          annotation: annotation,
+          bookTitle: titles[annotation.bookId] ?? '未知书籍',
+          imagePath: relativePath,
+        ),
+      );
+    }
+
+    cancelToken?.throwIfCancelled();
+    final markdown = _renderImageAnnotations(sections);
+    await _writeTextAtomically(file, markdown, cancelToken: cancelToken);
+    return ImageAnnotationExportResult(
+      markdownFile: file,
+      imageDirectory: imageDirectory,
+      imageCount: imageCount,
+      missingCount: missingCount,
     );
   }
 
@@ -275,6 +423,54 @@ final class ExportService {
     );
   }
 
+  String _renderImageAnnotations(List<_ImageExportSection> sections) {
+    final buffer = StringBuffer()
+      ..writeln('# PageSage 图片批注导出')
+      ..writeln()
+      ..writeln('导出时间：${DateTime.now().toIso8601String()}')
+      ..writeln();
+
+    if (sections.isEmpty) {
+      buffer.writeln('暂无图片批注。');
+      return buffer.toString();
+    }
+
+    for (final section in sections) {
+      final annotation = section.annotation;
+      final anchor = annotation.imageAnchor!;
+      final page = anchor is PdfImageAnchor ? anchor.page : null;
+      buffer
+        ..writeln('## ${section.bookTitle}')
+        ..writeln()
+        ..writeln(
+          '- 位置：${page != null ? '第 $page 页' : annotation.locator.displayLabel}',
+        )
+        ..writeln('- 颜色：${annotation.color.value}');
+      final caption = annotation.selectedText.trim();
+      buffer.writeln('- 图注：${caption.isEmpty ? '未标注' : caption}');
+      final comment = annotation.noteId;
+      if (comment != null) {
+        buffer.writeln('- 关联笔记 ID：`$comment`');
+      }
+      buffer.writeln();
+      if (section.imagePath != null) {
+        buffer
+          ..writeln(
+            '![${_escapeHeading(caption.isEmpty ? '图片' : caption)}](${section.imagePath})',
+          )
+          ..writeln();
+      } else {
+        // The picture is not in the cache — it was never cut out, or the cache
+        // was cleared. Saying so beats an empty image box in the reader's
+        // exported document.
+        buffer
+          ..writeln('> 图片未缓存，未能导出。')
+          ..writeln();
+      }
+    }
+    return buffer.toString();
+  }
+
   String _renderNotes(List<Note> notes) {
     final buffer = StringBuffer()
       ..writeln('# PageSage 笔记导出')
@@ -355,6 +551,11 @@ final class ExportService {
             'selectedText': annotation.selectedText,
             'color': annotation.color.value,
             'style': annotation.style.value,
+            // Without the target and the anchor, an exported image annotation
+            // is indistinguishable from a text one and cannot be drawn again.
+            'target': annotation.target.value,
+            if (annotation.imageAnchor != null)
+              'imageAnchor': annotation.imageAnchor!.toJson(),
             if (annotation.noteId != null) 'noteId': annotation.noteId,
             'createdAt': DateTime.fromMillisecondsSinceEpoch(
               annotation.createdAt,

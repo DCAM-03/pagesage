@@ -1933,6 +1933,36 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         );
     if (!mounted) return;
     _setTransientStatus('已标注图片', clearAfter: const Duration(seconds: 2));
+    // Cut the picture out of the page and keep it in the cache, but not
+    // before the annotation is written: the reader's comment is what they
+    // asked for, and it must not wait on a page render and a disk write.
+    // The export copies these files, and it says so when one is missing.
+    unawaited(_cacheImageForAnchor(anchor));
+  }
+
+  /// Render the marked region and store it in the picture cache.
+  ///
+  /// Failure is not worth interrupting the reader over: the annotation is
+  /// still valid without its picture, and the export says so when the cache
+  /// is empty.
+  Future<void> _cacheImageForAnchor(ImageAnchor anchor) async {
+    if (anchor is! PdfImageAnchor) return;
+    // The reader may have closed while the page was still rendering.
+    if (!mounted) return;
+    final source = ref.read(activePdfRendererControllerProvider);
+    if (source == null) return;
+    try {
+      final bytes = await source.exportPageRegion(
+        pageNumber: anchor.page,
+        rect: anchor.rect,
+      );
+      if (bytes == null || bytes.isEmpty) return;
+      await ref
+          .read(imageCacheStoreProvider)
+          .put(bookId: widget.bookId, anchor: anchor, bytes: bytes);
+    } on Object {
+      // A page that will not render simply has no cached picture.
+    }
   }
 
   Future<void> _saveImageToFile(RendererImageAreaSelected event) async {
@@ -7413,6 +7443,14 @@ Future<void> _deleteAnnotation(
     await ref
         .read(annotationRepositoryProvider)
         .deleteAnnotation(annotation.id);
+    // The cached picture was cut from the book for this one annotation. With
+    // the annotation gone it is unreachable, so it goes too.
+    final anchor = annotation.imageAnchor;
+    if (anchor != null) {
+      await ref
+          .read(imageCacheStoreProvider)
+          .delete(bookId: annotation.bookId, anchor: anchor);
+    }
   }
 }
 

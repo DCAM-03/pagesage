@@ -234,6 +234,20 @@ final class FilePickerService {
     );
   }
 
+  /// Destination for the image-annotation export.
+  ///
+  /// The pictures are written into a folder next to this file, so the name
+  /// is a plain Markdown name and the folder is derived from it.
+  Future<String?> pickImageAnnotationsExportPath() {
+    return _adapter.saveFile(
+      const FileSaveRequest(
+        dialogTitle: '导出图片批注',
+        fileName: 'pagesage-images.md',
+        allowedExtensions: ['md'],
+      ),
+    );
+  }
+
   /// Destination for a picture pulled out of a book.
   ///
   /// [baseName] comes from the book title and image ordinal; it is cleaned

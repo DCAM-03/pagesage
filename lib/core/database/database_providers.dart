@@ -4,7 +4,8 @@ import '../../core/security/secure_store.dart';
 import '../../core/search/search_indexer.dart';
 import '../../core/tasks/task_cancellation.dart';
 import '../../core/tasks/task_models.dart';
-import '../../core/files/app_paths.dart';
+import '../../core/files/file_providers.dart';
+import '../../core/files/image_cache_store.dart';
 import '../../domain/ai/ai_models.dart';
 import '../../domain/annotations/annotation.dart';
 import '../../domain/books/bookmark.dart';
@@ -25,6 +26,15 @@ final appDatabaseProvider = Provider<AppDatabase>((ref) {
   final database = AppDatabase();
   ref.onDispose(database.close);
   return database;
+});
+
+/// Cache of pictures cut out of books.
+///
+/// Lives next to the other file-level services so both the reader (which
+/// writes pictures) and the export service (which reads them back) can reach
+/// it without either importing the other.
+final imageCacheStoreProvider = Provider<CachedImageStore>((ref) {
+  return CachedImageStore(appPaths: ref.watch(appPathsProvider));
 });
 
 final bookDaoProvider = Provider<BookDao>((ref) {
@@ -162,7 +172,7 @@ final searchIndexerProvider = Provider<SearchIndexer>((ref) {
 final localDataServiceProvider = Provider<LocalDataService>((ref) {
   return LocalDataService(
     database: ref.watch(appDatabaseProvider),
-    appPaths: AppPaths(),
+    appPaths: ref.watch(appPathsProvider),
     clearSecrets: () =>
         ref.read(secureStoreProvider).delete(aiApiKeyStorageKey),
   );

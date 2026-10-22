@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,9 @@ import 'package:go_router/go_router.dart';
 import 'package:pagesage/app/pagesage_app.dart';
 import 'package:pagesage/app/widgets/app_chrome.dart';
 import 'package:pagesage/core/database/database_providers.dart';
+import 'package:pagesage/core/files/app_paths.dart';
+import 'package:pagesage/core/files/file_providers.dart';
+import 'package:pagesage/core/files/image_cache_store.dart';
 import 'package:pagesage/core/platform/file_picker_service.dart';
 import 'package:pagesage/core/platform/platform_providers.dart';
 import 'package:pagesage/domain/annotations/annotation.dart';
@@ -25,10 +29,12 @@ import 'package:pagesage/domain/ai/ai_models.dart';
 import 'package:pagesage/domain/notes/note.dart';
 import 'package:pagesage/domain/search/search_models.dart';
 import 'package:pagesage/features/ai/application/ai_context_range.dart';
+import 'package:pagesage/features/ocr/application/ocr_providers.dart';
 import 'package:pagesage/features/reader/presentation/reader_page.dart';
 import 'package:pagesage/features/library/presentation/library_page.dart';
 import 'package:pagesage/features/search/presentation/search_page.dart';
 import 'package:pagesage/renderers/common/renderer_event.dart';
+import 'package:pagesage/renderers/pdf/pdf_page_image_source.dart';
 
 void main() {
   testWidgets('shows the empty library screen', (tester) async {
@@ -1677,6 +1683,114 @@ void main() {
     );
   });
 
+  testWidgets('annotating an image caches the picture for the export', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    // The store keeps the picture in memory, so no directory is needed — and
+    // creating one here would do real file I/O inside the fake-async zone,
+    // where it never settles.
+    final cache = _RecordingImageCacheStore(
+      appPaths: AppPaths(overrideRoot: Directory('unused')),
+    );
+
+    final annotations = _RecordingAnnotationRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appPathsProvider.overrideWithValue(
+            AppPaths(overrideRoot: Directory('unused')),
+          ),
+          imageCacheStoreProvider.overrideWithValue(cache),
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [
+                _libraryBook(
+                  id: 'reader-image-cache',
+                  title: '图片缓存样本',
+                  format: BookFormat.pdf,
+                  progress: 0,
+                ),
+              ],
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            _FakeSettingsRepository(),
+          ),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            const _FakeBookmarkRepository(),
+          ),
+          annotationRepositoryProvider.overrideWithValue(annotations),
+          noteRepositoryProvider.overrideWithValue(const _FakeNoteRepository()),
+          searchRepositoryProvider.overrideWithValue(
+            const _FakeSearchRepository(),
+          ),
+          aiSettingsRepositoryProvider.overrideWithValue(
+            const _FakeAiSettingsRepository(),
+          ),
+          aiConversationRepositoryProvider.overrideWithValue(
+            const _FakeAiConversationRepository(),
+          ),
+          readerRendererHostProvider.overrideWithValue(
+            (config) =>
+                _FakeRendererHost(config: config, event: RendererReady()),
+          ),
+          activePdfRendererControllerProvider.overrideWith(
+            (ref) => const _FakePdfPageImageSource(),
+          ),
+        ],
+        child: const MediaQuery(
+          data: MediaQueryData(size: Size(1280, 800)),
+          child: MaterialApp(home: ReaderPage(bookId: 'reader-image-cache')),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final host = tester.widget<_FakeRendererHost>(
+      find.byType(_FakeRendererHost),
+    );
+    host.config.onImageAreaSelected?.call(
+      const RendererImageAreaSelected(
+        anchor: PdfImageAnchor(
+          page: 5,
+          ordinal: 1,
+          resourceName: 'Im2',
+          rect: ReaderRect(x: 0.1, y: 0.1, width: 0.4, height: 0.3),
+        ),
+        sourceRect: ReaderRect(
+          page: 5,
+          x: 100,
+          y: 100,
+          width: 200,
+          height: 150,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('注释此图'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    expect(annotations.saved, hasLength(1));
+    final anchor = annotations.saved.single.imageAnchor!;
+    // The export copies this file; without it the picture would have to be
+    // cut from the page again at export time.
+    expect(cache.stored, hasLength(1));
+    expect(cache.stored.single.anchor, anchor);
+    expect(cache.stored.single.bytes, isNotEmpty);
+  });
+
   testWidgets('an image box becomes an image annotation, keeping its anchor', (
     tester,
   ) async {
@@ -1800,7 +1914,6 @@ void main() {
     // jump path carries.
     expect(saved.locator.page, 3);
     expect(saved.locator.selectionRects, hasLength(1));
-
     // Saving a box ends the mode: the gesture must mean what it meant before.
     host = tester.widget<_FakeRendererHost>(find.byType(_FakeRendererHost));
     expect(host.config.imageDragMode, isFalse);
@@ -2065,6 +2178,49 @@ final class _FakeRendererHostState extends State<_FakeRendererHost> {
     widget.exportConfig?.call(widget.config);
     return Center(child: Text('Fake renderer ${widget.config.book.title}'));
   }
+}
+
+/// A picture cache that keeps what it was given instead of writing to disk.
+///
+/// A real write from a tap handler never settles inside the fake-async zone
+/// of `testWidgets`, so the widget test watches the calls rather than the
+/// files. The files themselves are covered by `image_cache_store_test.dart`.
+final class _RecordingImageCacheStore extends CachedImageStore {
+  _RecordingImageCacheStore({required super.appPaths});
+
+  final List<({String bookId, ImageAnchor anchor, Uint8List bytes})> stored =
+      <({String bookId, ImageAnchor anchor, Uint8List bytes})>[];
+
+  @override
+  Future<File> put({
+    required String bookId,
+    required ImageAnchor anchor,
+    required Uint8List bytes,
+  }) async {
+    stored.add((bookId: bookId, anchor: anchor, bytes: bytes));
+    return File('${anchor.runtimeType}.png');
+  }
+}
+
+final class _FakePdfPageImageSource implements PdfPageImageSource {
+  const _FakePdfPageImageSource();
+
+  @override
+  Future<Uint8List?> exportPageImage({
+    required int pageNumber,
+    double quality = 1,
+  }) async => Uint8List.fromList([1, 2, 3]);
+
+  @override
+  Future<Uint8List?> exportPageRegion({
+    required int pageNumber,
+    required ReaderRect rect,
+  }) async => Uint8List.fromList([1, 2, 3]);
+
+  @override
+  Future<List<int>> getVisiblePages({int? fallbackPage}) async => [
+    fallbackPage ?? 1,
+  ];
 }
 
 final class _RecordingFilePickerAdapter implements FilePickerAdapter {

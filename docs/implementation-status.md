@@ -93,6 +93,11 @@ PDF 渲染迁移（`docs/10-pdf-renderer-migration.md`，2026-10-21）：
 - **划词修复（2026-10-21，见 `11-pdf-canvas-implementation-plan.md` §25）**：`positionNear` 按 run 包围盒评分，在排版复杂的书上 3–27% 的点落到非指针所在行（最远 729pt）。改为 em 空间基线带判定 + 同行 run 合并 + 行内水平距离决胜；真实书网格复测错行 0.0%。顺带修掉前页/正文页尺寸不同导致的逐行偏移、连点失效、跨页拖选不滚动。
 - **待办**：S8 收口——Windows/Android 手工回归、旋转页标注、夜间标注配色、真机帧时间与峰值内存。
 
+图片批注（`docs/13-image-annotations.md` / `docs/tasks/image-annotations.md`，2026-10-22）：
+- B1 完成：PDF 拖框模式、视图内吸附、`annotations` 表 v4→v5（`target` / `image_anchor`）、四角括号描边、Notebook 图片条目与琥珀色跳回闪烁、`exportPageRegion` 保存 PNG。
+- B2 完成：标注时裁图进 `<cache>/images/<bookId>/`（文件名按图的同一性，不按矩形）、设置页「导出图片批注」（Markdown + 同级图片目录 + 相对路径）、「清理图片缓存」、删书/删批注清缓存、标注 JSON 补上 `target` 与 `imageAnchor`。裁图不挡读者的路：批注先写库，裁图在之后自己跑。
+- **待办**：B3（EPUB 图片渲染，当前加载器丢弃 `<img>`，是独立的产品缺陷）、B4、B5；以及「重启后批注仍在原位」的真实应用手动确认。
+
 AI 检索层（`docs/12-ai-retrieval-strategy.md`，2026-10-21）：
 - **选型已定**：全书 / 文件夹关联采用「结构感知的词法检索」（复用 FTS5 + EPUB 目录树 / PDF 大纲），**不采用 DCI，不引入向量 RAG**。
 - 依据：DCI 在 Android 无 shell 不可行；实测同准确率下 token 高 338×、成本高 17.5×、延迟 4–20×；论文自述语料从 10 万增至 40 万文档时准确率跌至 37.5%。向量 RAG 需 100MB+ 嵌入模型与两个原生依赖，对 3,499 块的语料规模不划算。

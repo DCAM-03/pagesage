@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
 import 'package:pagesage/core/files/app_paths.dart';
+import 'package:pagesage/core/files/image_cache_store.dart';
 import 'package:pagesage/domain/ai/ai_models.dart';
 import 'package:pagesage/domain/annotations/annotation.dart';
 import 'package:pagesage/domain/annotations/image_anchor.dart';
+import 'package:pagesage/domain/books/book.dart';
+import 'package:pagesage/domain/books/book_repository.dart';
 import 'package:pagesage/domain/books/bookmark.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/domain/notes/note.dart';
@@ -61,6 +65,188 @@ void main() {
     expect(content, contains('"annotations"'));
     expect(content, contains('"chapterOffset": 12'));
     expect(content, contains('"selectedText": "highlighted text"'));
+  });
+
+  test('annotations JSON keeps the target and the image anchor', () async {
+    final service = _service(
+      database,
+      annotations: [
+        Annotation(
+          id: 'annotation-image',
+          bookId: 'book-1',
+          locator: ReadingLocator.pdf(
+            page: 12,
+            selectionRects: const [
+              ReaderRect(x: 0.1, y: 0.2, width: 0.3, height: 0.4),
+            ],
+          ),
+          selectedText: '图 3 的说明',
+          color: AnnotationColor.blue,
+          style: AnnotationStyle.highlight,
+          createdAt: 1,
+          updatedAt: 2,
+          target: AnnotationTarget.image,
+          imageAnchor: const PdfImageAnchor(
+            page: 12,
+            ordinal: 3,
+            resourceName: 'Im1',
+            rect: ReaderRect(x: 0.1, y: 0.2, width: 0.3, height: 0.4),
+          ),
+        ),
+      ],
+    );
+
+    final file = await service.exportAnnotationsJson(
+      targetPath: '${tempDir.path}/annotations.json',
+    );
+
+    final content = await file.readAsString();
+    // Without these two the export cannot tell an image annotation from a
+    // text one, and the picture's place in the book is lost.
+    expect(content, contains('"target": "image"'));
+    expect(content, contains('"kind": "pdf"'));
+    expect(content, contains('"resourceName": "Im1"'));
+    expect(content, contains('"ordinal": 3'));
+  });
+
+  group('image annotation export', () {
+    test(
+      'writes the markdown and copies the cached picture next to it',
+      () async {
+        final appPaths = AppPaths(overrideRoot: tempDir);
+        final cache = CachedImageStore(appPaths: appPaths);
+        const anchor = PdfImageAnchor(
+          page: 12,
+          ordinal: 3,
+          resourceName: 'Im1',
+          rect: ReaderRect(x: 0.1, y: 0.2, width: 0.3, height: 0.4),
+        );
+        await cache.put(
+          bookId: 'book-1',
+          anchor: anchor,
+          bytes: Uint8List.fromList([1, 2, 3]),
+        );
+
+        final service = _service(
+          database,
+          annotations: [
+            Annotation(
+              id: 'annotation-image',
+              bookId: 'book-1',
+              locator: ReadingLocator.pdf(page: 12),
+              selectedText: '图 3 的说明',
+              color: AnnotationColor.blue,
+              style: AnnotationStyle.highlight,
+              createdAt: 1,
+              updatedAt: 2,
+              target: AnnotationTarget.image,
+              imageAnchor: anchor,
+            ),
+          ],
+          imageCacheStore: cache,
+          bookRepository: _FakeBookRepository({'book-1': '一本书'}),
+        );
+
+        final target = p.join(tempDir.path, 'export', 'images.md');
+        final result = await service.exportImageAnnotations(targetPath: target);
+
+        expect(result.imageCount, 1);
+        expect(result.missingCount, 0);
+        expect(await result.markdownFile.exists(), isTrue);
+
+        final markdown = await result.markdownFile.readAsString();
+        expect(markdown, contains('# PageSage 图片批注导出'));
+        expect(markdown, contains('一本书'));
+        expect(markdown, contains('第 12 页'));
+        expect(markdown, contains('图 3 的说明'));
+
+        // The picture is referenced relative to the Markdown, so moving the
+        // pair together keeps the link working.
+        final match = RegExp(r'!\[[^\]]*\]\(([^)]+)\)').firstMatch(markdown);
+        expect(match, isNotNull);
+        final relative = match!.group(1)!;
+        expect(relative, isNot(startsWith('/')));
+        final copied = File(p.join(p.dirname(target), relative));
+        expect(await copied.exists(), isTrue);
+        expect(await copied.readAsBytes(), [1, 2, 3]);
+      },
+    );
+
+    test('an annotation without a cached picture keeps its comment', () async {
+      final appPaths = AppPaths(overrideRoot: tempDir);
+      final service = _service(
+        database,
+        annotations: [
+          Annotation(
+            id: 'annotation-image',
+            bookId: 'book-1',
+            locator: ReadingLocator.pdf(page: 12),
+            selectedText: '图 3 的说明',
+            color: AnnotationColor.blue,
+            style: AnnotationStyle.highlight,
+            createdAt: 1,
+            updatedAt: 2,
+            target: AnnotationTarget.image,
+            imageAnchor: const PdfImageAnchor(
+              page: 12,
+              ordinal: 3,
+              rect: ReaderRect(x: 0.1, y: 0.2, width: 0.3, height: 0.4),
+            ),
+          ),
+        ],
+        imageCacheStore: CachedImageStore(appPaths: appPaths),
+        bookRepository: _FakeBookRepository({'book-1': '一本书'}),
+      );
+
+      final result = await service.exportImageAnnotations(
+        targetPath: p.join(tempDir.path, 'export', 'images.md'),
+      );
+
+      expect(result.imageCount, 0);
+      expect(result.missingCount, 1);
+      final markdown = await result.markdownFile.readAsString();
+      // The picture is gone, but the comment is the reader's own writing and
+      // must not be dropped along with it.
+      expect(markdown, contains('图 3 的说明'));
+      expect(markdown, contains('图片未缓存'));
+    });
+
+    test(
+      'an image without a caption says so instead of inventing one',
+      () async {
+        final appPaths = AppPaths(overrideRoot: tempDir);
+        final service = _service(
+          database,
+          annotations: [
+            Annotation(
+              id: 'annotation-image',
+              bookId: 'book-1',
+              locator: ReadingLocator.pdf(page: 12),
+              selectedText: '',
+              color: AnnotationColor.blue,
+              style: AnnotationStyle.highlight,
+              createdAt: 1,
+              updatedAt: 2,
+              target: AnnotationTarget.image,
+              imageAnchor: const PdfImageAnchor(
+                page: 12,
+                ordinal: 1,
+                rect: ReaderRect(x: 0.1, y: 0.2, width: 0.3, height: 0.4),
+              ),
+            ),
+          ],
+          imageCacheStore: CachedImageStore(appPaths: appPaths),
+          bookRepository: _FakeBookRepository({'book-1': '一本书'}),
+        );
+
+        final result = await service.exportImageAnnotations(
+          targetPath: p.join(tempDir.path, 'export', 'images.md'),
+        );
+
+        final markdown = await result.markdownFile.readAsString();
+        expect(markdown, contains('未标注'));
+      },
+    );
   });
 
   test('exports combined notebook markdown', () async {
@@ -139,6 +325,8 @@ void main() {
         annotationRepository: const _FakeAnnotationRepository([]),
         aiConversationRepository: const _FakeAiConversationRepository([]),
         database: database,
+        imageCacheStore: CachedImageStore(appPaths: appPaths),
+        bookRepository: _FakeBookRepository(),
       );
 
       final backup = await service.backupDatabaseZip(
@@ -162,6 +350,8 @@ ExportService _service(
   List<Bookmark> bookmarks = const [],
   List<Annotation> annotations = const [],
   List<AiConversation> conversations = const [],
+  CachedImageStore? imageCacheStore,
+  BookRepository? bookRepository,
 }) {
   return ExportService(
     appPaths: AppPaths(),
@@ -170,6 +360,8 @@ ExportService _service(
     annotationRepository: _FakeAnnotationRepository(annotations),
     aiConversationRepository: _FakeAiConversationRepository(conversations),
     database: database,
+    imageCacheStore: imageCacheStore ?? CachedImageStore(appPaths: AppPaths()),
+    bookRepository: bookRepository ?? _FakeBookRepository(),
   );
 }
 
@@ -379,4 +571,85 @@ final class _FakeAiConversationRepository implements AiConversationRepository {
   @override
   Stream<List<AiConversation>> watchConversations() =>
       Stream.value(conversations);
+}
+
+/// A repository that only knows the titles the export prints.
+final class _FakeBookRepository implements BookRepository {
+  _FakeBookRepository([Map<String, String> titles = const {}])
+    : _titles = titles;
+
+  final Map<String, String> _titles;
+
+  @override
+  Future<Book?> getBook(String id) async {
+    final title = _titles[id];
+    if (title == null) {
+      return null;
+    }
+    return Book(
+      id: id,
+      title: title,
+      format: BookFormat.pdf,
+      libraryFilePath: '/library/$id.pdf',
+      fileHash: 'hash-$id',
+      fileSize: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    );
+  }
+
+  @override
+  Future<void> deleteBook(String bookId) async {}
+
+  @override
+  Future<Book> createImportedBook(NewBookDraft draft) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<LibraryBook>> getLibrary() async => const [];
+
+  @override
+  Future<ReadingProgressSnapshot?> getProgress(String bookId) async => null;
+
+  @override
+  Future<Book?> findByHash(String fileHash) async => null;
+
+  @override
+  Future<void> markOpened(String bookId) async {}
+
+  @override
+  Future<void> saveProgress({
+    required String bookId,
+    required ReadingLocator locator,
+    required double progress,
+    String? chapterTitle,
+    int? pageNumber,
+  }) async {}
+
+  @override
+  Future<void> toggleFavorite(String bookId, bool isFavorite) async {}
+
+  @override
+  Future<void> updateCategory(String bookId, String? categoryId) async {}
+
+  @override
+  Future<void> updateIndexingStatus(
+    String bookId,
+    String indexingStatus,
+  ) async {}
+
+  @override
+  Future<void> updateMetadata({
+    required String bookId,
+    String? title,
+    String? author,
+    String? coverPath,
+    String? description,
+  }) async {}
+
+  @override
+  Future<void> updateReadStatus(String bookId, ReadStatus readStatus) async {}
+
+  @override
+  Stream<List<LibraryBook>> watchLibrary() => Stream.value(const []);
 }
