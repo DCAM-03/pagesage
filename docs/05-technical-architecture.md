@@ -406,7 +406,9 @@ JS -> Dart event：
 
 ```text
 lib/renderers/epub/epub_document_loader.dart
+lib/renderers/epub/epub_chapter_parser.dart
 lib/renderers/epub/epub_document.dart
+lib/renderers/epub/epub_paginator.dart
 lib/renderers/epub/epub_renderer_view.dart
 ```
 
@@ -419,6 +421,22 @@ lib/renderers/epub/epub_renderer_view.dart
 - text selection。
 - search。
 - annotations。
+- 插图（2026-10-22）：书里的图片按文档顺序显示在文字之间。
+
+**章节模型：一个字符串加一串块。** `EpubChapter.text` 仍然只有字，图片不占字符；
+`EpubChapter.blocks` 说明文字与图片在文中的先后。搜索、进度、跳转、划词高亮全都建立在
+字符偏移上，让它们去理解「有些东西不是字」会到处漏 —— 与其如此，不如让偏移从一开始
+就只有一种意思。
+
+**文本是写出来的，不是读出来的。** 章节文本与它的偏移必须严丝合缝：跳到错字比跳不过去
+更糟。解析器一边走标记一边拼文本，偏移是副产品。带 `id` 的元素会把它的偏移记进
+`EpubChapter.anchors`，目录跳转因此落在准确的位置。
+
+**图片有护栏。** 字节从 archive 读；`data:` URI 支持，远程图片不加载（本地优先）；
+单图的字节与像素预算硬限制，且尺寸在解码之前从图片头部读 —— 一张 20000×20000 的图
+先解再量，内存已经没了。加载失败时显示带原因和 `alt` 的占位块，不留空白。
+
+**图注是正文的一部分。** `figcaption` 参与排版，也参与搜索。
 
 ### 11.4 PDF Renderer
 

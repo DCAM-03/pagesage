@@ -5,9 +5,15 @@ import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 
+import 'epub_chapter_parser.dart';
 import 'epub_document.dart';
 
-final class EpubDocumentLoader {
+/// Opens an EPUB and reads what is in it.
+///
+/// Not `final`: a widget test subclasses this to hand the renderer a
+/// document it has already built, because a file read from inside the
+/// fake-async zone of `testWidgets` never settles.
+class EpubDocumentLoader {
   const EpubDocumentLoader();
 
   static final Map<String, Future<EpubDocument>> _inFlight = {};
@@ -72,13 +78,14 @@ final class EpubDocumentLoader {
     final package = _parsePackage(opf, opfPath);
 
     final chapters = <EpubChapter>[];
+    final parser = EpubChapterParser(entries: entries);
     for (final href in package.spinePaths) {
       final entry = entries[_normalizePath(href)];
       if (entry == null || !entry.isFile) {
         continue;
       }
       final xhtml = _readUtf8(entry);
-      final text = _extractText(xhtml);
+      final parsed = parser.parse(xhtml: xhtml, href: href);
       // Keep empty/image-only spine items so TOC hrefs can still resolve.
       chapters.add(
         EpubChapter(
@@ -86,10 +93,12 @@ final class EpubDocumentLoader {
           href: href,
           title:
               _extractTitle(xhtml) ??
-              (text.trim().isEmpty
+              (parsed.text.trim().isEmpty
                   ? '插图 ${chapters.length + 1}'
                   : '章节 ${chapters.length + 1}'),
-          text: text,
+          text: parsed.text,
+          blocks: parsed.blocks,
+          anchors: parsed.anchors,
         ),
       );
     }
@@ -473,6 +482,12 @@ final class EpubDocumentLoader {
     if (chapter == null) {
       return null;
     }
+    // The chapter was parsed with its anchors, so this is the exact place
+    // the element's text begins.
+    final anchor = chapter.anchors[fragment];
+    if (anchor != null) {
+      return anchor.clamp(0, chapter.text.length).toInt();
+    }
     final entry = entries[_normalizePath(chapter.href)];
     if (entry == null || !entry.isFile) {
       return null;
@@ -512,30 +527,6 @@ final class EpubDocumentLoader {
       return normalized.length.clamp(0, chapter.text.length).toInt();
     } on Object {
       return null;
-    }
-  }
-
-  String _extractText(String xhtml) {
-    try {
-      final document = XmlDocument.parse(
-        xhtml,
-        entityMapping: const XmlDefaultEntityMapping.html5(),
-      );
-      final body = _firstOrNull(
-        document.findAllElements('body', namespace: '*'),
-      );
-      return _normalizeText((body ?? document.rootElement).innerText);
-    } on XmlParserException {
-      final withoutScripts = xhtml
-          .replaceAll(
-            RegExp(r'<script[\s\S]*?</script>', caseSensitive: false),
-            ' ',
-          )
-          .replaceAll(
-            RegExp(r'<style[\s\S]*?</style>', caseSensitive: false),
-            ' ',
-          );
-      return _normalizeText(withoutScripts.replaceAll(RegExp(r'<[^>]+>'), ' '));
     }
   }
 

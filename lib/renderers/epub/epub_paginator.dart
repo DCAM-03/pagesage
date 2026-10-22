@@ -123,6 +123,15 @@ final class EpubPaginator {
         continue;
       }
 
+      // A picture is never split: it either fits on a page or it is
+      // scaled to fit one.
+      if (block.type == EpubBlockType.image) {
+        flush();
+        addMeasured(measured);
+        flush();
+        continue;
+      }
+
       flush();
       var localStart = 0;
       var continuation = false;
@@ -169,6 +178,23 @@ final class EpubPaginator {
   }
 
   _MeasuredFragment _measureBlock(EpubBlock block, EpubPageMetrics metrics) {
+    if (block.type == EpubBlockType.image) {
+      return _MeasuredFragment(
+        fragment: EpubPageFragment(
+          chapterIndex: block.chapter.index,
+          href: block.chapter.href,
+          startOffset: block.startOffset,
+          endOffset: block.endOffset,
+          text: '',
+          blockType: EpubBlockType.image,
+          image: block.image,
+        ),
+        height:
+            _imageHeight(block.image, metrics) +
+            metrics.chromeHeightFor(block.type) +
+            metrics.spacingFor(block.type),
+      );
+    }
     final height = _measure(
       block.text,
       metrics.styleFor(block.type),
@@ -188,6 +214,29 @@ final class EpubPaginator {
           metrics.chromeHeightFor(block.type) +
           metrics.spacingFor(block.type),
     );
+  }
+
+  /// How tall a picture is on the page.
+  ///
+  /// The picture is drawn at the width of the text column, so its height
+  /// follows from its own proportions. A picture taller than the page is
+  /// scaled down to fit: a page that shows half a figure is worse than a
+  /// smaller whole one.
+  ///
+  /// A picture smaller than the column is not blown up to fill it. A
+  /// 64-pixel icon drawn across 760 points is a blur, and a book that
+  /// meant it as an icon should look like one.
+  double _imageHeight(EpubImage? image, EpubPageMetrics metrics) {
+    if (image == null) {
+      return 0;
+    }
+    final width = metrics.imageWidthFor(image);
+    final height = width / image.aspectRatio;
+    final maxHeight = metrics.contentHeight * 0.82;
+    if (height <= maxHeight) {
+      return height;
+    }
+    return maxHeight;
   }
 
   _MeasuredFragment _largestFittingFragment({
@@ -327,15 +376,21 @@ final class EpubPageMetrics {
         fontSize: baseStyle.fontSize! * 0.92,
         height: 1.52,
       ),
-      EpubBlockType.imagePlaceholder || EpubBlockType.paragraph => baseStyle,
+      EpubBlockType.caption => baseStyle.copyWith(
+        fontSize: baseStyle.fontSize! * 0.88,
+        height: (baseStyle.height ?? 1.5) * 0.95,
+      ),
+      EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
     };
   }
 
   double measureWidthFor(EpubBlockType type) {
     final chrome = switch (type) {
       EpubBlockType.code => 28.0,
-      EpubBlockType.imagePlaceholder => 32.0,
-      EpubBlockType.heading || EpubBlockType.paragraph => 0.0,
+      EpubBlockType.image => 0.0,
+      EpubBlockType.heading ||
+      EpubBlockType.caption ||
+      EpubBlockType.paragraph => 0.0,
     };
     final width = contentWidth - chrome;
     return width < 120 ? contentWidth : width;
@@ -344,8 +399,10 @@ final class EpubPageMetrics {
   double chromeHeightFor(EpubBlockType type) {
     return switch (type) {
       EpubBlockType.code => 22.0,
-      EpubBlockType.imagePlaceholder => 44.0,
-      EpubBlockType.heading || EpubBlockType.paragraph => 0.0,
+      EpubBlockType.image => 0.0,
+      EpubBlockType.heading ||
+      EpubBlockType.caption ||
+      EpubBlockType.paragraph => 0.0,
     };
   }
 
@@ -353,9 +410,25 @@ final class EpubPageMetrics {
     return switch (type) {
       EpubBlockType.heading => paragraphSpacing * 1.55,
       EpubBlockType.code => paragraphSpacing * 1.35,
-      EpubBlockType.imagePlaceholder => paragraphSpacing * 1.2,
+      EpubBlockType.caption => paragraphSpacing * 0.6,
+      EpubBlockType.image => paragraphSpacing * 1.2,
       EpubBlockType.paragraph => paragraphSpacing,
     };
+  }
+
+  /// How wide a picture is drawn.
+  ///
+  /// The column is the widest a picture goes. A picture that is narrower
+  /// than the column in its own pixels keeps its size, so an icon stays
+  /// an icon instead of being stretched into a mural.
+  double imageWidthFor(EpubImage image) {
+    final column = contentWidth;
+    if (image.pixelWidth <= 0) {
+      return column;
+    }
+    // One point is one pixel here, so a picture's own width in pixels is
+    // the width it would have at full size.
+    return image.pixelWidth > column ? column : image.pixelWidth.toDouble();
   }
 }
 
@@ -396,6 +469,7 @@ final class EpubPageFragment {
     required this.text,
     required this.blockType,
     this.isContinuation = false,
+    this.image,
   });
 
   final int chapterIndex;
@@ -405,6 +479,9 @@ final class EpubPageFragment {
   final String text;
   final EpubBlockType blockType;
   final bool isContinuation;
+
+  /// The picture, when this fragment is one.
+  final EpubImage? image;
 }
 
 final class EpubBlock {
@@ -414,6 +491,7 @@ final class EpubBlock {
     required this.endOffset,
     required this.text,
     required this.type,
+    this.image,
   });
 
   final EpubChapter chapter;
@@ -421,9 +499,10 @@ final class EpubBlock {
   final int endOffset;
   final String text;
   final EpubBlockType type;
-}
 
-enum EpubBlockType { paragraph, heading, code, imagePlaceholder }
+  /// The picture, when this block is one.
+  final EpubImage? image;
+}
 
 final class _MeasuredFragment {
   const _MeasuredFragment({required this.fragment, required this.height});
@@ -432,7 +511,39 @@ final class _MeasuredFragment {
   final double height;
 }
 
+/// The blocks of a chapter, in the order they are read.
+///
+/// A chapter parsed from markup already knows its blocks, including where
+/// its pictures sit. A chapter that was not parsed — one built by hand in
+/// a test, say — has only text, and its blocks are found by splitting the
+/// text on blank lines.
 List<EpubBlock> epubBlocks(EpubChapter chapter) {
+  if (chapter.blocks.isNotEmpty) {
+    return [
+      for (final block in chapter.blocks)
+        if (block is EpubTextBlock)
+          EpubBlock(
+            chapter: chapter,
+            startOffset: block.startOffset,
+            endOffset: block.endOffset,
+            text: block.text,
+            type: block.type,
+          )
+        else if (block is EpubImageBlock)
+          EpubBlock(
+            chapter: chapter,
+            startOffset: block.startOffset,
+            endOffset: block.endOffset,
+            text: '',
+            type: EpubBlockType.image,
+            image: block.image,
+          ),
+    ];
+  }
+  return _blocksFromText(chapter);
+}
+
+List<EpubBlock> _blocksFromText(EpubChapter chapter) {
   final text = chapter.text;
   final blocks = <EpubBlock>[];
   var cursor = 0;
@@ -490,12 +601,6 @@ List<String> epubParagraphs(String text) {
 
 EpubBlockType _detectBlockType(String text, String chapterTitle) {
   final trimmed = text.trim();
-  final lower = trimmed.toLowerCase();
-  if (lower.startsWith('[image') ||
-      lower.startsWith('image:') ||
-      lower.startsWith('figure:')) {
-    return EpubBlockType.imagePlaceholder;
-  }
   final lines = trimmed.split('\n');
   final indentedLines = lines
       .where((line) => line.startsWith('  ') || line.startsWith('\t'))

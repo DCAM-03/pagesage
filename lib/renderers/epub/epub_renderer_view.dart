@@ -26,6 +26,7 @@ final class EpubRendererView extends StatefulWidget {
     this.searchQuery,
     this.focusLocator,
     this.jumpToken = 0,
+    this.documentLoader,
     super.key,
   });
 
@@ -41,6 +42,12 @@ final class EpubRendererView extends StatefulWidget {
 
   /// Bumped by the host when the reader should jump without remounting.
   final int jumpToken;
+
+  /// How the book is opened.
+  ///
+  /// A widget test passes its own, because a file read from inside the
+  /// fake-async zone of `testWidgets` never settles.
+  final EpubDocumentLoader? documentLoader;
 
   @override
   State<EpubRendererView> createState() => _EpubRendererViewState();
@@ -75,7 +82,9 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   @override
   void initState() {
     super.initState();
-    _documentFuture = EpubDocumentLoader().load(widget.book.libraryFilePath);
+    _documentFuture = (widget.documentLoader ?? EpubDocumentLoader()).load(
+      widget.book.libraryFilePath,
+    );
     _scrollController.addListener(_scheduleLocationReport);
   }
 
@@ -1741,6 +1750,7 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
             endOffset: block.endOffset,
             text: block.text,
             blockType: block.type,
+            image: block.image,
           ),
         )
         .toList(growable: false);
@@ -1819,6 +1829,12 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
   @override
   Widget build(BuildContext context) {
     final fragment = widget.fragment;
+    if (fragment.blockType == EpubBlockType.image) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
+        child: _EpubImageView(settings: widget.settings, image: fragment.image),
+      );
+    }
     final style = _styleForFragment(fragment, _baseStyle());
     // Use plain Text.rich so a parent SelectionArea can span multiple
     // paragraphs. SelectableText creates isolated selection regions.
@@ -1837,11 +1853,10 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
           settings: widget.settings,
           child: text,
         ),
-        EpubBlockType.imagePlaceholder => _EpubImagePlaceholder(
-          settings: widget.settings,
-          label: fragment.text,
-        ),
-        EpubBlockType.heading || EpubBlockType.paragraph => text,
+        EpubBlockType.caption => _EpubCaption(child: text),
+        EpubBlockType.image ||
+        EpubBlockType.heading ||
+        EpubBlockType.paragraph => text,
       },
     );
   }
@@ -1871,7 +1886,8 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     return switch (fragment.blockType) {
       EpubBlockType.heading => widget.settings.paragraphSpacing * 1.55,
       EpubBlockType.code => widget.settings.paragraphSpacing * 1.35,
-      EpubBlockType.imagePlaceholder => widget.settings.paragraphSpacing * 1.2,
+      EpubBlockType.caption => widget.settings.paragraphSpacing * 0.6,
+      EpubBlockType.image => widget.settings.paragraphSpacing * 1.2,
       EpubBlockType.paragraph => widget.settings.paragraphSpacing,
     };
   }
@@ -1888,7 +1904,12 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
         fontSize: baseStyle.fontSize! * 0.92,
         height: 1.52,
       ),
-      EpubBlockType.imagePlaceholder || EpubBlockType.paragraph => baseStyle,
+      EpubBlockType.caption => baseStyle.copyWith(
+        fontSize: baseStyle.fontSize! * 0.88,
+        height: (baseStyle.height ?? 1.5) * 0.95,
+        color: baseStyle.color?.withValues(alpha: 0.72),
+      ),
+      EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
     };
   }
 
@@ -2239,18 +2260,98 @@ final class _EpubCodeBlock extends StatelessWidget {
   }
 }
 
+/// A picture from the book.
+///
+/// The picture is drawn at the width of the text column, at the
+/// proportions it was made at. Nothing is filtered or inverted: a
+/// photograph that looks wrong under a night theme is worse than a
+/// photograph that is a little bright.
+final class _EpubImageView extends StatelessWidget {
+  const _EpubImageView({required this.settings, required this.image});
+
+  final ReaderSettings settings;
+  final EpubImage? image;
+
+  @override
+  Widget build(BuildContext context) {
+    final picture = image;
+    if (picture == null || !picture.isAvailable) {
+      return _EpubImagePlaceholder(
+        settings: settings,
+        label: picture?.unavailableReason ?? '图片',
+        alt: picture?.alt,
+      );
+    }
+    return Semantics(
+      label: picture.alt ?? '插图',
+      image: true,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // The picture is drawn at the width of the column, unless it is
+          // smaller than that to begin with: an icon stretched across the
+          // page is a blur, and a book that meant it as an icon should
+          // look like one.
+          final available = constraints.maxWidth;
+          final width = picture.pixelWidth > 0 && picture.pixelWidth < available
+              ? picture.pixelWidth.toDouble()
+              : available;
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Image.memory(
+              picture.bytes,
+              fit: BoxFit.contain,
+              width: width,
+              errorBuilder: (context, error, stackTrace) =>
+                  _EpubImagePlaceholder(
+                    settings: settings,
+                    label: '图片无法显示',
+                    alt: picture.alt,
+                  ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// A figure's caption: quieter than the prose around it.
+final class _EpubCaption extends StatelessWidget {
+  const _EpubCaption({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTextStyle.merge(
+      style: Theme.of(context).textTheme.bodySmall,
+      child: child,
+    );
+  }
+}
+
 final class _EpubImagePlaceholder extends StatelessWidget {
-  const _EpubImagePlaceholder({required this.settings, required this.label});
+  const _EpubImagePlaceholder({
+    required this.settings,
+    required this.label,
+    this.alt,
+  });
 
   final ReaderSettings settings;
   final String label;
+
+  /// The book's own description of the picture, shown under the reason.
+  final String? alt;
 
   @override
   Widget build(BuildContext context) {
     final foreground = settings.themePreset.foreground;
     final normalizedLabel = label.trim().isEmpty ? '图片占位' : label.trim();
+    final altText = alt?.trim();
     return Semantics(
-      label: normalizedLabel,
+      label: altText == null || altText.isEmpty
+          ? normalizedLabel
+          : '$normalizedLabel：$altText',
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: foreground.withValues(alpha: 0.045),
@@ -2268,13 +2369,30 @@ final class _EpubImagePlaceholder extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  normalizedLabel,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: foreground.withValues(alpha: 0.68),
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      normalizedLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: foreground.withValues(alpha: 0.68),
+                      ),
+                    ),
+                    if (altText != null && altText.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        altText,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: foreground.withValues(alpha: 0.52),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
