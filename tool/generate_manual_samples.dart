@@ -199,6 +199,17 @@ Future<List<GeneratedSample>> generateManualSamples({
       write: (file) => file.writeAsBytes(buildImageOnlyPdf(), flush: true),
     ),
     GeneratedSample(
+      fileName: 'image-xobject.pdf',
+      description: '单张图片 PDF：一页，含真实图片 XObject，用于图片批注与吸附验收。',
+      write: (file) => file.writeAsBytes(buildImageXObjectPdf(), flush: true),
+    ),
+    GeneratedSample(
+      fileName: 'image-xobject-rotated.pdf',
+      description: '旋转 90° 的单张图片 PDF：用于图片批注在旋转页上的坐标验收。',
+      write: (file) =>
+          file.writeAsBytes(buildImageXObjectPdf(rotate: 90), flush: true),
+    ),
+    GeneratedSample(
       fileName: 'broken.pdf',
       description: '损坏 PDF：用于可恢复错误 UI。',
       write: (file) => file.writeAsBytes(
@@ -458,6 +469,58 @@ ET''';
         '/Count 1 /Dest [5 0 R /XYZ 72 730 0] >>',
     '<< /Title (Section 2.1) /Parent $itemTwo 0 R '
         '/Dest [5 0 R /XYZ 72 500 0] >>',
+  ]);
+}
+
+/// A page with one real image XObject and no text: the one sample that
+/// exercises the image path.
+///
+/// `image-only.pdf` cannot serve this purpose despite its name — it draws its
+/// checkerboard with vector paths, so a renderer (and any image detector)
+/// finds no image at all. Tests that need an image must use this file.
+///
+/// The image is a 300x200 placement at user-space (150, 400) on a 612x792
+/// page, and [rotate] turns the whole page so the display-space geometry can
+/// be checked too.
+Uint8List buildImageXObjectPdf({int rotate = 0}) {
+  const imageWidth = 120;
+  const imageHeight = 80;
+  final rgb = Uint8List(imageWidth * imageHeight * 3);
+  for (var y = 0; y < imageHeight; y += 1) {
+    for (var x = 0; x < imageWidth; x += 1) {
+      final offset = (y * imageWidth + x) * 3;
+      // A two-tone pattern, so a wrong decode is visible rather than a flat
+      // colour that could pass for a correct one.
+      final light = ((x ~/ 15) + (y ~/ 15)).isEven;
+      rgb[offset] = light ? 220 : 40;
+      rgb[offset + 1] = light ? 96 : 70;
+      rgb[offset + 2] = light ? 64 : 120;
+    }
+  }
+  // ASCIIHexDecode keeps the whole file printable, so the existing
+  // string-based object writer stays valid; a binary stream would be mangled
+  // by its ASCII encoding.
+  final hex = StringBuffer();
+  for (final byte in rgb) {
+    hex.write(byte.toRadixString(16).padLeft(2, '0'));
+  }
+  hex.write('>');
+  const operations = '''
+q
+300 0 0 200 150 400 cm
+/Im1 Do
+Q''';
+  return _writePdfObjects([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+        '/Rotate $rotate '
+        '/Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>',
+    '<< /Length ${ascii.encode(operations).length} >>\nstream\n$operations\nendstream',
+    '<< /Type /XObject /Subtype /Image /Width $imageWidth '
+        '/Height $imageHeight /ColorSpace /DeviceRGB '
+        '/BitsPerComponent 8 /Filter /ASCIIHexDecode '
+        '/Length ${hex.length} >>\nstream\n$hex\nendstream',
   ]);
 }
 

@@ -89,6 +89,8 @@
 | TASK-24 | [packaging-release-and-operations.md](packaging-release-and-operations.md) | 打包、发布、版本、许可和运维材料 |
 | TASK-25 | [ui-ux-modernization.md](ui-ux-modernization.md) | UI/UX 现代化改造、设计系统、页面重构和验收 |
 | TASK-26 | [pdf-ocr-optional.md](pdf-ocr-optional.md) | 扫描版 PDF 本地 OCR（可选 / 后置规划，非当前实现） |
+| TASK-29 | [image-annotations.md](image-annotations.md) | 图片批注（PDF 拖框吸附、批注存储与渲染、导出） |
+| TASK-30 | [epub-images.md](epub-images.md) | EPUB 真实图片渲染（当前加载器丢弃 `<img>`，图片完全不显示） |
 
 ## 通用完成标准
 

@@ -6,10 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pagesage/app/pagesage_app.dart';
+import 'package:pagesage/app/widgets/app_chrome.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/core/platform/file_picker_service.dart';
 import 'package:pagesage/core/platform/platform_providers.dart';
 import 'package:pagesage/domain/annotations/annotation.dart';
+import 'package:pagesage/domain/annotations/image_anchor.dart';
 import 'package:pagesage/domain/books/bookmark.dart';
 import 'package:pagesage/domain/books/category.dart';
 import 'package:pagesage/domain/books/book.dart';
@@ -1617,6 +1619,384 @@ void main() {
     expect(note.locator?.href, 'chapter.xhtml');
     expect(find.text('已保存为笔记'), findsOneWidget);
   });
+
+  testWidgets('the command bar switches the whole interface theme', (
+    tester,
+  ) async {
+    // `setSurfaceSize` only grows the paint surface; `MediaQuery` keeps
+    // reporting the default 800x600, which would leave the shell below the
+    // expanded breakpoint. The view size is what layout reads.
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final settings = _RecordingSettingsRepository(const ReaderSettings());
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(_FakeBookRepository()),
+          settingsRepositoryProvider.overrideWithValue(settings),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            const _FakeBookmarkRepository(),
+          ),
+        ],
+        child: const PageSageApp(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // The command bar carries it on desktop and the page headers stand down,
+    // so there is exactly one control to find.
+    final control = find.byTooltip('外观：跟随系统');
+    expect(control, findsOneWidget);
+
+    // One tap takes it to the next mode: no menu in between.
+    await tester.tap(control);
+    await tester.pumpAndSettle();
+    expect(settings.saved.single.appThemeMode, ThemeMode.light);
+    expect(find.byTooltip('外观：亮色'), findsOneWidget);
+
+    // The whole window is what the reader was missing: the stored mode has to
+    // reach `MaterialApp`, not only the reading surface.
+    await tester.tap(find.byTooltip('外观：亮色'));
+    await tester.pumpAndSettle();
+    expect(settings.saved.last.appThemeMode, ThemeMode.dark);
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp).first);
+    expect(app.themeMode, ThemeMode.dark);
+    expect(
+      Theme.of(tester.element(find.byType(AppCommandBar))).brightness,
+      Brightness.dark,
+    );
+  });
+
+  testWidgets('an image box becomes an image annotation, keeping its anchor', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final annotations = _RecordingAnnotationRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [
+                _libraryBook(
+                  id: 'reader-image-box',
+                  title: '图片批注样本',
+                  format: BookFormat.pdf,
+                  progress: 0,
+                ),
+              ],
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            _FakeSettingsRepository(),
+          ),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            const _FakeBookmarkRepository(),
+          ),
+          annotationRepositoryProvider.overrideWithValue(annotations),
+          noteRepositoryProvider.overrideWithValue(const _FakeNoteRepository()),
+          searchRepositoryProvider.overrideWithValue(
+            const _FakeSearchRepository(),
+          ),
+          aiSettingsRepositoryProvider.overrideWithValue(
+            const _FakeAiSettingsRepository(),
+          ),
+          aiConversationRepositoryProvider.overrideWithValue(
+            const _FakeAiConversationRepository(),
+          ),
+          readerRendererHostProvider.overrideWithValue(
+            (config) =>
+                _FakeRendererHost(config: config, event: RendererReady()),
+          ),
+        ],
+        child: const MediaQuery(
+          data: MediaQueryData(size: Size(1280, 800)),
+          child: MaterialApp(home: ReaderPage(bookId: 'reader-image-box')),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    var host = tester.widget<_FakeRendererHost>(find.byType(_FakeRendererHost));
+    expect(
+      host.config.imageDragMode,
+      isFalse,
+      reason: 'text selection is the default meaning of a drag',
+    );
+
+    // Turn the mode on the way a reader does: the more menu.
+    await tester.tap(find.byTooltip('更多阅读操作'));
+    await tester.pumpAndSettle();
+    // The check-marked item wraps its label in a semantics merge, so the
+    // label's own render box is not in the hit path even though the tap lands
+    // on the item.
+    await tester.tap(find.text('框选图片').last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    host = tester.widget<_FakeRendererHost>(find.byType(_FakeRendererHost));
+    expect(host.config.imageDragMode, isTrue);
+    // The mode is visible and escapable, not a silent change of meaning.
+    expect(find.text('框选图片：拖出图片范围'), findsOneWidget);
+
+    // The renderer reports the box.
+    host.config.onImageAreaSelected?.call(
+      const RendererImageAreaSelected(
+        anchor: PdfImageAnchor(
+          page: 3,
+          ordinal: 2,
+          resourceName: 'Im1',
+          rect: ReaderRect(x: 0.2, y: 0.3, width: 0.5, height: 0.4),
+        ),
+        sourceRect: ReaderRect(
+          page: 3,
+          x: 300,
+          y: 300,
+          width: 200,
+          height: 120,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Desktop: the same floating bar as a text selection, next to the box.
+    expect(find.text('复制图注'), findsOneWidget);
+    await tester.tap(find.text('注释此图'));
+    await tester.pumpAndSettle();
+
+    // The editor opens; an image annotation defaults to blue, not the text
+    // highlight's yellow, so the two never read as the same mark.
+    expect(find.text('添加标注'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, '蓝色'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    expect(annotations.saved, hasLength(1));
+    final saved = annotations.saved.single;
+    final anchor = saved.imageAnchor! as PdfImageAnchor;
+    expect(anchor.page, 3);
+    expect(anchor.ordinal, 2, reason: 'identity, not just the rectangle');
+    expect(anchor.rect.width, closeTo(0.5, 1e-9));
+    expect(saved.color, AnnotationColor.blue);
+    // Jump-back needs the box on the locator too, because that is all every
+    // jump path carries.
+    expect(saved.locator.page, 3);
+    expect(saved.locator.selectionRects, hasLength(1));
+
+    // Saving a box ends the mode: the gesture must mean what it meant before.
+    host = tester.widget<_FakeRendererHost>(find.byType(_FakeRendererHost));
+    expect(host.config.imageDragMode, isFalse);
+    expect(find.text('框选图片：拖出图片范围'), findsNothing);
+  });
+
+  testWidgets('editing an image annotation keeps its anchor', (tester) async {
+    // Re-saving the row to change its colour used to write it back without the
+    // anchor: the frame vanished from the page and could not be found again.
+    final anchor = const PdfImageAnchor(
+      page: 4,
+      ordinal: 0,
+      rect: ReaderRect(x: 0.1, y: 0.1, width: 0.6, height: 0.5),
+    );
+    final annotations = _RecordingAnnotationRepository(
+      existing: [
+        Annotation(
+          id: 'anno-image',
+          bookId: 'reader-image-edit',
+          locator: ReadingLocator.pdf(
+            page: 4,
+            selectionRects: const [
+              ReaderRect(x: 0.1, y: 0.1, width: 0.6, height: 0.5),
+            ],
+          ),
+          selectedText: '既有图片标注',
+          color: AnnotationColor.blue,
+          style: AnnotationStyle.highlight,
+          createdAt: 1,
+          updatedAt: 1,
+          target: AnnotationTarget.image,
+          imageAnchor: anchor,
+        ),
+      ],
+    );
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [
+                _libraryBook(
+                  id: 'reader-image-edit',
+                  title: '图片标注样式样本',
+                  format: BookFormat.pdf,
+                ),
+              ],
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            _FakeSettingsRepository(),
+          ),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            const _FakeBookmarkRepository(),
+          ),
+          annotationRepositoryProvider.overrideWithValue(annotations),
+          noteRepositoryProvider.overrideWithValue(const _FakeNoteRepository()),
+          searchRepositoryProvider.overrideWithValue(
+            const _FakeSearchRepository(),
+          ),
+          aiSettingsRepositoryProvider.overrideWithValue(
+            const _FakeAiSettingsRepository(),
+          ),
+          aiConversationRepositoryProvider.overrideWithValue(
+            const _FakeAiConversationRepository(),
+          ),
+          readerRendererHostProvider.overrideWithValue(
+            (config) =>
+                _FakeRendererHost(config: config, event: RendererReady()),
+          ),
+        ],
+        child: const MediaQuery(
+          data: MediaQueryData(size: Size(1280, 800)),
+          child: MaterialApp(home: ReaderPage(bookId: 'reader-image-edit')),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // Tapping the frame opens the same annotation menu a highlight gets.
+    final host = tester.widget<_FakeRendererHost>(
+      find.byType(_FakeRendererHost),
+    );
+    host.config.onEvent(
+      RendererAnnotationSelected(
+        'anno-image',
+        sourceRect: const ReaderRect(
+          page: 4,
+          x: 300,
+          y: 300,
+          width: 200,
+          height: 120,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('既有图片标注'), findsOneWidget);
+
+    await tester.tap(find.text('样式'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, '绿色'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    expect(annotations.saved, hasLength(1));
+    final saved = annotations.saved.single;
+    expect(saved.id, 'anno-image', reason: 'edited in place, not re-created');
+    expect(saved.color, AnnotationColor.green);
+    expect(
+      saved.imageAnchor,
+      isNotNull,
+      reason: 'the frame must survive an edit',
+    );
+    expect((saved.imageAnchor! as PdfImageAnchor).ordinal, 0);
+    expect(saved.imageAnchor!.rect.width, closeTo(0.6, 1e-9));
+  });
+}
+
+/// Records writes and can serve pre-existing rows.
+final class _RecordingAnnotationRepository implements AnnotationRepository {
+  _RecordingAnnotationRepository({List<Annotation> existing = const []})
+    : existing = List<Annotation>.of(existing),
+      _stream = StreamController<List<Annotation>>.broadcast();
+
+  final List<Annotation> existing;
+  final List<Annotation> saved = [];
+  final StreamController<List<Annotation>> _stream;
+
+  @override
+  Future<void> deleteAnnotation(String id) async {
+    existing.removeWhere((annotation) => annotation.id == id);
+    _stream.add(List<Annotation>.of(existing));
+  }
+
+  @override
+  Future<List<Annotation>> getAll() async => List.of(existing);
+
+  @override
+  Future<List<Annotation>> getByBook(String bookId) async => List.of(existing);
+
+  @override
+  Future<void> linkNote({
+    required String annotationId,
+    required String noteId,
+  }) async {}
+
+  @override
+  Future<Annotation> saveAnnotation({
+    String? id,
+    required String bookId,
+    required ReadingLocator locator,
+    required String selectedText,
+    AnnotationColor color = AnnotationColor.yellow,
+    AnnotationStyle style = AnnotationStyle.highlight,
+    ImageAnchor? imageAnchor,
+  }) async {
+    final annotation = Annotation(
+      id: id ?? 'annotation-${saved.length}',
+      bookId: bookId,
+      locator: locator,
+      selectedText: selectedText,
+      color: color,
+      style: style,
+      createdAt: 1,
+      updatedAt: 1,
+      target: imageAnchor == null
+          ? AnnotationTarget.text
+          : AnnotationTarget.image,
+      imageAnchor: imageAnchor,
+    );
+    saved.add(annotation);
+    final index = existing.indexWhere((item) => item.id == annotation.id);
+    if (index >= 0) {
+      existing[index] = annotation;
+    } else {
+      existing.add(annotation);
+    }
+    _stream.add(List<Annotation>.of(existing));
+    return annotation;
+  }
+
+  @override
+  Stream<List<Annotation>> watchByBook(String bookId) async* {
+    yield List<Annotation>.of(existing);
+    yield* _stream.stream;
+  }
 }
 
 Future<void> _sendControlShortcut(
@@ -1818,6 +2198,8 @@ final class _RecordingSettingsRepository implements SettingsRepository {
     yield _settings;
     yield* _controller.stream;
   }
+
+  void dispose() => _controller.close();
 }
 
 final class _FakeAiSettingsRepository implements AiSettingsRepository {
@@ -2212,6 +2594,7 @@ final class _FakeAnnotationRepository implements AnnotationRepository {
     required String selectedText,
     AnnotationColor color = AnnotationColor.yellow,
     AnnotationStyle style = AnnotationStyle.highlight,
+    ImageAnchor? imageAnchor,
   }) async {
     return Annotation(
       id: id ?? 'annotation-test',

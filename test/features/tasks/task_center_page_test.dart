@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/core/tasks/task_models.dart';
+import 'package:pagesage/domain/books/reader_settings.dart';
+import 'package:pagesage/domain/books/settings_repository.dart';
 import 'package:pagesage/features/tasks/presentation/task_center_page.dart';
 
 void main() {
@@ -15,6 +17,11 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            // The page header carries the app's theme switch, which reads the
+            // settings store; without this the test builds a real database.
+            settingsRepositoryProvider.overrideWithValue(
+              const _FakeSettingsRepository(),
+            ),
             taskRepositoryProvider.overrideWithValue(
               _FakeTaskRepository([
                 const PageSageTask(
@@ -116,4 +123,21 @@ final class _FakeTaskRepository implements TaskRepository {
 
   @override
   Stream<List<PageSageTask>> watchTasks() => Stream.value(tasks);
+}
+
+/// Enough for the header's theme switch: the value it reads, and a save that
+/// goes nowhere.
+final class _FakeSettingsRepository implements SettingsRepository {
+  const _FakeSettingsRepository();
+
+  @override
+  Future<ReaderSettings> getReaderSettings() async => const ReaderSettings();
+
+  @override
+  Future<void> saveReaderSettings(ReaderSettings settings) async {}
+
+  @override
+  Stream<ReaderSettings> watchReaderSettings() {
+    return Stream.value(const ReaderSettings());
+  }
 }

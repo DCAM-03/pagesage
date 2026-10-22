@@ -55,6 +55,7 @@ final class _NotesPageState extends ConsumerState<NotesPage> {
                   AppPageHeader(
                     title: '笔记',
                     subtitle: '管理书签、摘录、手写笔记和 AI 记录',
+                    showThemeMode: true,
                     actions: [
                       if (!isCompact)
                         FilledButton.icon(

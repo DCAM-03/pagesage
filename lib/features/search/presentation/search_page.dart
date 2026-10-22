@@ -72,6 +72,7 @@ final class _SearchPageState extends ConsumerState<SearchPage> {
             AppPageHeader(
               title: '搜索',
               subtitle: '搜索本地书库、正文、Notebook 和 AI 历史',
+              showThemeMode: true,
               actions: [
                 IconButton(
                   tooltip: '清空搜索',

@@ -44,6 +44,8 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // No theme control in this header: the page is where 应用外观 lives,
+              // and a shortcut to the setting beside the setting is noise.
               const AppPageHeader(title: '设置', subtitle: '管理阅读偏好、AI、本地数据和任务'),
               Expanded(
                 child: Row(

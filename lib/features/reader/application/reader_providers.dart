@@ -62,6 +62,8 @@ final class ReaderSessionController {
       case RendererCapabilityChanged():
       case RendererNotice():
       case RendererAnnotationSelected():
+      case RendererImagesDetected():
+      case RendererImageAreaSelected():
       case RendererFailed():
         return;
       case RendererLocationChanged():

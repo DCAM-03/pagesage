@@ -8,6 +8,7 @@ import 'package:pagesage/core/database/app_database.dart';
 import 'package:pagesage/core/files/app_paths.dart';
 import 'package:pagesage/domain/ai/ai_models.dart';
 import 'package:pagesage/domain/annotations/annotation.dart';
+import 'package:pagesage/domain/annotations/image_anchor.dart';
 import 'package:pagesage/domain/books/bookmark.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/domain/notes/note.dart';
@@ -312,6 +313,7 @@ final class _FakeAnnotationRepository implements AnnotationRepository {
     required String selectedText,
     AnnotationColor color = AnnotationColor.yellow,
     AnnotationStyle style = AnnotationStyle.highlight,
+    ImageAnchor? imageAnchor,
   }) async {
     return Annotation(
       id: id ?? 'annotation-new',

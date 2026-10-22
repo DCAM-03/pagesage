@@ -11,9 +11,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../app/responsive/app_breakpoints.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/widgets/app_chrome.dart';
+import '../../../app/widgets/theme_mode_button.dart';
 import '../../../core/database/database_providers.dart';
+import '../../../core/platform/platform_providers.dart';
 import '../../../domain/ai/ai_models.dart';
 import '../../../domain/annotations/annotation.dart';
+import '../../../domain/annotations/image_anchor.dart';
 import '../../../domain/books/book.dart';
 import '../../../domain/books/bookmark.dart';
 import '../../../domain/books/reader_fonts.dart';
@@ -60,6 +63,8 @@ final class ReaderRendererHostConfig {
     this.ocrOverlayPage,
     this.ocrOverlayBlocks = const [],
     this.onZoomChanged,
+    this.imageDragMode = false,
+    this.onImageAreaSelected,
   });
 
   final Book book;
@@ -92,6 +97,14 @@ final class ReaderRendererHostConfig {
   /// or null when the renderer has no such gesture (the WebView bridge owns
   /// its own zoom and reports it through settings only).
   final PdfZoomChanged? onZoomChanged;
+
+  /// While true a drag draws a box around a picture instead of selecting text.
+  ///
+  /// Only the canvas PDF renderer supports it; other renderers ignore it.
+  final bool imageDragMode;
+
+  /// Called when the reader finishes drawing an image box.
+  final ValueChanged<RendererImageAreaSelected>? onImageAreaSelected;
 }
 
 final class ReaderPage extends ConsumerStatefulWidget {
@@ -145,6 +158,10 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   final ValueNotifier<RendererLocationChanged?> _locationNotifier =
       ValueNotifier<RendererLocationChanged?>(null);
   RendererTextSelected? _selectedText;
+
+  /// Whether a drag on a PDF page draws an image box instead of selecting
+  /// text. Off by default, because the same gesture already means "select".
+  bool _imageDragMode = false;
   ReadingProgressSnapshot? _jumpProgress;
   int _rendererVersion = 0;
   int _jumpToken = 0;
@@ -270,6 +287,25 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       _statusText = null;
       _statusNotifier.value = null;
     });
+  }
+
+  /// Turns the drag-box image annotator on or off.
+  ///
+  /// It is a mode rather than a modifier because the same drag already means
+  /// "select text"; the reader has to know which one they asked for. Turning
+  /// it on says so in the status line, and Escape or a saved box turns it off
+  /// again, so the mode cannot be left on unnoticed and silently break
+  /// text selection.
+  void _toggleImageDragMode() {
+    setState(() => _imageDragMode = !_imageDragMode);
+    if (_imageDragMode) {
+      // Entering needs no toast: the banner is right there and says the same
+      // thing for as long as the mode lasts. Two messages stacked on each
+      // other made the reader read the same sentence twice.
+      _setTransientStatus(null);
+      return;
+    }
+    _setTransientStatus('已退出框选图片', clearAfter: const Duration(seconds: 2));
   }
 
   void _scheduleLocationChromeUpdate(RendererLocationChanged event) {
@@ -421,6 +457,13 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                       unawaited(_runOcrCurrentPage(context, book));
                     }
                   : null,
+              onImageBox: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      _toggleImageDragMode();
+                    }
+                  : null,
+              imageBoxMode: _imageDragMode,
               onSettings: () {
                 Navigator.of(sheetContext).pop();
                 unawaited(_showReaderSettings(context, settings));
@@ -723,6 +766,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                                 ocrOverlayPage: _ocrOverlayPage,
                                 ocrOverlayBlocks: _ocrOverlayBlocks,
                                 onZoomChanged: _handlePdfZoomChanged,
+                                imageDragMode: _imageDragMode,
+                                onImageAreaSelected:
+                                    _showImageAnnotationActions,
                               ),
                             ),
                           ),
@@ -851,14 +897,27 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                             bottom: showDesktopChrome
                                 ? desktopStatusBarHeight + 10
                                 : 16,
-                            child: ValueListenableBuilder<String?>(
-                              valueListenable: _statusNotifier,
-                              builder: (context, status, _) {
-                                if (status == null) {
-                                  return const SizedBox.shrink();
-                                }
-                                return _ReaderStatusBanner(message: status);
-                              },
+                            // One column, so a persistent mode banner and a
+                            // transient status cannot land on top of each other.
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (_imageDragMode) ...[
+                                  _ImageBoxModeBanner(
+                                    onExit: _toggleImageDragMode,
+                                  ),
+                                  const SizedBox(height: 6),
+                                ],
+                                ValueListenableBuilder<String?>(
+                                  valueListenable: _statusNotifier,
+                                  builder: (context, status, _) {
+                                    if (status == null) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return _ReaderStatusBanner(message: status);
+                                  },
+                                ),
+                              ],
                             ),
                           ),
                           if (_renderError != null)
@@ -1151,6 +1210,13 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         if (_renderError != null) {
           setState(() => _renderError = null);
         }
+      case RendererImagesDetected():
+        // Snapping happens inside the canvas view, which already holds the
+        // renderer; the host has nothing to do with the list yet. It is
+        // routed here so the event is not an unhandled case.
+        break;
+      case RendererImageAreaSelected():
+        _showImageAnnotationActions(event);
       case RendererTextSelected():
         // Avoid setState on every selection event — rebuilding the whole reader
         // (and WebView host) while the native ::selection is active makes the
@@ -1326,6 +1392,11 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
           value: _ReaderMoreAction.pdfZoomIn,
           child: Text('放大'),
         ),
+        CheckedPopupMenuItem(
+          value: _ReaderMoreAction.pdfImageBox,
+          checked: _imageDragMode,
+          child: const Text('框选图片'),
+        ),
         const PopupMenuDivider(),
       ],
       PopupMenuItem(
@@ -1364,6 +1435,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         await _adjustReaderScale(-1);
       case _ReaderMoreAction.pdfZoomIn:
         await _adjustReaderScale(1);
+      case _ReaderMoreAction.pdfImageBox:
+        _toggleImageDragMode();
       case _ReaderMoreAction.readerMode:
         if (settings != null) {
           await _toggleReaderMode(settings);
@@ -1653,6 +1726,255 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     await completer.future;
   }
 
+  /// The reader drew a box over a picture: offer the image-specific actions.
+  ///
+  /// The menu is the same surface and placement as the text selection menu —
+  /// the reader just performed the same kind of gesture and should not have to
+  /// learn a second one.
+  Future<void> _showImageAnnotationActions(
+    RendererImageAreaSelected event,
+  ) async {
+    if (!mounted) return;
+    final caption = _captionForAnchor(event.anchor);
+    _showMobileChrome(autoHide: false);
+    _ImageAnnotationAction? action;
+    try {
+      if (context.supportsSidePanel) {
+        action = await _showDesktopImageMenu(context, event);
+      } else {
+        action = await _showImageActionSheet(caption);
+      }
+    } finally {
+      _scheduleMobileChromeAutoHide();
+    }
+    if (!mounted || action == null) {
+      // Dismissed without choosing: stay in the mode, so a badly drawn box
+      // can simply be drawn again. Only an action ends it.
+      return;
+    }
+    switch (action) {
+      case _ImageAnnotationAction.annotate:
+        await _annotateImage(event);
+      case _ImageAnnotationAction.save:
+        await _saveImageToFile(event);
+      case _ImageAnnotationAction.copyCaption:
+        await Clipboard.setData(ClipboardData(text: caption));
+        if (mounted) {
+          _setTransientStatus('已复制图注', clearAfter: const Duration(seconds: 2));
+        }
+    }
+    if (mounted && _imageDragMode) {
+      setState(() => _imageDragMode = false);
+    }
+  }
+
+  /// Floating bar next to the box the reader just drew, like the text one.
+  Future<_ImageAnnotationAction?> _showDesktopImageMenu(
+    BuildContext context,
+    RendererImageAreaSelected event,
+  ) async {
+    _closeSelectionOverlay();
+    final overlayState = Overlay.of(context);
+    final overlayBox = overlayState.context.findRenderObject() as RenderBox?;
+    final overlaySize = overlayBox?.size ?? MediaQuery.sizeOf(context);
+    const estimatedWidth = 300.0;
+    const estimatedHeight = 48.0;
+    final placement = placeFloatingMenu(
+      overlaySize: overlaySize,
+      target: _toOverlayLocalRect(event.sourceRect, overlayBox),
+      menuWidth: estimatedWidth,
+      menuHeight: estimatedHeight,
+      gap: 10,
+    );
+    final completer = Completer<void>();
+    _selectionOverlayCompleter = completer;
+    _ImageAnnotationAction? picked;
+    void dismiss([_ImageAnnotationAction? action]) {
+      picked = action;
+      _closeSelectionOverlay();
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    }
+
+    _selectionOverlayEntry = OverlayEntry(
+      builder: (overlayContext) => Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: dismiss,
+              child: const IgnorePointer(
+                child: ColoredBox(color: Color(0x00000000)),
+              ),
+            ),
+          ),
+          Positioned(
+            left: placement.left,
+            top: placement.top,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: (overlaySize.width - placement.left - 12).clamp(
+                  180.0,
+                  overlaySize.width - 24,
+                ),
+              ),
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.escape): dismiss,
+                },
+                child: Focus(
+                  autofocus: true,
+                  child: _ImageActionOverlay(
+                    hasCaption: _captionForAnchor(event.anchor).isNotEmpty,
+                    onAction: (picked) => dismiss(picked),
+                    onDismiss: dismiss,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    overlayState.insert(_selectionOverlayEntry!);
+    await completer.future;
+    return picked;
+  }
+
+  Future<_ImageAnnotationAction?> _showImageActionSheet(String caption) {
+    return showModalBottomSheet<_ImageAnnotationAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.x4,
+            AppSpacing.x2,
+            AppSpacing.x4,
+            AppSpacing.x4,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '图片',
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: AppSpacing.x2),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('注释此图'),
+                onTap: () => Navigator.of(
+                  sheetContext,
+                ).pop(_ImageAnnotationAction.annotate),
+              ),
+              ListTile(
+                leading: const Icon(Icons.download_outlined),
+                title: const Text('保存图片'),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_ImageAnnotationAction.save),
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy_all_outlined),
+                title: const Text('复制图注'),
+                // No caption is not an error: plenty of illustrations carry
+                // none. Say so instead of copying an empty string.
+                subtitle: Text(caption.isEmpty ? '这张图没有图注' : caption),
+                enabled: caption.isNotEmpty,
+                onTap: () => Navigator.of(
+                  sheetContext,
+                ).pop(_ImageAnnotationAction.copyCaption),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The page's caption for an annotated image.
+  ///
+  /// Empty for PDFs: an image XObject carries no alt text, and nothing in the
+  /// document says which words are its caption. EPUB has `alt`/`figcaption`
+  /// and will fill this in when its images land. Returning '' is the honest
+  /// answer, and the menu says so instead of offering an empty copy.
+  String _captionForAnchor(ImageAnchor anchor) => '';
+
+  Future<void> _annotateImage(RendererImageAreaSelected event) async {
+    final anchor = event.anchor;
+    final page = anchor is PdfImageAnchor ? anchor.page : null;
+    final result = await _showAnnotationEditor(
+      context,
+      initialText: '',
+      initialColor: AnnotationColor.blue,
+      initialStyle: AnnotationStyle.highlight,
+    );
+    if (result == null) return;
+    if (!mounted) return;
+    await ref
+        .read(annotationRepositoryProvider)
+        .saveAnnotation(
+          bookId: widget.bookId,
+          // The box is stored twice on purpose: in the anchor for painting,
+          // and in the locator so jump-back can flash the same area. The
+          // locator is the only thing every jump path already carries.
+          locator: ReadingLocator.pdf(
+            page: page ?? 1,
+            selectionRects: [anchor.rect],
+          ),
+          selectedText: result.selectedText.trim(),
+          color: result.color,
+          style: result.style,
+          imageAnchor: anchor,
+        );
+    if (!mounted) return;
+    _setTransientStatus('已标注图片', clearAfter: const Duration(seconds: 2));
+  }
+
+  Future<void> _saveImageToFile(RendererImageAreaSelected event) async {
+    final anchor = event.anchor;
+    if (anchor is! PdfImageAnchor) return;
+    final source = ref.read(activePdfRendererControllerProvider);
+    if (source == null) {
+      _setTransientStatus(
+        '找不到页面渲染器，无法保存图片',
+        clearAfter: const Duration(seconds: 3),
+      );
+      return;
+    }
+    _setTransientStatus('正在生成图片…', clearAfter: const Duration(seconds: 8));
+    final bytes = await source.exportPageRegion(
+      pageNumber: anchor.page,
+      rect: anchor.rect,
+    );
+    if (!mounted) return;
+    if (bytes == null || bytes.isEmpty) {
+      _setTransientStatus('这一页无法生成图片', clearAfter: const Duration(seconds: 3));
+      return;
+    }
+    // The page may still have been rasterising when the reader left the view;
+    // the dialog below has no context to attach to after that.
+    if (!mounted) return;
+    final book = ref.read(readerBookProvider(widget.bookId)).value;
+    final stem = book == null
+        ? '第 ${anchor.page} 页'
+        : '${book.title} 第 ${anchor.page} 页';
+    final path = await ref
+        .read(filePickerServiceProvider)
+        .pickImageSavePath(baseName: stem, bytes: bytes);
+    if (!mounted) return;
+    if (path == null) {
+      // Cancelled: no file was written, and saying "saved" would be a lie.
+      _setTransientStatus(null);
+      return;
+    }
+    _setTransientStatus('已保存图片', clearAfter: const Duration(seconds: 3));
+  }
+
   void _showSelectionActionsOnce(RendererTextSelected event) {
     // Stable key: text + page/chapter only. Do NOT include selectionRects —
     // they jitter a few pixels across events and used to thrash the menu.
@@ -1720,12 +2042,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 ),
                 const SizedBox(height: AppSpacing.x1),
                 Text(
-                  '立即切换白昼 / 夜间 / 护眼，无需进入完整设置。',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  '书页纸色',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: AppSpacing.x4),
+                const SizedBox(height: AppSpacing.x2),
                 Wrap(
                   spacing: AppSpacing.x2,
                   runSpacing: AppSpacing.x2,
@@ -1747,6 +2069,17 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                       ),
                   ],
                 ),
+                const SizedBox(height: AppSpacing.x4),
+                Text(
+                  '界面颜色',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: AppSpacing.x1),
+                const AppThemeHint(),
+                const SizedBox(height: AppSpacing.x2),
+                const AppThemeModeSelector(),
                 const SizedBox(height: AppSpacing.x4),
                 Text(
                   'EPUB 字体',
@@ -1834,6 +2167,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   void _handleEscape() {
+    // A mode that changes what dragging means must answer Escape first, or
+    // the reader has no obvious way out of it.
+    if (_imageDragMode) {
+      _toggleImageDragMode();
+      return;
+    }
     if (_selectionOverlayEntry != null) {
       _closeSelectionOverlay();
       return;
@@ -3484,6 +3823,7 @@ enum _ReaderMoreAction {
   pdfFitPage,
   pdfZoomOut,
   pdfZoomIn,
+  pdfImageBox,
   readerMode,
   notebook,
   ai,
@@ -3778,6 +4118,8 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
     this.onFitWidth,
     this.onFitPage,
     this.onOcrPage,
+    this.onImageBox,
+    this.imageBoxMode = false,
   });
 
   final Book book;
@@ -3799,6 +4141,8 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
   final VoidCallback? onFitWidth;
   final VoidCallback? onFitPage;
   final VoidCallback? onOcrPage;
+  final VoidCallback? onImageBox;
+  final bool imageBoxMode;
 
   @override
   Widget build(BuildContext context) {
@@ -3922,6 +4266,13 @@ final class _MobileReaderMoreSheet extends StatelessWidget {
                     icon: Icons.document_scanner_outlined,
                     label: '识别可见页',
                     onTap: onOcrPage!,
+                  ),
+                if (onImageBox != null)
+                  _MobileMoreChip(
+                    icon: Icons.crop_free,
+                    label: '框选图片',
+                    selected: imageBoxMode,
+                    onTap: onImageBox!,
                   ),
               ],
             ),
@@ -4465,6 +4816,9 @@ final class _ReaderBottomSheetFrame extends StatelessWidget {
 
 enum _SelectionAction { highlight, underline, note, search, copy, ai }
 
+/// Actions offered after drawing a box over an image.
+enum _ImageAnnotationAction { annotate, save, copyCaption }
+
 final class _DesktopSelectionOverlay extends StatelessWidget {
   const _DesktopSelectionOverlay({
     required this.selection,
@@ -4597,6 +4951,115 @@ final class _DesktopSelectionOverlay extends StatelessWidget {
                 label: 'AI',
                 value: _SelectionAction.ai,
                 accent: true,
+              ),
+              IconButton(
+                tooltip: '关闭',
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
+                onPressed: onDismiss,
+                icon: Icon(
+                  Icons.close,
+                  size: 16,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _ImageActionOverlay extends StatelessWidget {
+  const _ImageActionOverlay({
+    required this.hasCaption,
+    required this.onAction,
+    required this.onDismiss,
+  });
+
+  /// PDFs carry no alt text, so this is false until EPUB images land. The
+  /// action stays visible but disabled rather than vanishing: the same menu
+  /// layout across formats is easier to learn than a menu that rearranges.
+  final bool hasCaption;
+  final ValueChanged<_ImageAnnotationAction> onAction;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    Widget action({
+      required IconData icon,
+      required String label,
+      required _ImageAnnotationAction value,
+      bool enabled = true,
+    }) {
+      final fg = enabled ? colorScheme.onSurface : colorScheme.onSurfaceVariant;
+      return Tooltip(
+        message: label,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: enabled ? () => onAction(value) : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 16, color: fg),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      elevation: 14,
+      color: colorScheme.surface,
+      shadowColor: colorScheme.shadow.withValues(alpha: 0.22),
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.95),
+          ),
+          color: colorScheme.surface.withValues(alpha: 0.99),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              action(
+                icon: Icons.edit_outlined,
+                label: '注释此图',
+                value: _ImageAnnotationAction.annotate,
+              ),
+              action(
+                icon: Icons.download_outlined,
+                label: '保存图片',
+                value: _ImageAnnotationAction.save,
+              ),
+              action(
+                icon: Icons.copy_all_outlined,
+                label: '复制图注',
+                value: _ImageAnnotationAction.copyCaption,
+                enabled: hasCaption,
               ),
               IconButton(
                 tooltip: '关闭',
@@ -5375,7 +5838,7 @@ final class _NotebookMetaChip extends StatelessWidget {
   }
 }
 
-enum _NotebookEntryType { bookmark, annotation, note, ai }
+enum _NotebookEntryType { bookmark, annotation, image, note, ai }
 
 enum _NotebookAction { jump, edit, note, copy, delete, openNotes }
 
@@ -5402,6 +5865,9 @@ final class _NotebookEntry {
     return switch (type) {
       _NotebookEntryType.bookmark => '书签',
       _NotebookEntryType.annotation => '标注',
+      // Image annotations are annotations in storage; they are listed apart
+      // because a frame with no words is hard to find in a wall of text.
+      _NotebookEntryType.image => '图片',
       _NotebookEntryType.note => '笔记',
       _NotebookEntryType.ai => 'AI',
     };
@@ -5411,6 +5877,7 @@ final class _NotebookEntry {
     return switch (type) {
       _NotebookEntryType.bookmark => Icons.bookmark_border,
       _NotebookEntryType.annotation => Icons.border_color_outlined,
+      _NotebookEntryType.image => Icons.image_outlined,
       _NotebookEntryType.note => Icons.sticky_note_2_outlined,
       _NotebookEntryType.ai => Icons.auto_awesome_outlined,
     };
@@ -5437,9 +5904,22 @@ List<_NotebookEntry> _buildNotebookEntries(
       ),
     for (final annotation in annotations)
       _NotebookEntry(
-        type: _NotebookEntryType.annotation,
-        title: annotation.selectedText,
-        subtitle: annotation.locator.displayLabel,
+        type: annotation.target == AnnotationTarget.image
+            ? _NotebookEntryType.image
+            : _NotebookEntryType.annotation,
+        // An image annotation often has no caption, and an entry titled '' is
+        // a blank row: name it by position instead, which is what the reader
+        // would say out loud anyway.
+        title: annotation.selectedText.isNotEmpty
+            ? annotation.selectedText
+            : annotation.target == AnnotationTarget.image
+            ? '图片 · ${annotation.locator.displayLabel}'
+            : annotation.selectedText,
+        subtitle: annotation.target == AnnotationTarget.image
+            ? (annotation.selectedText.isNotEmpty
+                  ? annotation.locator.displayLabel
+                  : '没有图注')
+            : annotation.locator.displayLabel,
         timestamp: annotation.updatedAt,
         locator: annotation.locator,
         source: annotation,
@@ -5500,6 +5980,7 @@ Color _notebookTypeColor(BuildContext context, _NotebookEntryType type) {
   return switch (type) {
     _NotebookEntryType.bookmark => colorScheme.statusWarning,
     _NotebookEntryType.annotation => colorScheme.primary,
+    _NotebookEntryType.image => colorScheme.statusInfo,
     _NotebookEntryType.note => colorScheme.statusInfo,
     _NotebookEntryType.ai => colorScheme.aiAccent,
   };
@@ -5525,7 +6006,8 @@ List<PopupMenuEntry<_NotebookAction>> _notebookMenuItems(_NotebookEntry entry) {
           title: Text('编辑备注'),
         ),
       ),
-    if (entry.type == _NotebookEntryType.annotation)
+    if (entry.type == _NotebookEntryType.annotation ||
+        entry.type == _NotebookEntryType.image)
       const PopupMenuItem(
         value: _NotebookAction.edit,
         child: ListTile(
@@ -5535,6 +6017,7 @@ List<PopupMenuEntry<_NotebookAction>> _notebookMenuItems(_NotebookEntry entry) {
         ),
       ),
     if (entry.type == _NotebookEntryType.annotation ||
+        entry.type == _NotebookEntryType.image ||
         entry.type == _NotebookEntryType.ai)
       const PopupMenuItem(
         value: _NotebookAction.note,
@@ -6630,6 +7113,8 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
     required this.ocrOverlayPage,
     required this.ocrOverlayBlocks,
     this.onZoomChanged,
+    this.imageDragMode = false,
+    this.onImageAreaSelected,
   });
 
   final String bookId;
@@ -6647,6 +7132,8 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
   final int? ocrOverlayPage;
   final List<Map<String, Object?>> ocrOverlayBlocks;
   final PdfZoomChanged? onZoomChanged;
+  final bool imageDragMode;
+  final ValueChanged<RendererImageAreaSelected>? onImageAreaSelected;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -6670,6 +7157,8 @@ final class _ReaderAnnotationsHost extends ConsumerWidget {
         ocrOverlayPage: ocrOverlayPage,
         ocrOverlayBlocks: ocrOverlayBlocks,
         onZoomChanged: onZoomChanged,
+        imageDragMode: imageDragMode,
+        onImageAreaSelected: onImageAreaSelected,
       ),
     );
   }
@@ -6889,6 +7378,10 @@ Future<void> _editAnnotation(
         selectedText: annotation.selectedText,
         color: result.color,
         style: result.style,
+        // Re-saving without the anchor would turn an image annotation into a
+        // text one with no geometry: it would vanish from the page, and its
+        // frame could never be found again.
+        imageAnchor: annotation.imageAnchor,
       );
 }
 
@@ -6962,6 +7455,8 @@ final class _DefaultRendererHost extends StatelessWidget {
         clearSearchHighlightsVersion: config.clearSearchHighlightsVersion,
         clearSelectionVersion: config.clearSelectionVersion,
         onZoomChanged: config.onZoomChanged,
+        imageDragMode: config.imageDragMode,
+        onImageAreaSelected: config.onImageAreaSelected,
         onEvent: config.onEvent,
       ),
     };
@@ -7807,6 +8302,62 @@ final class _StatusBarPill extends StatelessWidget {
           style: Theme.of(
             context,
           ).textTheme.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
+        ),
+      ),
+    );
+  }
+}
+
+/// Says that dragging now means "draw a box around a picture", and offers the
+/// way out.
+///
+/// A transient toast was not enough: the mode lasts until the reader leaves it,
+/// and someone who turned it on, drew badly and gave up needs to see the state
+/// they are in, not remember a message from ten seconds ago.
+final class _ImageBoxModeBanner extends StatelessWidget {
+  const _ImageBoxModeBanner({required this.onExit});
+
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colorScheme.inverseSurface,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.crop_free,
+                size: 18,
+                color: colorScheme.onInverseSurface,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  '框选图片：拖出图片范围',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onInverseSurface,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: onExit,
+                style: TextButton.styleFrom(
+                  foregroundColor: colorScheme.onInverseSurface,
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('退出'),
+              ),
+            ],
+          ),
         ),
       ),
     );

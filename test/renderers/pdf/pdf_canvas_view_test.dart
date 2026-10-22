@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/domain/annotations/image_anchor.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/reader_settings.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
@@ -75,6 +76,8 @@ void main() {
     PdfZoomChanged? onZoomChanged,
     int clearSelectionVersion = 0,
     String? searchQuery,
+    bool imageDragMode = false,
+    void Function(RendererImageAreaSelected area)? onImageAreaSelected,
   }) async {
     final events = <RendererEvent>[];
     // The host clears the paint by bumping this; exposed so tests can do the
@@ -113,6 +116,8 @@ void main() {
                   onZoomChanged: onZoomChanged,
                   clearSelectionVersion: clearVersion,
                   searchQuery: searchQuery,
+                  imageDragMode: imageDragMode,
+                  onImageAreaSelected: onImageAreaSelected,
                 ),
               ),
             ),
@@ -1099,6 +1104,168 @@ void main() {
         result.events.whereType<RendererLocationChanged>().last.pageNumber,
         2,
       );
+    });
+  });
+
+  group('B1 image box', () {
+    Future<void> dragBox(
+      WidgetTester tester,
+      Offset from,
+      Offset delta, {
+      PointerDeviceKind kind = PointerDeviceKind.mouse,
+    }) async {
+      final gesture = await tester.startGesture(from, kind: kind);
+      for (var i = 1; i <= 20; i++) {
+        await gesture.moveTo(from + delta * (i / 20));
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+
+    testWidgets('a box drawn over the image snaps to its bounds', (
+      tester,
+    ) async {
+      final areas = <RendererImageAreaSelected>[];
+      // `image-xobject.pdf` paints one 300x200 image at user-space
+      // (150, 400); on this 612x792 page that is x 0.245..0.735 and
+      // y 0.242..0.495 of the displayed box.
+      await pumpReader(
+        tester,
+        'image-xobject.pdf',
+        viewport: const Size(1000, 900),
+        imageDragMode: true,
+        onImageAreaSelected: areas.add,
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      // Display box of the image: x 150..450, y 192..392.
+      const start = Offset(160, 205);
+      const delta = Offset(280, 175);
+      await tester.runAsync(() async {
+        // Deliberately sloppy: starts inside the picture and stops short of
+        // its right and bottom edges, but still covers most of it.
+        await dragBox(
+          tester,
+          Offset(rect.left + start.dx * scale, rect.top + start.dy * scale),
+          Offset(delta.dx * scale, delta.dy * scale),
+        );
+        await tester.pump();
+      });
+
+      expect(areas, hasLength(1));
+      final anchor = areas.single.anchor as PdfImageAnchor;
+      expect(anchor.page, 1);
+      expect(
+        anchor.ordinal,
+        0,
+        reason: 'the drawn box must identify the image',
+      );
+      expect(anchor.resourceName, 'Im1');
+      expect(anchor.rect.x, closeTo(150 / 612, 1e-6));
+      expect(anchor.rect.width, closeTo(300 / 612, 1e-6));
+      expect(anchor.rect.height, closeTo(200 / 792, 1e-6));
+    });
+
+    testWidgets('text selection is not also started by that drag', (
+      tester,
+    ) async {
+      final result = await pumpReader(
+        tester,
+        'image-xobject.pdf',
+        viewport: const Size(1000, 900),
+        imageDragMode: true,
+        onImageAreaSelected: (_) {},
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      await tester.runAsync(() async {
+        await dragBox(
+          tester,
+          Offset(rect.left + 160 * scale, rect.top + 205 * scale),
+          Offset(280 * scale, 175 * scale),
+        );
+        await tester.pump();
+      });
+      expect(
+        result.events.whereType<RendererTextSelected>(),
+        isEmpty,
+        reason: 'one gesture cannot mean both a box and a selection',
+      );
+    });
+
+    testWidgets('a page with no detected image keeps the drawn box', (
+      tester,
+    ) async {
+      final areas = <RendererImageAreaSelected>[];
+      // Vector artwork only: nothing to snap to, and the reader's box is the
+      // only geometry that exists.
+      await pumpReader(
+        tester,
+        'image-only.pdf',
+        viewport: const Size(1000, 900),
+        imageDragMode: true,
+        onImageAreaSelected: areas.add,
+      );
+      final rect = pageBox(tester);
+      await tester.runAsync(() async {
+        await dragBox(
+          tester,
+          rect.topLeft + const Offset(120, 120),
+          const Offset(200, 160),
+        );
+        await tester.pump();
+      });
+      expect(areas, hasLength(1));
+      final anchor = areas.single.anchor as PdfImageAnchor;
+      expect(anchor.ordinal, isNull, reason: 'nothing was detected to snap to');
+      expect(anchor.rect.width, closeTo(200 / rect.width, 1e-6));
+      expect(anchor.rect.height, closeTo(160 / rect.height, 1e-6));
+    });
+
+    testWidgets('a drag with the mode off still selects text', (tester) async {
+      final areas = <RendererImageAreaSelected>[];
+      final result = await pumpReader(
+        tester,
+        'standard-text.pdf',
+        viewport: const Size(1000, 900),
+        onImageAreaSelected: areas.add,
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      await tester.runAsync(() async {
+        await dragBox(
+          tester,
+          Offset(rect.left + 76 * scale, rect.top + (792 - 733) * scale),
+          Offset(80 * scale, 0),
+        );
+        await tester.pump();
+      });
+      expect(areas, isEmpty);
+      expect(result.events.whereType<RendererTextSelected>(), isNotEmpty);
+    });
+
+    testWidgets('a touch drag draws a box only in image mode', (tester) async {
+      final areas = <RendererImageAreaSelected>[];
+      await pumpReader(
+        tester,
+        'image-xobject.pdf',
+        viewport: const Size(1000, 900),
+        imageDragMode: true,
+        onImageAreaSelected: areas.add,
+      );
+      final rect = pageBox(tester);
+      final scale = rect.width / 612;
+      await tester.runAsync(() async {
+        await dragBox(
+          tester,
+          Offset(rect.left + 160 * scale, rect.top + 205 * scale),
+          Offset(280 * scale, 175 * scale),
+          kind: PointerDeviceKind.touch,
+        );
+        await tester.pump();
+      });
+      expect(areas, hasLength(1));
     });
   });
 }

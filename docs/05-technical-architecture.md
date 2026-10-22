@@ -351,6 +351,16 @@ RendererEvent：
 - searchResults
 - bookmarkRequested
 - renderError
+- imagesDetected / imageAreaSelected（图片批注，见 `13-image-annotations.md` §4）
+
+图片批注的边界：
+
+- 渲染器只报告几何（`RendererDetectedImage`：页号、序号、资源名、显示框 0..1 矩形），不持有批注，不写数据库。
+- 锚点由主机保存；重新打开时主机把锚点交给渲染器投影回屏幕坐标。
+- 吸附在渲染器内部完成：`PdfCanvasView` 拖框结束时读 `PdfCanvasRenderer.imagesOnPage(page)` 并调用 `snapToDetectedImage`，`RendererImagesDetected` 目前没有生产者（B2 的 Notebook 缩略图会用到）。
+- 识别结果只用于吸附。PDF 的 form XObject 内部元素不在 `PdfPageElements` 里，因此拖框是主入口，识别不是唯一入口。
+- 保存图片走 `PdfPageImageSource.exportPageRegion`，与 OCR 的页面导出现在同一接口：主机只持有能力，不持有渲染器。
+- 提取出的图片写入应用缓存目录 `<cache>/images/<bookId>/`，可随时重建；不写入书库目录，也不修改原始书籍文件。
 
 ### 11.2 JS Bridge
 

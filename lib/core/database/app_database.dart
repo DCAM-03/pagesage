@@ -107,6 +107,13 @@ class Annotations extends Table {
   TextColumn get color => text()();
   TextColumn get style => text()();
   TextColumn get noteId => text().nullable()();
+
+  /// `text` or `image`. Every row written before schema v5 marks text, which
+  /// is what it was.
+  TextColumn get target => text().withDefault(const Constant('text'))();
+
+  /// JSON for an [ImageAnchor]; null on text annotations.
+  TextColumn get imageAnchor => text().nullable()();
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
 
@@ -1309,7 +1316,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1338,6 +1345,13 @@ class AppDatabase extends _$AppDatabase {
         // grouping them after the fact would guess at which ones belong
         // together, and a wrong guess is worse than an ungrouped history.
         await migrator.addColumn(aiConversations, aiConversations.threadId);
+      }
+      if (from < 5) {
+        // Image annotations reuse the table: colours, notes, export and
+        // jump-back are all shared with text highlights, and only the geometry
+        // differs. Existing rows default to `text`, which is what they are.
+        await migrator.addColumn(annotations, annotations.target);
+        await migrator.addColumn(annotations, annotations.imageAnchor);
       }
       await _createIndexesAndFts();
     },

@@ -31,7 +31,9 @@ dart run tool/generate_manual_samples.dart D:\Temp\pagesage-samples
 | `large.epub` | 40 章大型 EPUB，用于导入、索引、任务取消和滚动性能检查。 |
 | `standard-text.pdf` | 3 页文本 PDF，用于页码、搜索、缩放、书签和保存进度。 |
 | `large-text.pdf` | 80 页文本 PDF，用于滚动、页码跳转、索引和长任务取消。 |
-| `image-only.pdf` | 无文本层 PDF，用于搜索、划词和 AI 禁用状态说明。 |
+| `image-only.pdf` | 无文本层 PDF，用于搜索、划词和 AI 禁用状态说明（内容为矢量路径，**不含任何图片 XObject**）。 |
+| `image-xobject.pdf` | 单页、含一张真实图片 XObject，用于图片批注的识别、吸附与渲染验收。 |
+| `image-xobject-rotated.pdf` | 同上但整页 `/Rotate 90`，用于图片批注在旋转页上的坐标验收。 |
 | `broken.pdf` | 故意损坏的 PDF，用于可恢复错误 UI。 |
 
 ## 验收流程

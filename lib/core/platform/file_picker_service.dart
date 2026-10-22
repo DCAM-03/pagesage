@@ -233,4 +233,32 @@ final class FilePickerService {
       ),
     );
   }
+
+  /// Destination for a picture pulled out of a book.
+  ///
+  /// [baseName] comes from the book title and image ordinal; it is cleaned
+  /// here because a title may contain slashes, colons or quotes that some
+  /// filesystems reject outright.
+  Future<String?> pickImageSavePath({
+    required String baseName,
+    required List<int> bytes,
+  }) {
+    return _adapter.saveFile(
+      FileSaveRequest(
+        dialogTitle: '保存图片',
+        fileName: '${_safeFileStem(baseName)}.png',
+        allowedExtensions: ['png'],
+        bytes: bytes,
+      ),
+    );
+  }
+
+  static String _safeFileStem(String value) {
+    final cleaned = value
+        .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (cleaned.isEmpty) return 'pagesage-image';
+    return cleaned.length <= 80 ? cleaned : cleaned.substring(0, 80).trim();
+  }
 }

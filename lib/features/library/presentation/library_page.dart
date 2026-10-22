@@ -76,6 +76,7 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
                   AppPageHeader(
                     title: '书库',
                     subtitle: '本地 EPUB/PDF 阅读库',
+                    showThemeMode: true,
                     actions: [
                       _LibraryHeaderActions(
                         isImporting: _isImporting,
@@ -114,6 +115,7 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
               children: [
                 AppPageHeader(
                   title: '书库',
+                  showThemeMode: true,
                   subtitle:
                       '${visibleBooks.length} 本 · ${libraryState.sort.label} · ${libraryState.viewMode.label}'
                       '${libraryState.viewMode == LibraryViewMode.grid ? ' · 封面${libraryState.gridSize.label}' : ''}',

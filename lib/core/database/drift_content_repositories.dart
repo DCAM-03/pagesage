@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../domain/ai/ai_models.dart';
 import '../../domain/annotations/annotation.dart' as domain;
+import '../../domain/annotations/image_anchor.dart' as domain;
 import '../../domain/books/bookmark.dart' as domain;
 import '../../domain/books/category.dart' as domain;
 import '../../domain/books/reading_position.dart';
@@ -375,7 +376,19 @@ final class DriftAnnotationRepository implements domain.AnnotationRepository {
     required String selectedText,
     domain.AnnotationColor color = domain.AnnotationColor.yellow,
     domain.AnnotationStyle style = domain.AnnotationStyle.highlight,
+    domain.ImageAnchor? imageAnchor,
   }) async {
+    if (imageAnchor != null &&
+        imageAnchor.rect.width <= 0 &&
+        imageAnchor.rect.height <= 0) {
+      // An image annotation with an empty box has nowhere to paint; writing it
+      // would produce a row that silently never shows up in the reader.
+      throw ArgumentError.value(
+        imageAnchor,
+        'imageAnchor',
+        'image annotation needs a non-empty rect',
+      );
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
     final previous = id == null ? null : await _dao.getAnnotation(id);
     final resolvedLocator = enrichLocatorForJump(
@@ -392,6 +405,10 @@ final class DriftAnnotationRepository implements domain.AnnotationRepository {
       noteId: previous?.noteId,
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
+      target: imageAnchor == null
+          ? domain.AnnotationTarget.text
+          : domain.AnnotationTarget.image,
+      imageAnchor: imageAnchor,
     );
     await _dao.upsertAnnotation(
       db.AnnotationsCompanion.insert(
@@ -402,6 +419,13 @@ final class DriftAnnotationRepository implements domain.AnnotationRepository {
         color: annotation.color.value,
         style: annotation.style.value,
         noteId: Value(annotation.noteId),
+        // Has a column default, so the generated insert takes a `Value`.
+        target: Value(annotation.target.value),
+        imageAnchor: Value(
+          annotation.imageAnchor == null
+              ? null
+              : jsonEncode(annotation.imageAnchor!.toJson()),
+        ),
         createdAt: annotation.createdAt,
         updatedAt: annotation.updatedAt,
       ),
@@ -433,7 +457,25 @@ final class DriftAnnotationRepository implements domain.AnnotationRepository {
       noteId: row.noteId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      target: domain.AnnotationTarget.fromValue(row.target),
+      imageAnchor: _imageAnchorFromText(row.imageAnchor),
     );
+  }
+
+  domain.ImageAnchor? _imageAnchorFromText(String? value) {
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is Map) {
+        return domain.ImageAnchor.fromJson(decoded.cast<String, Object?>());
+      }
+    } on Object {
+      // A corrupt anchor must not hide the rest of the annotation list; the
+      // annotation still jumps to its page through `locator`.
+    }
+    return null;
   }
 }
 

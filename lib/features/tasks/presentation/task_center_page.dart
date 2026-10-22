@@ -46,6 +46,7 @@ final class _TaskCenterPageState extends ConsumerState<TaskCenterPage> {
             AppPageHeader(
               title: '任务中心',
               subtitle: '查看导入、索引、导出和备份任务',
+              showThemeMode: true,
               actions: [
                 IconButton(
                   tooltip: completedCount > 0 ? '清除已完成' : '没有可清除的任务',

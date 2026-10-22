@@ -28,6 +28,10 @@ void main() {
     await fresh.close();
 
     sqlite.execute('ALTER TABLE ai_conversations DROP COLUMN thread_id');
+    // Rewinding to v3 also has to remove what v5 adds, otherwise the upgrade
+    // under test finds the columns already there.
+    sqlite.execute('ALTER TABLE annotations DROP COLUMN target');
+    sqlite.execute('ALTER TABLE annotations DROP COLUMN image_anchor');
     sqlite.execute('PRAGMA user_version = 3');
     expect(
       sqlite.select('SELECT COUNT(*) AS c FROM ai_conversations').first['c'],

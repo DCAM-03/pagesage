@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/app/pagesage_app.dart';
 import 'package:pagesage/app/theme/app_theme.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/core/platform/platform_providers.dart';
@@ -13,6 +14,7 @@ import 'package:pagesage/core/platform/window_drop_import_service.dart';
 import 'package:pagesage/core/tasks/task_models.dart';
 import 'package:pagesage/domain/ai/ai_models.dart';
 import 'package:pagesage/domain/annotations/annotation.dart';
+import 'package:pagesage/domain/annotations/image_anchor.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/book_repository.dart';
 import 'package:pagesage/domain/books/bookmark.dart';
@@ -156,6 +158,28 @@ void main() {
         settings: const ReaderSettings(appThemeMode: ThemeMode.dark),
       ),
     );
+    // The shell scenes mount the real `PageSageApp`, because the sidebar only
+    // exists inside `MainShell` — a bare page has no navigation to show.
+    await _captureIfSelected(
+      tester,
+      fileName: 'shell-command-bar-theme.png',
+      size: const Size(1280, 860),
+      route: '/library',
+      outputDir: outputDir,
+      data: data,
+      wholeApp: true,
+    );
+    await _captureIfSelected(
+      tester,
+      fileName: 'shell-command-bar-theme-dark.png',
+      size: const Size(1280, 860),
+      route: '/library',
+      outputDir: outputDir,
+      data: data.copyWith(
+        settings: const ReaderSettings(appThemeMode: ThemeMode.dark),
+      ),
+      wholeApp: true,
+    );
     await _captureIfSelected(
       tester,
       fileName: 'theme-high-contrast-search.png',
@@ -195,6 +219,73 @@ void main() {
         settings: const ReaderSettings(desktopContextOpen: true),
       ),
       settle: const Duration(seconds: 2),
+    );
+    await _captureIfSelected(
+      tester,
+      fileName: 'reader-pdf-image-box-mode.png',
+      size: const Size(1440, 960),
+      route: '/book/book-pdf/reader',
+      outputDir: outputDir,
+      data: data,
+      settle: const Duration(seconds: 2),
+      afterPump: (tester) async {
+        // The mode is entered from the more menu; the screenshot has to show
+        // the persistent banner that makes the state visible and escapable.
+        await tester.tap(find.byTooltip('更多阅读操作'));
+        // The menu fades and scales in; tapping its label mid-animation lands
+        // outside the shrinking hit area and merely dismisses it.
+        for (var i = 0; i < 8; i += 1) {
+          await tester.pump(const Duration(milliseconds: 150));
+        }
+        // Tap the menu row rather than the label: a checked row merges its
+        // children into one semantics node, and the text's own box is not in
+        // the hit path.
+        await tester.tap(
+          find
+              .ancestor(
+                of: find.text('框选图片'),
+                matching: find.byWidgetPredicate((w) => w is PopupMenuItem),
+              )
+              .first,
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+        // A screenshot of a mode that silently failed to turn on would be
+        // worse than no screenshot, so the scene checks the banner itself.
+        expect(find.text('框选图片：拖出图片范围'), findsOneWidget);
+      },
+    );
+    await _captureIfSelected(
+      tester,
+      fileName: 'reader-pdf-image-menu.png',
+      size: const Size(1440, 960),
+      route: '/book/book-pdf/reader',
+      outputDir: outputDir,
+      data: data,
+      settle: const Duration(seconds: 2),
+      afterPump: (tester) async {
+        // What the reader sees right after drawing a box: the same floating
+        // bar as a text selection, with the image actions.
+        final host = tester.widget<_FakeReaderRendererHost>(
+          find.byType(_FakeReaderRendererHost),
+        );
+        host.config.onImageAreaSelected?.call(
+          const RendererImageAreaSelected(
+            anchor: PdfImageAnchor(
+              page: 3,
+              ordinal: 0,
+              rect: ReaderRect(x: 0.2, y: 0.25, width: 0.55, height: 0.38),
+            ),
+            sourceRect: ReaderRect(
+              page: 3,
+              x: 520,
+              y: 380,
+              width: 380,
+              height: 260,
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+      },
     );
     await _captureIfSelected(
       tester,
@@ -299,10 +390,13 @@ Future<void> _loadScreenshotFonts() async {
         .load();
   }
 
-  await load(
-    'NotoSansCJK',
-    '/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc',
-  );
+  const cjk =
+      '/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc';
+  await load('NotoSansCJK', cjk);
+  // Whole-app scenes build their own `MaterialApp`, so they cannot go through
+  // `_withScreenshotFont`; registering the CJK family under the default name
+  // keeps their text from rendering as blank boxes.
+  await load('Roboto', cjk);
   // The runner is `<sdk>/bin/cache/artifacts/engine/<os>/flutter_tester`, so
   // the artifacts directory sits three levels up — no hard-coded SDK path.
   final artifacts = Directory(Platform.resolvedExecutable).parent.parent.parent;
@@ -330,6 +424,7 @@ Future<void> _captureIfSelected(
   double textScale = 1,
   bool highContrast = false,
   Duration settle = const Duration(milliseconds: 150),
+  bool wholeApp = false,
   Future<void> Function(WidgetTester tester)? afterPump,
 }) async {
   if (_screenshotFilter.isNotEmpty && !fileName.contains(_screenshotFilter)) {
@@ -349,6 +444,7 @@ Future<void> _captureIfSelected(
     textScale: textScale,
     highContrast: highContrast,
     settle: settle,
+    wholeApp: wholeApp,
     afterPump: afterPump,
   );
 }
@@ -363,6 +459,7 @@ Future<void> _captureAppPage(
   double textScale = 1,
   bool highContrast = false,
   Duration settle = const Duration(milliseconds: 150),
+  bool wholeApp = false,
   Future<void> Function(WidgetTester tester)? afterPump,
 }) async {
   await tester.binding.setSurfaceSize(size);
@@ -380,18 +477,24 @@ Future<void> _captureAppPage(
         ),
         child: RepaintBoundary(
           key: key,
-          child: MaterialApp(
-            title: 'PageSage',
-            debugShowCheckedModeBanner: false,
-            theme: _withScreenshotFont(
-              highContrast ? AppTheme.highContrast() : AppTheme.light(),
-            ),
-            darkTheme: _withScreenshotFont(AppTheme.dark()),
-            highContrastTheme: _withScreenshotFont(AppTheme.highContrast()),
-            highContrastDarkTheme: _withScreenshotFont(AppTheme.highContrast()),
-            themeMode: data.settings.appThemeMode,
-            home: _pageForRoute(route, data),
-          ),
+          child: wholeApp
+              ? const PageSageApp()
+              : MaterialApp(
+                  title: 'PageSage',
+                  debugShowCheckedModeBanner: false,
+                  theme: _withScreenshotFont(
+                    highContrast ? AppTheme.highContrast() : AppTheme.light(),
+                  ),
+                  darkTheme: _withScreenshotFont(AppTheme.dark()),
+                  highContrastTheme: _withScreenshotFont(
+                    AppTheme.highContrast(),
+                  ),
+                  highContrastDarkTheme: _withScreenshotFont(
+                    AppTheme.highContrast(),
+                  ),
+                  themeMode: data.settings.appThemeMode,
+                  home: _pageForRoute(route, data),
+                ),
         ),
       ),
     ),
@@ -1255,6 +1358,7 @@ final class _FakeAnnotationRepository implements AnnotationRepository {
     required String selectedText,
     AnnotationColor color = AnnotationColor.yellow,
     AnnotationStyle style = AnnotationStyle.highlight,
+    ImageAnchor? imageAnchor,
   }) async {
     return Annotation(
       id: id ?? 'annotation-new',

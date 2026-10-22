@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
+import '../../domain/books/reading_position.dart';
+import 'pdf_image_detector.dart';
+
 /// Renders a PDF page onto a Flutter [Canvas] with `pdf_graphics`.
 ///
 /// Wraps `dart_pdf_editor`'s `CanvasPdfDevice`, so the page paints without any
@@ -234,6 +237,28 @@ final class PdfCanvasRenderer {
     return extracted;
   }
 
+  /// Images on [pageIndex], in the annotation coordinate space.
+  ///
+  /// Cached per page like [textOf]: the host asks on every hit test while the
+  /// reader drags a box, and parsing a graphics-rich page's content stream per
+  /// pointer move would drop frames. An empty list is a real answer — the page
+  /// draws no images, or its stream cannot be parsed — so it is cached too.
+  List<PdfDetectedImage> imagesOnPage(int pageIndex) {
+    final cached = _imageCache.remove(pageIndex);
+    if (cached != null) {
+      _imageCache[pageIndex] = cached;
+      return cached;
+    }
+    final detected = pageIndex < 0 || pageIndex >= _doc.pageCount
+        ? const <PdfDetectedImage>[]
+        : PdfImageDetector.detect(_doc, pageIndex);
+    _imageCache[pageIndex] = detected;
+    while (_imageCache.length > _imageCachePages) {
+      _imageCache.remove(_imageCache.keys.first);
+    }
+    return detected;
+  }
+
   /// [textOf] without blocking the UI thread when a worker is available.
   ///
   /// Returns null only when the page has no extractable text and the worker
@@ -278,6 +303,12 @@ final class PdfCanvasRenderer {
   }
 
   static const _textCachePages = 8;
+
+  /// Image geometry is a few dozen doubles per page; caching a screenful costs
+  /// nothing next to the text cache beside it.
+  final Map<int, List<PdfDetectedImage>> _imageCache =
+      <int, List<PdfDetectedImage>>{};
+  static const _imageCachePages = 12;
   final Map<int, PdfPageText> _textCache = <int, PdfPageText>{};
 
   /// Whether the document has an extractable text layer at all.
@@ -355,6 +386,68 @@ final class PdfCanvasRenderer {
         (size.width * ratio).round(),
         (size.height * ratio).round(),
       );
+      picture.dispose();
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      return data?.buffer.asUint8List();
+    } on Object {
+      return null;
+    } finally {
+      image?.dispose();
+    }
+  }
+
+  /// Crops part of a rendered page to a PNG.
+  ///
+  /// [rect] is a fraction of the displayed page box, the same basis image
+  /// annotations store, so what was annotated is exactly what comes out.
+  ///
+  /// Cropping the page raster rather than decoding the image XObject keeps the
+  /// result faithful for free: soft masks, CMYK colour spaces, inline images
+  /// and images drawn by form XObjects all come out as the reader sees them.
+  /// The cost is rendering the whole page for one picture, which is why the
+  /// output is capped rather than exported at native resolution.
+  ///
+  /// Returns null when the page cannot be rendered or [rect] is empty.
+  Future<Uint8List?> exportPageRegion(
+    int pageIndex,
+    ReaderRect rect, {
+    int maxPixels = 4096,
+  }) async {
+    if (_disposed) return null;
+    if (pageIndex < 0 || pageIndex >= pageCount) return null;
+    final size = displaySizeOf(pageIndex);
+    if (size.isEmpty || rect.width <= 0 || rect.height <= 0) return null;
+    // Two source pixels per output pixel keeps the crop sharp when it is shown
+    // next to the page, and the cap stops a whole-page selection of a large
+    // page from allocating a giant raster.
+    var ratio = 2.0;
+    final regionWidth = rect.width * size.width;
+    final regionHeight = rect.height * size.height;
+    final widest = math.max(regionWidth, regionHeight);
+    if (widest * ratio > maxPixels) {
+      ratio = (maxPixels / widest).clamp(0.1, 2.0).toDouble();
+    }
+    final outWidth = (regionWidth * ratio).round();
+    final outHeight = (regionHeight * ratio).round();
+    if (outWidth <= 0 || outHeight <= 0) return null;
+
+    ui.Image? image;
+    try {
+      final page = await renderPage(pageIndex);
+      if (page == null) return null;
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      // Move the crop to the origin, then scale in one step: the page draws at
+      // 1 unit = 1 point, so this both selects the region and resamples it.
+      canvas.translate(
+        -rect.x * size.width * ratio,
+        -rect.y * size.height * ratio,
+      );
+      canvas.scale(ratio);
+      canvas.drawPicture(page.picture);
+      page.dispose();
+      final picture = recorder.endRecording();
+      image = await picture.toImage(outWidth, outHeight);
       picture.dispose();
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       return data?.buffer.asUint8List();

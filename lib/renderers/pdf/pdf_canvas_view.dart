@@ -13,6 +13,7 @@ import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
 import '../../domain/annotations/annotation.dart';
+import '../../domain/annotations/image_anchor.dart';
 import '../../domain/books/book.dart';
 import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
@@ -20,6 +21,7 @@ import '../common/renderer_event.dart';
 import '../../features/ocr/application/ocr_providers.dart';
 import '../epub/epub_jump.dart';
 import 'pdf_annotation_lines.dart';
+import 'pdf_image_detector.dart';
 import 'pdf_canvas_renderer.dart';
 import 'pdf_layout.dart';
 import 'pdf_page_image_source.dart';
@@ -67,6 +69,8 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
     this.clearSearchHighlightsVersion = 0,
     this.clearSelectionVersion = 0,
     this.onZoomChanged,
+    this.imageDragMode = false,
+    this.onImageAreaSelected,
     super.key,
   });
 
@@ -105,6 +109,18 @@ final class PdfCanvasView extends ConsumerStatefulWidget {
   /// arrive, so the page never jumps back for a frame.
   final PdfZoomChanged? onZoomChanged;
 
+  /// Whether a drag draws a box for an image annotation instead of selecting
+  /// text. Turned on by the reader's toolbar; false by default so the existing
+  /// text gesture is untouched.
+  ///
+  /// When it is on the page stops offering itself for text selection: the same
+  /// drag cannot mean both, and a highlight left painted under the box would
+  /// make the reader think both happened.
+  final bool imageDragMode;
+
+  /// A box was drawn over an image.
+  final ValueChanged<RendererImageAreaSelected>? onImageAreaSelected;
+
   @override
   ConsumerState<PdfCanvasView> createState() => _PdfCanvasViewState();
 }
@@ -141,6 +157,14 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// result shows *where* on the page the phrase sits. All hits stay in a
   /// faint tint, so the flash is a focus cue rather than the only highlight.
   final Map<int, List<PdfTextQuad>> _focusQuads = {};
+
+  /// Image boxes to pulse after a jump, as display-box fractions.
+  ///
+  /// Kept apart from [_focusQuads]: those are point-space text quads run
+  /// through `PdfPageGeometry`, while an image box is already in the space
+  /// annotations use. Mixing them would project one of the two twice on a
+  /// rotated page.
+  final Map<int, List<ReaderRect>> _imageFocus = {};
 
   /// Whether the current search was triggered from the reader, which decides
   /// whether a hit may scroll the page into view.
@@ -235,6 +259,12 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       setState(() => _searchHighlights.clear());
     }
     if (oldWidget.clearSelectionVersion != widget.clearSelectionVersion) {
+      _clearSelection();
+    }
+    if (oldWidget.imageDragMode != widget.imageDragMode) {
+      // Entering the mode with a text selection still painted would leave a
+      // highlight under the box the reader is about to draw, and the next tap
+      // would hit that highlight instead of starting a box.
       _clearSelection();
     }
     // The host puts the jump target in `initialProgress`: `_jumpProgress`
@@ -601,8 +631,22 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// are marked for a moment instead of leaving the reader to scan the page.
   Future<void> _flashFocusHit(int pageIndex, String? excerpt) async {
     final renderer = _renderer;
+    if (renderer == null) return;
+    // An image annotation has no words to find. It carries its own box in the
+    // locator's `selectionRects` instead, so jump-back lights up the frame
+    // rather than dropping the reader on a page to hunt for it.
+    final boxes = _imageFocusFractions(pageIndex);
+    if (boxes.isNotEmpty) {
+      _focusClearTimer?.cancel();
+      if (!mounted) return;
+      setState(() => _imageFocus[pageIndex] = boxes);
+      _focusClearTimer = Timer(const Duration(milliseconds: 2200), () {
+        if (mounted) _clearFocusHit();
+      });
+      return;
+    }
     final needle = excerpt?.trim();
-    if (renderer == null || needle == null || needle.isEmpty) {
+    if (needle == null || needle.isEmpty) {
       _clearFocusHit();
       return;
     }
@@ -635,6 +679,23 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     });
   }
 
+  /// The stored box of a jumped-to image annotation, if this jump has one.
+  ///
+  /// Fractions of the displayed page box, so they are painted directly. Only a
+  /// locator pointing at [pageIndex] qualifies; a rect stored for another page
+  /// would light up the wrong place.
+  List<ReaderRect> _imageFocusFractions(int pageIndex) {
+    final locator = widget.initialProgress?.locator;
+    if (locator == null || locator.type != ReadingLocatorType.pdf) {
+      return const [];
+    }
+    if (locator.page != pageIndex + 1) return const [];
+    return [
+      for (final rect in locator.selectionRects)
+        if (rect.width > 0 && rect.height > 0) rect,
+    ];
+  }
+
   void _jumpToPageFromLink(int page) {
     unawaited(_jumpToLocator(ReadingLocator.pdf(page: page)));
   }
@@ -642,8 +703,11 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   void _clearFocusHit() {
     _focusClearTimer?.cancel();
     _focusClearTimer = null;
-    if (_focusQuads.isEmpty || !mounted) return;
-    setState(_focusQuads.clear);
+    if ((_focusQuads.isEmpty && _imageFocus.isEmpty) || !mounted) return;
+    setState(() {
+      _focusQuads.clear();
+      _imageFocus.clear();
+    });
   }
 
   /// Forwards a zoom the user performed on the page to the host.
@@ -862,6 +926,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               turnOnWheel: false,
               searchQuads: _searchHighlights[index] ?? const [],
               focusQuads: _focusQuads[index] ?? const [],
+              imageFocus: _imageFocus[index] ?? const [],
               tint: _tint(narrow),
               annotations: widget.annotations,
               ocrBlocks: widget.ocrOverlayPage == index + 1
@@ -870,6 +935,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               selectionRange: _rangeForPage(index),
               selectionStartsHere: _selectionStartsAt(index),
               selectionEndsHere: _selectionEndsAt(index),
+              onImageAreaSelected: (area) =>
+                  widget.onImageAreaSelected?.call(area),
+              imageDragMode: widget.imageDragMode,
               onSelectionStart: _beginSelection,
               onSelectionMove: _moveSelection,
               onSelectionEnd: _endSelection,
@@ -938,6 +1006,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   turnOnWheel: true,
                   searchQuads: _searchHighlights[indices[i]] ?? const [],
                   focusQuads: _focusQuads[indices[i]] ?? const [],
+                  imageFocus: _imageFocus[indices[i]] ?? const [],
                   tint: _tint(narrow),
                   annotations: widget.annotations,
                   ocrBlocks: widget.ocrOverlayPage == indices[i] + 1
@@ -946,6 +1015,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   selectionRange: _rangeForPage(indices[i]),
                   selectionStartsHere: _selectionStartsAt(indices[i]),
                   selectionEndsHere: _selectionEndsAt(indices[i]),
+                  onImageAreaSelected: (area) =>
+                      widget.onImageAreaSelected?.call(area),
+                  imageDragMode: widget.imageDragMode,
                   onSelectionStart: _beginSelection,
                   onSelectionMove: _moveSelection,
                   onSelectionEnd: _endSelection,
@@ -1606,6 +1678,7 @@ final class _CanvasPage extends StatefulWidget {
     required this.turnOnWheel,
     required this.searchQuads,
     required this.focusQuads,
+    this.imageFocus = const [],
     required this.tint,
     required this.annotations,
     required this.ocrBlocks,
@@ -1620,6 +1693,8 @@ final class _CanvasPage extends StatefulWidget {
     required this.onSelectionHandleDragEnd,
     required this.onPaintedRect,
     required this.onAnnotationSelected,
+    required this.onImageAreaSelected,
+    required this.imageDragMode,
     required this.onExternalLink,
     required this.onJumpToPage,
     required this.onZoomChanged,
@@ -1655,6 +1730,9 @@ final class _CanvasPage extends StatefulWidget {
   /// Quads of the one hit the reader just jumped to, painted brighter than the
   /// rest for a couple of seconds.
   final List<PdfTextQuad> focusQuads;
+
+  /// Image boxes to pulse after a jump, as display-box fractions.
+  final List<ReaderRect> imageFocus;
 
   /// Theme adjustment resolved once for the whole layout.
   final PdfPageTint tint;
@@ -1697,6 +1775,12 @@ final class _CanvasPage extends StatefulWidget {
   /// Reports where this page painted itself, in global coordinates.
   final void Function(int pageIndex, Rect rect) onPaintedRect;
   final ValueChanged<RendererAnnotationSelected> onAnnotationSelected;
+
+  /// A box was drawn over an image with image-drag mode on.
+  final ValueChanged<RendererImageAreaSelected> onImageAreaSelected;
+
+  /// Whether a drag draws an image box instead of selecting text.
+  final bool imageDragMode;
 
   /// An external `/URI` link was tapped; the host confirms and opens it.
   final ValueChanged<RendererExternalLinkRequested> onExternalLink;
@@ -1865,8 +1949,27 @@ final class _CanvasPageState extends State<_CanvasPage> {
       focusedRects: [
         for (final q in widget.focusQuads) _quadToRect(q, _pageSize),
       ],
+      imageFocusRects: [
+        for (final r in widget.imageFocus)
+          Rect.fromLTWH(
+            r.x * _pageSize.width,
+            r.y * _pageSize.height,
+            r.width * _pageSize.width,
+            r.height * _pageSize.height,
+          ),
+      ],
       tint: widget.tint,
-      annotations: _annotationBoxes(_paintedSize),
+      annotations: [
+        ..._annotationBoxes(_paintedSize),
+        if (_imageDragStart != null && _imageDragCurrent != null)
+          _AnnotationBox(
+            annotationId: '__image_drag__',
+            rect: Rect.fromPoints(_imageDragStart!, _imageDragCurrent!),
+            color: AnnotationColor.blue,
+            underline: false,
+            imageFrame: true,
+          ),
+      ],
       ocrBoxes: _ocrBoxes(_paintedSize),
       onStart: _onDragStart,
       onUpdate: _onDragUpdate,
@@ -1875,6 +1978,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
       onLongPressStart: _onLongPressStart,
       onLongPressMove: _onLongPressMoveUpdate,
       onLongPressEnd: _onLongPressEnd,
+      imageBoxMode: widget.imageDragMode,
     );
   }
 
@@ -2194,11 +2298,25 @@ final class _CanvasPageState extends State<_CanvasPage> {
 
   Offset _toGlobal(Offset local) => _globalOrigin + local;
 
+  Offset? _imageDragStart;
+  Offset? _imageDragCurrent;
+
   void _onDragStart(Offset local) {
+    if (widget.imageDragMode) {
+      _imageDragStart = local;
+      _imageDragCurrent = local;
+      setState(() {});
+      return;
+    }
     widget.onSelectionStart(_toGlobal(local), PointerDeviceKind.mouse);
   }
 
   void _onDragUpdate(Offset local) {
+    if (widget.imageDragMode) {
+      _imageDragCurrent = local;
+      setState(() {});
+      return;
+    }
     // The view holds the carets and rebuilds every page with its new
     // `selectionRange`, so the highlight follows the drag without the page
     // tracking selection state of its own.
@@ -2206,7 +2324,57 @@ final class _CanvasPageState extends State<_CanvasPage> {
   }
 
   void _onDragEnd(Offset local, Offset globalOrigin) {
+    if (widget.imageDragMode) {
+      final start = _imageDragStart;
+      _imageDragStart = null;
+      _imageDragCurrent = null;
+      setState(() {});
+      if (start != null) {
+        _emitImageSelection(start, local, globalOrigin);
+      }
+      return;
+    }
     widget.onSelectionEnd(_toGlobal(local), PointerDeviceKind.mouse);
+  }
+
+  /// Converts the drawn box into an anchor, snapping to a detected image.
+  void _emitImageSelection(Offset start, Offset end, Offset globalOrigin) {
+    final painted = _paintedSize;
+    if (painted.width <= 0 || painted.height <= 0) return;
+    final left = math.min(start.dx, end.dx) / painted.width;
+    final top = math.min(start.dy, end.dy) / painted.height;
+    final width = (end.dx - start.dx).abs() / painted.width;
+    final height = (end.dy - start.dy).abs() / painted.height;
+    if (width <= 0.003 || height <= 0.003) return;
+    final drawn = ReaderRect(
+      x: left.clamp(0.0, 1.0),
+      y: top.clamp(0.0, 1.0),
+      width: width.clamp(0.0, 1.0 - left),
+      height: height.clamp(0.0, 1.0 - top),
+    );
+    final image = snapToDetectedImage(
+      drawn,
+      widget.renderer.imagesOnPage(widget.pageIndex),
+    );
+    final page = widget.pageIndex + 1;
+    final anchor = PdfImageAnchor(
+      page: page,
+      ordinal: image?.ordinal,
+      resourceName: image?.resourceName,
+      rect: image?.rect ?? drawn,
+    );
+    widget.onImageAreaSelected(
+      RendererImageAreaSelected(
+        anchor: anchor,
+        sourceRect: ReaderRect(
+          page: page,
+          x: globalOrigin.dx + left * painted.width,
+          y: globalOrigin.dy + top * painted.height,
+          width: width * painted.width,
+          height: height * painted.height,
+        ),
+      ),
+    );
   }
 
   /// Touch long-press selects the word under the finger.
@@ -2290,6 +2458,27 @@ final class _CanvasPageState extends State<_CanvasPage> {
     final out = <_AnnotationBox>[];
     for (final annotation in widget.annotations) {
       if (annotation.locator.page != widget.pageIndex + 1) continue;
+      final anchor = annotation.imageAnchor;
+      if (annotation.target == AnnotationTarget.image && anchor != null) {
+        // An image is marked with a frame, not a wash: a translucent fill over
+        // artwork changes what the reader sees, which is the one thing a
+        // highlight of an image must not do.
+        out.add(
+          _AnnotationBox(
+            annotationId: annotation.id,
+            rect: Rect.fromLTWH(
+              anchor.rect.x * viewSize.width,
+              anchor.rect.y * viewSize.height,
+              anchor.rect.width * viewSize.width,
+              anchor.rect.height * viewSize.height,
+            ),
+            color: annotation.color,
+            underline: false,
+            imageFrame: true,
+          ),
+        );
+        continue;
+      }
       final raw = <PdfLineRect>[
         for (final rect in annotation.locator.selectionRects)
           if (rect.width > 0 && rect.height > 0)
@@ -2503,6 +2692,7 @@ final class _PicturePainter extends CustomPainter {
     this.page, {
     this.highlights = const [],
     this.focusHighlights = const [],
+    this.imageFocus = const [],
     this.annotations = const [],
     this.ocrBoxes = const [],
     this.pxPerPoint = 1,
@@ -2512,6 +2702,9 @@ final class _PicturePainter extends CustomPainter {
   final PdfRenderedPage page;
   final List<Rect> highlights;
   final List<Rect> focusHighlights;
+
+  /// Image boxes the jump landed on: framed, never filled.
+  final List<Rect> imageFocus;
   final List<_AnnotationBox> annotations;
   final List<_OcrBox> ocrBoxes;
 
@@ -2555,8 +2748,15 @@ final class _PicturePainter extends CustomPainter {
     for (final rect in focusHighlights) {
       canvas.drawRect(rect, focusFill);
     }
+    for (final rect in imageFocus) {
+      _paintImageFrame(canvas, rect, const Color(0xCCFFB300));
+    }
     for (final box in annotations) {
       final fill = Paint()..color = _annotationColor(box.color);
+      if (box.imageFrame) {
+        _paintImageFrame(canvas, box.rect, fill.color);
+        continue;
+      }
       if (box.underline) {
         canvas.drawRect(
           Rect.fromLTRB(
@@ -2576,6 +2776,48 @@ final class _PicturePainter extends CustomPainter {
     for (final box in ocrBoxes) {
       if (!box.rect.isEmpty) _paintOcrText(canvas, box);
     }
+  }
+
+  /// Four corners plus a hairline, so the mark reads as "this picture" without
+  /// tinting the picture itself.
+  void _paintImageFrame(Canvas canvas, Rect rect, Color color) {
+    if (rect.isEmpty) return;
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    canvas.drawRect(rect, stroke);
+    final corner = math.min(rect.width, rect.height) * 0.18;
+    final heavy = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.square;
+    // Top-left, top-right, bottom-right, bottom-left.
+    canvas.drawLine(rect.topLeft, rect.topLeft + Offset(corner, 0), heavy);
+    canvas.drawLine(rect.topLeft, rect.topLeft + Offset(0, corner), heavy);
+    canvas.drawLine(rect.topRight, rect.topRight - Offset(corner, 0), heavy);
+    canvas.drawLine(rect.topRight, rect.topRight + Offset(0, corner), heavy);
+    canvas.drawLine(
+      rect.bottomRight,
+      rect.bottomRight - Offset(corner, 0),
+      heavy,
+    );
+    canvas.drawLine(
+      rect.bottomRight,
+      rect.bottomRight - Offset(0, corner),
+      heavy,
+    );
+    canvas.drawLine(
+      rect.bottomLeft,
+      rect.bottomLeft + Offset(corner, 0),
+      heavy,
+    );
+    canvas.drawLine(
+      rect.bottomLeft,
+      rect.bottomLeft - Offset(0, corner),
+      heavy,
+    );
   }
 
   void _paintOcrText(Canvas canvas, _OcrBox box) {
@@ -2619,6 +2861,7 @@ final class _SelectablePage extends StatefulWidget {
     required this.pageSize,
     required this.highlightedRects,
     required this.focusedRects,
+    this.imageFocusRects = const [],
     required this.tint,
     required this.annotations,
     required this.ocrBoxes,
@@ -2629,6 +2872,7 @@ final class _SelectablePage extends StatefulWidget {
     required this.onLongPressStart,
     required this.onLongPressMove,
     required this.onLongPressEnd,
+    this.imageBoxMode = false,
     super.key,
   });
 
@@ -2641,6 +2885,10 @@ final class _SelectablePage extends StatefulWidget {
 
   /// The jumped-to hit, drawn in a stronger colour than [highlightedRects].
   final List<Rect> focusedRects;
+
+  /// Image boxes the jump landed on, painted as a pulsing frame rather than a
+  /// wash: a tint over artwork would change what the reader sees.
+  final List<Rect> imageFocusRects;
   final PdfPageTint tint;
   final List<_AnnotationBox> annotations;
   final List<_OcrBox> ocrBoxes;
@@ -2652,6 +2900,9 @@ final class _SelectablePage extends StatefulWidget {
   final void Function(LongPressStartDetails details) onLongPressStart;
   final void Function(LongPressMoveUpdateDetails details) onLongPressMove;
   final void Function(LongPressEndDetails details) onLongPressEnd;
+
+  /// A drag draws an image box, from a finger as well as a mouse.
+  final bool imageBoxMode;
 
   @override
   State<_SelectablePage> createState() => _SelectablePageState();
@@ -2690,26 +2941,30 @@ final class _SelectablePageState extends State<_SelectablePage> {
             _MousePanGestureRecognizer:
                 GestureRecognizerFactoryWithHandlers<
                   _MousePanGestureRecognizer
-                >(() => _MousePanGestureRecognizer(debugOwner: this), (
-                  recognizer,
-                ) {
-                  // Browsers anchor a drag-selection at the pointer-down
-                  // position. With the default `start`, the anchor is
-                  // wherever the pointer was when the pan was recognised
-                  // (past the slop), so the first word under the press is
-                  // silently dropped.
-                  recognizer.dragStartBehavior = DragStartBehavior.down;
-                  recognizer.onStart = (details) =>
-                      widget.onStart(_toLocal(details.globalPosition));
-                  recognizer.onUpdate = (details) =>
-                      widget.onUpdate(_toLocal(details.globalPosition));
-                  recognizer.onEnd = (_) {
-                    final last = _lastLocal;
-                    if (last != null) {
-                      widget.onEnd(last, _globalOrigin);
-                    }
-                  };
-                }),
+                >(
+                  () => _MousePanGestureRecognizer(
+                    debugOwner: this,
+                    allowTouch: widget.imageBoxMode,
+                  ),
+                  (recognizer) {
+                    // Browsers anchor a drag-selection at the pointer-down
+                    // position. With the default `start`, the anchor is
+                    // wherever the pointer was when the pan was recognised
+                    // (past the slop), so the first word under the press is
+                    // silently dropped.
+                    recognizer.dragStartBehavior = DragStartBehavior.down;
+                    recognizer.onStart = (details) =>
+                        widget.onStart(_toLocal(details.globalPosition));
+                    recognizer.onUpdate = (details) =>
+                        widget.onUpdate(_toLocal(details.globalPosition));
+                    recognizer.onEnd = (_) {
+                      final last = _lastLocal;
+                      if (last != null) {
+                        widget.onEnd(last, _globalOrigin);
+                      }
+                    };
+                  },
+                ),
             TapGestureRecognizer:
                 GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
                   () => TapGestureRecognizer(debugOwner: this),
@@ -2742,6 +2997,7 @@ final class _SelectablePageState extends State<_SelectablePage> {
               widget.page,
               highlights: widget.highlightedRects,
               focusHighlights: widget.focusedRects,
+              imageFocus: widget.imageFocusRects,
               annotations: widget.annotations,
               ocrBoxes: widget.ocrBoxes,
               tint: widget.tint,
@@ -2766,13 +3022,22 @@ const Set<PointerDeviceKind> _selectionPointerKinds = {
 };
 
 final class _MousePanGestureRecognizer extends PanGestureRecognizer {
-  _MousePanGestureRecognizer({super.debugOwner});
+  _MousePanGestureRecognizer({super.debugOwner, this.allowTouch = false});
+
+  /// While drawing an image box, a finger drags the box too.
+  ///
+  /// Text selection on touch is long-press, not drag, so there is no conflict
+  /// to resolve: a drag means the box and the page-level pinch/pan stays out
+  /// of the way because this recognizer is the inner one.
+  final bool allowTouch;
 
   @override
   bool isPointerAllowed(PointerEvent event) {
     final allowed = super.isPointerAllowed(event);
     if (event is! PointerDownEvent) return allowed;
-    if (!_selectionPointerKinds.contains(event.kind)) return false;
+    if (!allowTouch && !_selectionPointerKinds.contains(event.kind)) {
+      return false;
+    }
     return allowed;
   }
 }
@@ -2912,12 +3177,16 @@ final class _AnnotationBox {
     required this.rect,
     required this.color,
     required this.underline,
+    this.imageFrame = false,
   });
 
   final String annotationId;
   final Rect rect;
   final AnnotationColor color;
   final bool underline;
+
+  /// Draw brackets around the box instead of filling it (image annotations).
+  final bool imageFrame;
 }
 
 /// One OCR text block projected into view coordinates.
@@ -2954,6 +3223,16 @@ final class _CanvasPageImageSource implements PdfPageImageSource {
     final renderer = _view._renderer;
     if (renderer == null) return Future<Uint8List?>.value();
     return renderer.exportPageImage(pageNumber - 1);
+  }
+
+  @override
+  Future<Uint8List?> exportPageRegion({
+    required int pageNumber,
+    required ReaderRect rect,
+  }) {
+    final renderer = _view._renderer;
+    if (renderer == null) return Future<Uint8List?>.value();
+    return renderer.exportPageRegion(pageNumber - 1, rect);
   }
 
   @override

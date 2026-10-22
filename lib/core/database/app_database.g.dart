@@ -3327,6 +3327,27 @@ class $AnnotationsTable extends Annotations
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _targetMeta = const VerificationMeta('target');
+  @override
+  late final GeneratedColumn<String> target = GeneratedColumn<String>(
+    'target',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('text'),
+  );
+  static const VerificationMeta _imageAnchorMeta = const VerificationMeta(
+    'imageAnchor',
+  );
+  @override
+  late final GeneratedColumn<String> imageAnchor = GeneratedColumn<String>(
+    'image_anchor',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3358,6 +3379,8 @@ class $AnnotationsTable extends Annotations
     color,
     style,
     noteId,
+    target,
+    imageAnchor,
     createdAt,
     updatedAt,
   ];
@@ -3427,6 +3450,21 @@ class $AnnotationsTable extends Annotations
         noteId.isAcceptableOrUnknown(data['note_id']!, _noteIdMeta),
       );
     }
+    if (data.containsKey('target')) {
+      context.handle(
+        _targetMeta,
+        target.isAcceptableOrUnknown(data['target']!, _targetMeta),
+      );
+    }
+    if (data.containsKey('image_anchor')) {
+      context.handle(
+        _imageAnchorMeta,
+        imageAnchor.isAcceptableOrUnknown(
+          data['image_anchor']!,
+          _imageAnchorMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3480,6 +3518,14 @@ class $AnnotationsTable extends Annotations
         DriftSqlType.string,
         data['${effectivePrefix}note_id'],
       ),
+      target: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}target'],
+      )!,
+      imageAnchor: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}image_anchor'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}created_at'],
@@ -3505,6 +3551,13 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
   final String color;
   final String style;
   final String? noteId;
+
+  /// `text` or `image`. Every row written before schema v5 marks text, which
+  /// is what it was.
+  final String target;
+
+  /// JSON for an [ImageAnchor]; null on text annotations.
+  final String? imageAnchor;
   final int createdAt;
   final int updatedAt;
   const AnnotationRow({
@@ -3515,6 +3568,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
     required this.color,
     required this.style,
     this.noteId,
+    required this.target,
+    this.imageAnchor,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -3529,6 +3584,10 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
     map['style'] = Variable<String>(style);
     if (!nullToAbsent || noteId != null) {
       map['note_id'] = Variable<String>(noteId);
+    }
+    map['target'] = Variable<String>(target);
+    if (!nullToAbsent || imageAnchor != null) {
+      map['image_anchor'] = Variable<String>(imageAnchor);
     }
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
@@ -3546,6 +3605,10 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
       noteId: noteId == null && nullToAbsent
           ? const Value.absent()
           : Value(noteId),
+      target: Value(target),
+      imageAnchor: imageAnchor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(imageAnchor),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -3564,6 +3627,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
       color: serializer.fromJson<String>(json['color']),
       style: serializer.fromJson<String>(json['style']),
       noteId: serializer.fromJson<String?>(json['noteId']),
+      target: serializer.fromJson<String>(json['target']),
+      imageAnchor: serializer.fromJson<String?>(json['imageAnchor']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
@@ -3579,6 +3644,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
       'color': serializer.toJson<String>(color),
       'style': serializer.toJson<String>(style),
       'noteId': serializer.toJson<String?>(noteId),
+      'target': serializer.toJson<String>(target),
+      'imageAnchor': serializer.toJson<String?>(imageAnchor),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
@@ -3592,6 +3659,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
     String? color,
     String? style,
     Value<String?> noteId = const Value.absent(),
+    String? target,
+    Value<String?> imageAnchor = const Value.absent(),
     int? createdAt,
     int? updatedAt,
   }) => AnnotationRow(
@@ -3602,6 +3671,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
     color: color ?? this.color,
     style: style ?? this.style,
     noteId: noteId.present ? noteId.value : this.noteId,
+    target: target ?? this.target,
+    imageAnchor: imageAnchor.present ? imageAnchor.value : this.imageAnchor,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -3616,6 +3687,10 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
       color: data.color.present ? data.color.value : this.color,
       style: data.style.present ? data.style.value : this.style,
       noteId: data.noteId.present ? data.noteId.value : this.noteId,
+      target: data.target.present ? data.target.value : this.target,
+      imageAnchor: data.imageAnchor.present
+          ? data.imageAnchor.value
+          : this.imageAnchor,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -3631,6 +3706,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
           ..write('color: $color, ')
           ..write('style: $style, ')
           ..write('noteId: $noteId, ')
+          ..write('target: $target, ')
+          ..write('imageAnchor: $imageAnchor, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -3646,6 +3723,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
     color,
     style,
     noteId,
+    target,
+    imageAnchor,
     createdAt,
     updatedAt,
   );
@@ -3660,6 +3739,8 @@ class AnnotationRow extends DataClass implements Insertable<AnnotationRow> {
           other.color == this.color &&
           other.style == this.style &&
           other.noteId == this.noteId &&
+          other.target == this.target &&
+          other.imageAnchor == this.imageAnchor &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -3672,6 +3753,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
   final Value<String> color;
   final Value<String> style;
   final Value<String?> noteId;
+  final Value<String> target;
+  final Value<String?> imageAnchor;
   final Value<int> createdAt;
   final Value<int> updatedAt;
   final Value<int> rowid;
@@ -3683,6 +3766,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
     this.color = const Value.absent(),
     this.style = const Value.absent(),
     this.noteId = const Value.absent(),
+    this.target = const Value.absent(),
+    this.imageAnchor = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -3695,6 +3780,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
     required String color,
     required String style,
     this.noteId = const Value.absent(),
+    this.target = const Value.absent(),
+    this.imageAnchor = const Value.absent(),
     required int createdAt,
     required int updatedAt,
     this.rowid = const Value.absent(),
@@ -3714,6 +3801,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
     Expression<String>? color,
     Expression<String>? style,
     Expression<String>? noteId,
+    Expression<String>? target,
+    Expression<String>? imageAnchor,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
     Expression<int>? rowid,
@@ -3726,6 +3815,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
       if (color != null) 'color': color,
       if (style != null) 'style': style,
       if (noteId != null) 'note_id': noteId,
+      if (target != null) 'target': target,
+      if (imageAnchor != null) 'image_anchor': imageAnchor,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -3740,6 +3831,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
     Value<String>? color,
     Value<String>? style,
     Value<String?>? noteId,
+    Value<String>? target,
+    Value<String?>? imageAnchor,
     Value<int>? createdAt,
     Value<int>? updatedAt,
     Value<int>? rowid,
@@ -3752,6 +3845,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
       color: color ?? this.color,
       style: style ?? this.style,
       noteId: noteId ?? this.noteId,
+      target: target ?? this.target,
+      imageAnchor: imageAnchor ?? this.imageAnchor,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -3782,6 +3877,12 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
     if (noteId.present) {
       map['note_id'] = Variable<String>(noteId.value);
     }
+    if (target.present) {
+      map['target'] = Variable<String>(target.value);
+    }
+    if (imageAnchor.present) {
+      map['image_anchor'] = Variable<String>(imageAnchor.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<int>(createdAt.value);
     }
@@ -3804,6 +3905,8 @@ class AnnotationsCompanion extends UpdateCompanion<AnnotationRow> {
           ..write('color: $color, ')
           ..write('style: $style, ')
           ..write('noteId: $noteId, ')
+          ..write('target: $target, ')
+          ..write('imageAnchor: $imageAnchor, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -9265,6 +9368,8 @@ typedef $$AnnotationsTableCreateCompanionBuilder =
       required String color,
       required String style,
       Value<String?> noteId,
+      Value<String> target,
+      Value<String?> imageAnchor,
       required int createdAt,
       required int updatedAt,
       Value<int> rowid,
@@ -9278,6 +9383,8 @@ typedef $$AnnotationsTableUpdateCompanionBuilder =
       Value<String> color,
       Value<String> style,
       Value<String?> noteId,
+      Value<String> target,
+      Value<String?> imageAnchor,
       Value<int> createdAt,
       Value<int> updatedAt,
       Value<int> rowid,
@@ -9324,6 +9431,16 @@ class $$AnnotationsTableFilterComposer
 
   ColumnFilters<String> get noteId => $composableBuilder(
     column: $table.noteId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get target => $composableBuilder(
+    column: $table.target,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get imageAnchor => $composableBuilder(
+    column: $table.imageAnchor,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -9382,6 +9499,16 @@ class $$AnnotationsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get target => $composableBuilder(
+    column: $table.target,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get imageAnchor => $composableBuilder(
+    column: $table.imageAnchor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -9424,6 +9551,14 @@ class $$AnnotationsTableAnnotationComposer
 
   GeneratedColumn<String> get noteId =>
       $composableBuilder(column: $table.noteId, builder: (column) => column);
+
+  GeneratedColumn<String> get target =>
+      $composableBuilder(column: $table.target, builder: (column) => column);
+
+  GeneratedColumn<String> get imageAnchor => $composableBuilder(
+    column: $table.imageAnchor,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<int> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -9470,6 +9605,8 @@ class $$AnnotationsTableTableManager
                 Value<String> color = const Value.absent(),
                 Value<String> style = const Value.absent(),
                 Value<String?> noteId = const Value.absent(),
+                Value<String> target = const Value.absent(),
+                Value<String?> imageAnchor = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -9481,6 +9618,8 @@ class $$AnnotationsTableTableManager
                 color: color,
                 style: style,
                 noteId: noteId,
+                target: target,
+                imageAnchor: imageAnchor,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -9494,6 +9633,8 @@ class $$AnnotationsTableTableManager
                 required String color,
                 required String style,
                 Value<String?> noteId = const Value.absent(),
+                Value<String> target = const Value.absent(),
+                Value<String?> imageAnchor = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -9505,6 +9646,8 @@ class $$AnnotationsTableTableManager
                 color: color,
                 style: style,
                 noteId: noteId,
+                target: target,
+                imageAnchor: imageAnchor,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,

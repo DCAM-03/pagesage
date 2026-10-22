@@ -183,16 +183,18 @@ PDF locator：
 
 ## 9. annotations
 
-用途：划线和高亮。
+用途：划线和图片批注。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | id | text | primary key | UUID |
 | book_id | text | not null | 书籍 |
-| locator | text | not null | JSON locator |
-| selected_text | text | not null | 选中文本 |
+| locator | text | not null | JSON locator（图片批注也只用于跳页） |
+| selected_text | text | not null | 选中文本；图片批注存图注或空串 |
 | color | text | not null | yellow/blue/green/red/purple |
 | style | text | not null | highlight/underline |
+| target | text | not null, default `text` | `text` / `image` |
+| image_anchor | text | nullable | 图片锚点 JSON，见 `13-image-annotations.md` §3.1 |
 | note_id | text | nullable | 关联笔记 |
 | created_at | integer | not null | 创建时间 |
 | updated_at | integer | not null | 更新时间 |
@@ -207,6 +209,9 @@ PDF locator：
 - 删除 annotation 不一定删除 note，需要用户确认。
 - EPUB 高亮定位以 CFI 为主。
 - PDF 高亮坐标后续增强。
+- 图片批注的主键是锚点里的「哪张图」（页 + 序号 + 资源名），坐标只作兜底；不要用矩形当主键，同一张图在不同 `/Rotate` 下矩形不同。
+- 图片批注的坐标一律是显示框（已应用 `/Rotate`）的 0..1、y 向下，与 `ReaderRect` 一致。
+- 迁移：schemaVersion 4 → 5 新增 `target`（默认 `text`）与 `image_anchor`（`migrator.addColumn`），不回填、不清数据。
 
 ## 10. notes
 

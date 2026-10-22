@@ -80,6 +80,9 @@ PageSage 是一个可以管理、搜索、标注和询问书籍内容的本地�
 12. [v1-experience-freeze.md](v1-experience-freeze.md)  
    v1.0 体验冻结清单：必须做 / 明确延后、扫描 PDF 策略、手测红线。
 
+13. [13-image-annotations.md](13-image-annotations.md)  
+   图片批注与插图文档：图片锚点、批注存储扩展、PDF 识别边界和分批计划。
+
 原始总纲保留在 [product-technical-document.md](product-technical-document.md)，作为早期启动稿参考。
 
 ## 5. 首版技术决策

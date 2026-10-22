@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/renderers/pdf/pdf_canvas_renderer.dart';
 import 'package:pagesage/renderers/pdf/pdf_selection_controller.dart';
 
@@ -90,6 +92,50 @@ void main() {
       expect(first, isNotNull);
       expect(second, isNotNull);
       expect(first!.length, second!.length);
+    });
+
+    test('exports one region of a page at the region\'s own shape', () async {
+      final renderer = open(standard);
+      addTearDown(renderer.dispose);
+      final pageSize = renderer.displaySizeOf(0);
+      // A quarter of the page, top-left. The crop is measured in the same
+      // fractions the image annotation stores, so what comes out is what the
+      // reader circled.
+      final region = await renderer.exportPageRegion(
+        0,
+        const ReaderRect(x: 0.1, y: 0.1, width: 0.25, height: 0.2),
+      );
+
+      expect(region, isNotNull);
+      expect(region!.take(4), [0x89, 0x50, 0x4E, 0x47]);
+      // Read the size straight out of the IHDR chunk (width and height are
+      // the two big-endian words at offset 16). Decoding a codec here would
+      // need the frame pipeline for a number that is already in the bytes.
+      final header = ByteData.sublistView(region);
+      final width = header.getUint32(16);
+      final height = header.getUint32(20);
+      final expected = (pageSize.width * 0.25) / (pageSize.height * 0.2);
+      expect(width / height, closeTo(expected, 0.02));
+    });
+
+    test('an empty or out-of-range region reports null', () async {
+      final renderer = open(standard);
+      addTearDown(renderer.dispose);
+
+      expect(
+        await renderer.exportPageRegion(
+          0,
+          const ReaderRect(x: 0.2, y: 0.2, width: 0, height: 0.3),
+        ),
+        isNull,
+      );
+      expect(
+        await renderer.exportPageRegion(
+          99,
+          const ReaderRect(x: 0.1, y: 0.1, width: 0.3, height: 0.3),
+        ),
+        isNull,
+      );
     });
 
     test('exporting an out-of-range page reports null', () async {

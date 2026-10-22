@@ -71,6 +71,55 @@ void main() {
     expect(adapter.saveRequests.single.dialogTitle, '导出全部笔记');
     expect(adapter.saveRequests.single.allowedExtensions, ['md']);
   });
+
+  group('image save path', () {
+    test('writes the PNG the renderer produced', () async {
+      final adapter = _FakeFilePickerAdapter(
+        const [],
+        savePath: r'D:\pictures\page.png',
+      );
+      final service = FilePickerService(adapter: adapter);
+      final bytes = [0x89, 0x50, 0x4E, 0x47];
+
+      final path = await service.pickImageSavePath(
+        baseName: '一本书 第 12 页',
+        bytes: bytes,
+      );
+
+      expect(path, r'D:\pictures\page.png');
+      final request = adapter.saveRequests.single;
+      expect(request.fileName, '一本书 第 12 页.png');
+      expect(request.allowedExtensions, ['png']);
+      // The bytes go through the save call; file_picker 12 no longer writes
+      // the file itself, so passing them here is the only way it lands.
+      expect(request.bytes, bytes);
+    });
+
+    test('a title with path separators cannot escape the folder', () async {
+      final adapter = _FakeFilePickerAdapter(const [], savePath: '/tmp/a.png');
+      final service = FilePickerService(adapter: adapter);
+
+      await service.pickImageSavePath(
+        baseName: 'a/b\\c:d*e?f"g<h>i|j',
+        bytes: const [1],
+      );
+
+      final name = adapter.saveRequests.single.fileName;
+      expect(name, isNot(contains('/')));
+      expect(name, isNot(contains('\\')));
+      expect(name, isNot(contains(':')));
+      expect(name.endsWith('.png'), isTrue);
+    });
+
+    test('an empty title still yields a usable file name', () async {
+      final adapter = _FakeFilePickerAdapter(const [], savePath: '/tmp/a.png');
+      final service = FilePickerService(adapter: adapter);
+
+      await service.pickImageSavePath(baseName: '   ', bytes: const [1]);
+
+      expect(adapter.saveRequests.single.fileName, 'pagesage-image.png');
+    });
+  });
 }
 
 final class _FakeFilePickerAdapter implements FilePickerAdapter {

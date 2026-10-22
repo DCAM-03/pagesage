@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_tokens.dart';
+import 'theme_mode_button.dart';
 
 final class AppPageHeader extends StatelessWidget {
   const AppPageHeader({
@@ -9,6 +10,7 @@ final class AppPageHeader extends StatelessWidget {
     this.leading,
     this.actions = const [],
     this.dense = false,
+    this.showThemeMode = false,
     super.key,
   });
 
@@ -16,6 +18,16 @@ final class AppPageHeader extends StatelessWidget {
   final String? subtitle;
   final Widget? leading;
   final List<Widget> actions;
+
+  /// Offer the app's light/dark switch in this header.
+  ///
+  /// This is the narrow-window half of the pair: above the expanded breakpoint
+  /// [AppCommandBar] carries the control, and [ThemeModeMenuButton.compactOnly]
+  /// hides the header copy so the two are never on screen together. Off by
+  /// default and turned on by the main tabs because the control reads the
+  /// settings store, and a header that pulls a provider cannot be pumped by a
+  /// widget test that has no database behind it.
+  final bool showThemeMode;
 
   /// Tighter vertical padding under a desktop command bar.
   final bool dense;
@@ -62,6 +74,11 @@ final class AppPageHeader extends StatelessWidget {
             ],
           ),
         ),
+        // Trailing in the title row rather than in [actions]: actions stack on
+        // a second row below 420 px or at large text, and one 48 px button is
+        // not worth pushing every page's content down by a row.
+        if (showThemeMode)
+          const ThemeModeMenuButton(compactOnly: true, dense: true),
       ],
     );
     return Padding(
@@ -178,6 +195,12 @@ final class AppCommandBar extends StatelessWidget {
                     ),
                   ),
                 ),
+              // With the other tools rather than at the bottom of the sidebar:
+              // it is a thing you toggle in passing, not a preference to find.
+              // Below the expanded breakpoint this bar does not exist, so the
+              // page headers carry the same control (see [AppPageHeader]).
+              const ThemeModeMenuButton(),
+              const SizedBox(width: AppSpacing.x2),
               if (showSearch) ...[
                 _CommandButton(
                   tooltip: '全局搜索',

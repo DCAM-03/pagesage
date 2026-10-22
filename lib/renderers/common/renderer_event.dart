@@ -1,3 +1,4 @@
+import '../../domain/annotations/image_anchor.dart';
 import '../../domain/books/reading_position.dart';
 
 sealed class RendererEvent {
@@ -125,6 +126,62 @@ final class RendererNotice extends RendererEvent {
   const RendererNotice(this.message);
 
   final String message;
+}
+
+/// An image the renderer found on a page, in display-box fractions.
+///
+/// Carries geometry only: the renderer never holds or writes annotations, and
+/// the host is the one that decides what to do with a hit.
+final class RendererDetectedImage {
+  const RendererDetectedImage({
+    required this.page,
+    required this.ordinal,
+    required this.rect,
+    this.resourceName,
+    this.pixelWidth,
+    this.pixelHeight,
+  });
+
+  /// 1-based; null for a renderer whose images are not page-based (EPUB).
+  final int? page;
+  final int ordinal;
+  final String? resourceName;
+  final ReaderRect rect;
+  final int? pixelWidth;
+  final int? pixelHeight;
+}
+
+/// The images detected so far, replaced wholesale per page.
+///
+/// Not emitted today. Snapping happens inside the canvas view, where the
+/// renderer is already in hand, so the host never needs the list to place a
+/// box. The type stays because B2 needs captions and thumbnails on the host
+/// side (Notebook's 图片 group), and that is exactly this payload.
+final class RendererImagesDetected extends RendererEvent {
+  const RendererImagesDetected({required this.page, required this.images});
+
+  /// 1-based page the list covers.
+  final int page;
+  final List<RendererDetectedImage> images;
+}
+
+/// The reader drew a box over an image (or over an area it believes holds
+/// one) and wants to annotate it.
+///
+/// [anchor] may carry no ordinal: when detection missed the image — form
+/// XObjects are not listed by `PdfPageElements` — the box itself is all there
+/// is, and it still has to work.
+final class RendererImageAreaSelected extends RendererEvent {
+  const RendererImageAreaSelected({
+    required this.anchor,
+    required this.sourceRect,
+  });
+
+  final ImageAnchor anchor;
+
+  /// The box in window coordinates, for positioning the action menu next to
+  /// what the reader just drew.
+  final ReaderRect sourceRect;
 }
 
 final class RendererAnnotationSelected extends RendererEvent {
