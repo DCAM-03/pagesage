@@ -46,7 +46,10 @@
 ## 涉及模块和文件
 
 - `lib/renderers/epub/epub_document.dart`、`epub_chapter_parser.dart`、`epub_document_loader.dart`、`epub_paginator.dart`、`epub_renderer_view.dart`
-- `test/renderers/epub/epub_image_test.dart`
+- `test/renderers/epub/epub_image_test.dart`、`test/renderers/epub/epub_image_rendering_test.dart`
+- `integration_test/reader_epub_image_test.dart`
+- `tool/generate_manual_samples.dart`（样本插图改为现场生成的真图）
+- `tool/import_book.dart`（命令行导入本地书库，供桌面端真机验证用）
 
 ## 数据与接口
 
@@ -66,13 +69,15 @@
 - [x] 图片加载失败时有可读的占位说明，不是空白。
 - [x] 阅读进度、跳转、划词在高亮偏移上不受影响。
 - [x] `AiContextSource` 取章节文本仍返回纯文本，不含图片标记。
+- [x] 真实窗口里图片被画出来（Linux 桌面集成测试，`build/integration-captures/epub-01-picture-painted.png`）。
 - [ ] 真机（Android / Windows）手测：图文混排书在两种阅读模式下都能看到图。
 
 ## 测试与验证
 
 - 单元测试：路径解析（相对路径、子目录、`../`）、`data:` URI、拒绝远程 URL。
 - Widget 测试：含图 EPUB 的分页与滚动渲染。
-- 真实样本：补一本图文混排 EPUB 到 `docs/manual-samples.md`（现有 `image.epub` 可先用作冒烟）。
+- 集成测试：`integration_test/reader_epub_image_test.dart` 在真实 Linux 窗口里打开 `image.epub`，确认图片被绘制、周围的字仍在。
+- 真实样本：`image.epub` 的插图改由 `tool/generate_manual_samples.dart` 自己生成（可解码的 64×64 棋盘格）。原先内嵌的 base64 是一张 144 字节的坏图，任何解码器都读不出来，读者只会显示「图片无法显示」—— 样本本身有问题，测的就不是图片了。
 - `dart format .`、`flutter analyze`、`flutter test`。
 
 ## 依赖与风险

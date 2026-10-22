@@ -611,9 +611,107 @@ String _slug(String text) {
   return text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-');
 }
 
-final _checkerPng = base64Decode(
-  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAWElEQVR4nO3PQQ0AIBDAMMC/5+ONAvZoFSzZnQVm7b0O8G8B3JYAWwJsCbAlwJYAWwJsCbAlwJYAWwJsCbAlwJYAWwJsCbAlwJYAWwJsCbAlwJYAWwK8AF2pAi/voHMUAAAAAElFTkSuQmCC',
-);
+/// The sample's picture: a 64x64 checkerboard.
+///
+/// It is built here rather than pasted as a blob, because a picture that
+/// cannot be decoded is not a picture: the reader would show its "missing"
+/// placeholder for a picture that is really in the book, and the sample would
+/// test the wrong thing.
+final _checkerPng = _buildCheckerPng(width: 64, height: 64);
+
+/// A PNG of a checkerboard, built from scratch.
+///
+/// Truecolour, no interlacing, and the pixels are stored uncompressed inside
+/// a zlib stream: the simplest PNG a decoder accepts, and the smallest
+/// program that can write one.
+Uint8List _buildCheckerPng({required int width, required int height}) {
+  final raw = <int>[];
+  for (var y = 0; y < height; y += 1) {
+    // Each row starts with a filter byte. Zero means "no filter".
+    raw.add(0);
+    for (var x = 0; x < width; x += 1) {
+      final isLight = ((x ~/ 8) + (y ~/ 8)) % 2 == 0;
+      raw.addAll(isLight ? const [0xF2, 0xF2, 0xF2] : const [0x33, 0x33, 0x33]);
+    }
+  }
+
+  final out = <int>[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
+  ];
+  out.addAll(
+    _pngChunk('IHDR', <int>[
+      ..._uint32(width),
+      ..._uint32(height),
+      0x08, // bit depth
+      0x02, // colour type: truecolour
+      0x00, // compression
+      0x00, // filter
+      0x00, // interlace
+    ]),
+  );
+  out.addAll(_pngChunk('IDAT', _zlibStore(raw)));
+  out.addAll(_pngChunk('IEND', const []));
+  return Uint8List.fromList(out);
+}
+
+List<int> _pngChunk(String type, List<int> data) {
+  final out = <int>[..._uint32(data.length), ...type.codeUnits, ...data];
+  // The CRC covers the type and the data, not the length.
+  out.addAll(_uint32(_crc32(<int>[...type.codeUnits, ...data])));
+  return out;
+}
+
+/// Wraps [raw] in a zlib stream with no compression.
+///
+/// A PNG reader wants a zlib stream; the stored form is the simplest one a
+/// decoder accepts, and the sample does not care about the size.
+List<int> _zlibStore(List<int> raw) {
+  final out = <int>[0x78, 0x01];
+  var offset = 0;
+  while (offset < raw.length) {
+    final end = offset + 65535 > raw.length ? raw.length : offset + 65535;
+    final block = raw.sublist(offset, end);
+    final isLast = end >= raw.length;
+    out.add(isLast ? 1 : 0);
+    out.add(block.length & 0xFF);
+    out.add((block.length >> 8) & 0xFF);
+    out.add((~block.length) & 0xFF);
+    out.add(((~block.length) >> 8) & 0xFF);
+    out.addAll(block);
+    offset = end;
+  }
+  // The Adler-32 of the raw data.
+  var a = 1;
+  var b = 0;
+  for (final byte in raw) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  final checksum = ((b << 16) | a) & 0xFFFFFFFF;
+  out.addAll(_uint32(checksum));
+  return out;
+}
+
+List<int> _uint32(int value) {
+  return <int>[
+    (value >> 24) & 0xFF,
+    (value >> 16) & 0xFF,
+    (value >> 8) & 0xFF,
+    value & 0xFF,
+  ];
+}
+
+/// The CRC-32 of [bytes], as PNG chunks carry it.
+int _crc32(List<int> bytes) {
+  var crc = 0xFFFFFFFF;
+  for (final byte in bytes) {
+    crc ^= byte;
+    for (var bit = 0; bit < 8; bit += 1) {
+      crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320 : crc >> 1;
+    }
+  }
+  return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
+}
 
 final class EpubSampleChapter {
   const EpubSampleChapter({

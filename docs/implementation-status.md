@@ -96,8 +96,8 @@ PDF 渲染迁移（`docs/10-pdf-renderer-migration.md`，2026-10-21）：
 图片批注（`docs/13-image-annotations.md` / `docs/tasks/image-annotations.md`，2026-10-22）：
 - B1 完成：PDF 拖框模式、视图内吸附、`annotations` 表 v4→v5（`target` / `image_anchor`）、四角括号描边、Notebook 图片条目与琥珀色跳回闪烁、`exportPageRegion` 保存 PNG。
 - B2 完成：标注时裁图进 `<cache>/images/<bookId>/`（文件名按图的同一性，不按矩形）、设置页「导出图片批注」（Markdown + 同级图片目录 + 相对路径）、「清理图片缓存」、删书/删批注清缓存、标注 JSON 补上 `target` 与 `imageAnchor`。裁图不挡读者的路：批注先写库，裁图在之后自己跑。
-- B3 完成（2026-10-22）：EPUB 真正显示书中的插图。加载器改为解析 XHTML 的结构（`epub_chapter_parser.dart`），章节文本仍是「只有字」的一条字符串，图片作为并列的块插在文字之间且不占字符，因此搜索、进度、跳转、划词偏移全部不受影响。图片字节从 archive 读，`data:` URI 支持、远程图片不加载；单图字节与像素预算硬限制，尺寸在解码前从头部读。图注是正文的一部分（参与排版与搜索）。失败降级为带原因和 `alt` 的占位块，不留空白。详见 `docs/tasks/epub-images.md`。
-- **待办**：B3（EPUB 图片渲染，当前加载器丢弃 `<img>`，是独立的产品缺陷）、B4、B5；以及「重启后批注仍在原位」的真实应用手动确认。
+- B3 完成（2026-10-22）：EPUB 真正显示书中的插图。加载器改为解析 XHTML 的结构（`epub_chapter_parser.dart`），章节文本仍是「只有字」的一条字符串，图片作为并列的块插在文字之间且不占字符，因此搜索、进度、跳转、划词偏移全部不受影响。图片字节从 archive 读，`data:` URI 支持、远程图片不加载；单图字节与像素预算硬限制，尺寸在解码前从头部读。图注是正文的一部分（参与排版与搜索）。失败降级为带原因和 `alt` 的占位块，不留空白。已在真实 Linux 窗口里验证图片被画出（`integration_test/reader_epub_image_test.dart`）；同时修好样本本身：`image.epub` 原先内嵌的插图是一张 144 字节的坏图，任何解码器都读不出来，样本改由生成器现场产出可解码的真图。详见 `docs/tasks/epub-images.md`。
+- **待办**：B4、B5；以及「重启后批注仍在原位」的真实应用手动确认。
 
 AI 检索层（`docs/12-ai-retrieval-strategy.md`，2026-10-21）：
 - **选型已定**：全书 / 文件夹关联采用「结构感知的词法检索」（复用 FTS5 + EPUB 目录树 / PDF 大纲），**不采用 DCI，不引入向量 RAG**。
