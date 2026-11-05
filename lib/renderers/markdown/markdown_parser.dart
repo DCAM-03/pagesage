@@ -31,6 +31,9 @@ final class MarkdownParser {
   /// The most pixels one picture may have.
   static const int maxImagePixels = 40 * 1000 * 1000;
 
+  /// How much of a picture is read to find its size.
+  static const int _headerBytes = 128 * 1024;
+
   Future<EpubDocument> parse(
     String raw, {
     required String fallbackTitle,
@@ -69,16 +72,16 @@ final class MarkdownParser {
 
     final path = _resolve(trimmed);
     final file = File(path);
-    if (!await file.exists()) {
-      return _unavailable(path, alt, '图片不在磁盘上');
-    }
     try {
       final length = await file.length();
       if (length > maxImageBytes) {
         return _unavailable(path, alt, '图片过大，已跳过');
       }
-      final bytes = await file.readAsBytes();
-      final size = readImageSize(bytes);
+      // The header says how big the picture is; the rest of it is not read
+      // until the reader draws it. A folder of notes is a folder of
+      // screenshots, and holding all of them in the document is what turns
+      // opening a book into a memory surprise.
+      final size = readImageSize(await _readHeader(file, length));
       if (size != null && size.width * size.height > maxImagePixels) {
         return EpubImage(
           archivePath: path,
@@ -91,14 +94,28 @@ final class MarkdownParser {
       }
       return EpubImage(
         archivePath: path,
-        bytes: bytes,
+        bytes: Uint8List(0),
+        sourcePath: path,
         pixelWidth: size?.width ?? 0,
         pixelHeight: size?.height ?? 0,
         alt: alt,
         unavailableReason: size == null ? '图片格式无法识别' : null,
       );
+    } on FileSystemException {
+      return _unavailable(path, alt, '图片不在磁盘上');
     } on Object {
       return _unavailable(path, alt, '图片无法读取');
+    }
+  }
+
+  /// The first [_headerBytes] of a picture, which is all a header needs.
+  Future<Uint8List> _readHeader(File file, int length) async {
+    final handle = await file.open();
+    try {
+      final count = length < _headerBytes ? length : _headerBytes;
+      return await handle.read(count);
+    } finally {
+      await handle.close();
     }
   }
 

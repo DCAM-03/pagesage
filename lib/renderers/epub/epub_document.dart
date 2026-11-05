@@ -166,13 +166,26 @@ final class EpubImage {
     required this.pixelHeight,
     this.alt,
     this.unavailableReason,
+    this.sourcePath,
   });
 
   /// Where the picture came from inside the book, for the record.
   final String archivePath;
 
-  /// The picture's bytes, or empty when it could not be loaded.
+  /// The picture's bytes, or empty when it could not be loaded — and always
+  /// empty for a picture that lives in a file, which is described by
+  /// [sourcePath] instead.
+  ///
+  /// A book of images that are read from disk is the difference between a
+  /// folder of notes opening in a second and it exhausting memory: the bytes
+  /// of every screenshot must not be sitting in the document.
   final Uint8List bytes;
+
+  /// Where the picture's bytes are on disk, when they are not in [bytes].
+  ///
+  /// The reader loads the picture when it draws it, and the platform image
+  /// cache decides what stays decoded.
+  final String? sourcePath;
 
   final int pixelWidth;
   final int pixelHeight;
@@ -184,7 +197,7 @@ final class EpubImage {
   /// Why the picture is not there, when it is not there.
   final String? unavailableReason;
 
-  bool get isAvailable => bytes.isNotEmpty;
+  bool get isAvailable => bytes.isNotEmpty || sourcePath != null;
 
   /// Width over height. A picture whose size could not be read falls back
   /// to a shape that at least looks like a picture rather than a stripe.

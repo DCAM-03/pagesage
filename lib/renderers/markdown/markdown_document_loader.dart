@@ -29,19 +29,59 @@ final class MarkdownLoadException implements BookLoadException {
 /// and from the file name when it does not. A file with nothing to read is an
 /// error rather than an empty page: an empty chapter looks like a broken
 /// renderer, and saying so is kinder than showing a blank screen.
+///
+/// A parsed document is kept until the source changes. Opening a book asks
+/// for it more than once — the table of contents, the renderer, the index —
+/// and parsing the same file three times is time the reader spends looking
+/// at a spinner.
 final class MarkdownDocumentLoader implements BookDocumentLoader {
   const MarkdownDocumentLoader();
 
+  static final Map<String, _FileCacheEntry> _cache =
+      <String, _FileCacheEntry>{};
+
+  /// Forgets every parsed Markdown document. Used by tests and by "重建索引".
+  static void clearCache() {
+    _cache.clear();
+    MarkdownFolderLoader.clearCache();
+  }
+
   @override
   Future<EpubDocument> load(String filePath) async {
-    final type = await FileSystemEntity.type(filePath);
-    if (type == FileSystemEntityType.directory) {
+    final stat = await File(filePath).stat();
+    if (stat.type == FileSystemEntityType.directory) {
       return const MarkdownFolderLoader().load(filePath);
     }
-    if (type == FileSystemEntityType.notFound) {
+    if (stat.type == FileSystemEntityType.notFound) {
       throw const MarkdownLoadException('找不到这个 Markdown 文件或文件夹');
     }
 
+    final signature = '${stat.size}|${stat.modified.millisecondsSinceEpoch}';
+    final cached = _cache[filePath];
+    if (cached != null && cached.signature == signature) {
+      return cached.document;
+    }
+
+    final entry = _FileCacheEntry(signature, _parseFile(filePath));
+    _cache[filePath] = entry;
+    _evict();
+    try {
+      return await entry.document;
+    } on Object {
+      if (identical(_cache[filePath], entry)) {
+        _cache.remove(filePath);
+      }
+      rethrow;
+    }
+  }
+
+  static void _evict() {
+    while (_cache.length > 4) {
+      _cache.remove(_cache.keys.first);
+    }
+  }
+
+  Future<EpubDocument> _parseFile(String filePath) async {
     final file = File(filePath);
     final String raw;
     try {
@@ -59,4 +99,11 @@ final class MarkdownDocumentLoader implements BookDocumentLoader {
     }
     return document;
   }
+}
+
+final class _FileCacheEntry {
+  _FileCacheEntry(this.signature, this.document);
+
+  final String signature;
+  final Future<EpubDocument> document;
 }

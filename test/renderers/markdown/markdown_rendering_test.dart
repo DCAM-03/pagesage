@@ -81,6 +81,71 @@ void main() {
     expect(find.textContaining('第一篇的正文'), findsWidgets);
     expect(find.textContaining('# '), findsNothing);
   });
+
+  testWidgets('a picture in a note is drawn from the file, not from memory', (
+    tester,
+  ) async {
+    final document = await tester.runAsync(_loadPictureDocument);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubRendererView(
+            book: Book(
+              id: 'note-picture',
+              title: '笔记',
+              format: BookFormat.markdown,
+              libraryFilePath: '/unused.md',
+              fileHash: 'hash',
+              fileSize: 1,
+              createdAt: 0,
+              updatedAt: 0,
+            ),
+            settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+            initialProgress: null,
+            annotations: const [],
+            onEvent: (_) {},
+            documentLoader: _StubLoader(document!),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final image = tester.widget<Image>(find.byType(Image).first);
+    // The document carries the picture's path, not its bytes: a folder of
+    // notes with screenshots would otherwise hold every screenshot in memory.
+    final resized = image.image as ResizeImage;
+    expect((resized.imageProvider as FileImage).file.path, endsWith('pic.png'));
+    // And it is decoded at the size the page shows, not at the file's own.
+    expect(resized.width, isNotNull);
+  });
+}
+
+/// A note with one picture beside it.
+Future<EpubDocument> _loadPictureDocument() async {
+  final dir = await Directory.systemTemp.createTemp('pagesage_md_pic_');
+  addTearDown(() => dir.delete(recursive: true));
+  await File('${dir.path}/pic.png').writeAsBytes(_pngBytes(32, 16));
+  await File('${dir.path}/note.md').writeAsString('# 图\n\n![一张图](pic.png)');
+  return const MarkdownDocumentLoader().load('${dir.path}/note.md');
+}
+
+List<int> _pngBytes(int width, int height) {
+  return <int>[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, //
+    0x00, 0x00, 0x00, 0x0D,
+    0x49, 0x48, 0x44, 0x52,
+    (width >> 24) & 0xFF,
+    (width >> 16) & 0xFF,
+    (width >> 8) & 0xFF,
+    width & 0xFF,
+    (height >> 24) & 0xFF,
+    (height >> 16) & 0xFF,
+    (height >> 8) & 0xFF,
+    height & 0xFF,
+    0x08, 0x02, 0x00, 0x00, 0x00,
+  ];
 }
 
 /// Builds a small folder of notes and opens it the way the app does.

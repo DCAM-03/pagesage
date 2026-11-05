@@ -1,5 +1,7 @@
-import '../common/book_document_loader.dart';
 import 'dart:async';
+import 'dart:io';
+
+import '../common/book_document_loader.dart';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -2337,19 +2339,43 @@ final class _EpubImageView extends StatelessWidget {
           final width = picture.pixelWidth > 0 && picture.pixelWidth < available
               ? picture.pixelWidth.toDouble()
               : available;
+          // Decode at the size the page will show, not at the picture's own
+          // resolution: a 4000px photo in a 700px column costs sixteen times
+          // the memory it earns.
+          final cacheWidth = width.isFinite && width > 0
+              ? (width * MediaQuery.devicePixelRatioOf(context)).round()
+              : null;
+          Widget placeholder(
+            BuildContext context,
+            Object error,
+            StackTrace? _,
+          ) {
+            return _EpubImagePlaceholder(
+              settings: settings,
+              label: '图片无法显示',
+              alt: picture.alt,
+            );
+          }
+
           return ClipRRect(
             borderRadius: BorderRadius.circular(4),
-            child: Image.memory(
-              picture.bytes,
-              fit: BoxFit.contain,
-              width: width,
-              errorBuilder: (context, error, stackTrace) =>
-                  _EpubImagePlaceholder(
-                    settings: settings,
-                    label: '图片无法显示',
-                    alt: picture.alt,
+            // A picture in a file is loaded when it is drawn; the platform
+            // image cache is what keeps it decoded afterwards.
+            child: picture.sourcePath != null
+                ? Image.file(
+                    File(picture.sourcePath!),
+                    fit: BoxFit.contain,
+                    width: width,
+                    cacheWidth: cacheWidth,
+                    errorBuilder: placeholder,
+                  )
+                : Image.memory(
+                    picture.bytes,
+                    fit: BoxFit.contain,
+                    width: width,
+                    cacheWidth: cacheWidth,
+                    errorBuilder: placeholder,
                   ),
-            ),
           );
         },
       ),
