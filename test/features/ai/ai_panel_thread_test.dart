@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/core/security/secure_store.dart';
 import 'package:pagesage/domain/ai/ai_models.dart';
+import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/features/ai/application/ai_chat_service.dart';
 import 'package:pagesage/features/ai/application/ai_providers.dart';
@@ -128,7 +129,7 @@ Widget _panel({
         body: AiPanel(
           bookId: 'book-1',
           bookPath: null,
-          isEpub: true,
+          format: BookFormat.epub,
           locator: ReadingLocator.epub(
             href: 'OEBPS/chapter1.xhtml',
             chapterIndex: 0,

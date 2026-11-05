@@ -192,7 +192,7 @@ final class InBookSearchController extends ChangeNotifier {
     }
     return switch (locator.type) {
       ReadingLocatorType.pdf => (locator.page ?? 1).toDouble(),
-      ReadingLocatorType.epub =>
+      ReadingLocatorType.epub || ReadingLocatorType.markdown =>
         ((locator.chapterIndex ?? 0) * 1000000000 +
                 (locator.chapterOffset ?? 0))
             .toDouble(),

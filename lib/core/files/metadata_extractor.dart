@@ -10,6 +10,7 @@ import 'package:xml/xml.dart';
 import '../../domain/books/book.dart';
 import '../tasks/task_cancellation.dart';
 import 'app_paths.dart';
+import 'markdown_source.dart';
 
 /// Paints a PDF's first page into a PNG, or returns null when it cannot.
 ///
@@ -58,7 +59,37 @@ final class MetadataExtractor {
     return switch (format) {
       BookFormat.epub => _extractEpub(file, bookId, cancelToken),
       BookFormat.pdf => _extractPdf(file, bookId, cancelToken),
+      BookFormat.markdown => _extractMarkdown(file, cancelToken),
     };
+  }
+
+  /// Reads a Markdown file's own claim about what it is.
+  ///
+  /// A title comes from front matter `title:`, or failing that from the first
+  /// level-one heading. There is no author or language to find reliably, and
+  /// inventing one from a name that happens to appear in the text would be
+  /// worse than leaving it empty.
+  Future<BookMetadata> _extractMarkdown(
+    File file,
+    TaskCancelToken? cancelToken,
+  ) async {
+    cancelToken?.throwIfCancelled();
+    final raw = await file.readAsString();
+    cancelToken?.throwIfCancelled();
+    final source = MarkdownSource.parse(raw);
+    final title = source.title ?? _firstHeading(source.body);
+    return BookMetadata(title: title);
+  }
+
+  String? _firstHeading(String body) {
+    for (final line in body.split('\n')) {
+      final match = RegExp(r'^#\s+(.+?)\s*#*\s*$').firstMatch(line);
+      if (match != null) {
+        final title = match.group(1)!.trim();
+        return title.isEmpty ? null : title;
+      }
+    }
+    return null;
   }
 
   Future<BookMetadata> _extractEpub(

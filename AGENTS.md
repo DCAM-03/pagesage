@@ -2,13 +2,14 @@
 
 ## Project Context
 
-PageSage is a local-first, cross-platform intelligent reader for EPUB and PDF. The first implementation target is Flutter for Android and Windows, and the Flutter project now lives at the repository root.
+PageSage is a local-first, cross-platform intelligent reader for EPUB, PDF, and Markdown. The first implementation target is Flutter for Android and Windows, and the Flutter project now lives at the repository root.
 
 Primary product constraints:
 
 - Local-first by default: books, notes, annotations, progress, and search data stay on device.
 - AI is user-triggered only. Never upload a whole book automatically, and always make the AI context range explicit.
 - The MVP is the reading loop: import EPUB/PDF, open, read, save progress, reopen at the saved location.
+- Markdown reading was added by explicit request (2026-11-05, `docs/tasks/markdown-reading.md`): a single `.md` file is a book in P1, a directory of files is a book in P2. Its reading, progress, and search behavior follow the EPUB path rather than getting its own reader.
 - MOBI/AZW support and Calibre `ebook-convert` integration are deferred. Do not implement or document them as part of the current milestone unless the roadmap is explicitly changed.
 - Do not add cloud sync, accounts, DRM bypass, scanned-PDF OCR, online bookstores, or collaboration features unless the roadmap is intentionally changed.
 

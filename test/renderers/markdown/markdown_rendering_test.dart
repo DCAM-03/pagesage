@@ -1,0 +1,78 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/domain/books/book.dart';
+import 'package:pagesage/domain/books/reader_settings.dart';
+import 'package:pagesage/renderers/common/book_document_loader.dart';
+import 'package:pagesage/renderers/epub/epub_document.dart';
+import 'package:pagesage/renderers/epub/epub_renderer_view.dart';
+import 'package:pagesage/renderers/markdown/markdown_document_loader.dart';
+
+void main() {
+  testWidgets('a Markdown book is laid out as prose, not as markup', (
+    tester,
+  ) async {
+    // The file is read in the test's real async zone: file I/O triggered from
+    // inside the fake-async zone of `testWidgets` never settles.
+    final document = await tester.runAsync(_loadDocument);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubRendererView(
+            book: Book(
+              id: 'note-1',
+              title: '笔记',
+              format: BookFormat.markdown,
+              libraryFilePath: '/unused.md',
+              fileHash: 'hash',
+              fileSize: 1,
+              createdAt: 0,
+              updatedAt: 0,
+            ),
+            settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+            initialProgress: null,
+            annotations: const [],
+            onEvent: (_) {},
+            documentLoader: _StubLoader(document!),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The reader shows the words.
+    expect(find.textContaining('正文第一段'), findsWidgets);
+    expect(find.textContaining('列表项'), findsWidgets);
+    // And not the markup that produced them.
+    expect(find.textContaining('# '), findsNothing);
+    expect(find.textContaining('**'), findsNothing);
+  });
+}
+
+/// Builds a small Markdown book on disk and opens it the way the app does.
+Future<EpubDocument> _loadDocument() async {
+  final dir = await Directory.systemTemp.createTemp('pagesage_md_ui_');
+  addTearDown(() => dir.delete(recursive: true));
+  final file = File('${dir.path}/note.md');
+  await file.writeAsString('''
+# 笔记
+
+正文第一段，带**强调**。
+
+- 列表项一
+- 列表项二
+''');
+  return const MarkdownDocumentLoader().load(file.path);
+}
+
+/// Hands the renderer a document built outside the fake-async zone.
+final class _StubLoader implements BookDocumentLoader {
+  const _StubLoader(this.document);
+
+  final EpubDocument document;
+
+  @override
+  Future<EpubDocument> load(String filePath) async => document;
+}

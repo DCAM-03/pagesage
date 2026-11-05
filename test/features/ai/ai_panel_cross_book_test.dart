@@ -76,7 +76,7 @@ final class _NoSource extends AiContextSource {
     required AiContextRange range,
     required String bookPath,
     required ReadingLocator? locator,
-    required bool isEpub,
+    required BookFormat format,
   }) async => null;
 }
 
@@ -112,6 +112,7 @@ void main() {
                     key: panelKey,
                     bookId: 'book-a',
                     locator: ReadingLocator.pdf(page: 1),
+                    format: BookFormat.pdf,
                     initialContext: '共享的上下文词',
                     onJumpTo: (locator) {},
                   ),

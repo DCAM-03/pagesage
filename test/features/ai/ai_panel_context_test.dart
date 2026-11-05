@@ -26,7 +26,7 @@ final class _SlowSource extends AiContextSource {
     required AiContextRange range,
     required String bookPath,
     required ReadingLocator? locator,
-    required bool isEpub,
+    required BookFormat format,
   }) {
     requested.add(range);
     return _gate.future;
@@ -49,7 +49,7 @@ final class _StubSource extends AiContextSource {
     required AiContextRange range,
     required String bookPath,
     required ReadingLocator? locator,
-    required bool isEpub,
+    required BookFormat format,
   }) async {
     requested.add(range);
     if (unreadable) throw const BookUnreadableException();
@@ -146,7 +146,7 @@ Widget _panel(
         body: AiPanel(
           bookId: 'book-1',
           bookPath: bookPath,
-          isEpub: true,
+          format: BookFormat.epub,
           locator: ReadingLocator.epub(
             href: 'OEBPS/chapter1.xhtml',
             chapterIndex: 0,

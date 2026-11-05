@@ -25,6 +25,7 @@ import '../../../domain/books/reading_position.dart';
 import '../../../domain/notes/note.dart';
 import '../../../domain/search/search_models.dart';
 import '../../../features/settings/application/settings_providers.dart';
+import '../../../renderers/common/book_document_loader.dart';
 import '../../../renderers/common/renderer_event.dart';
 import '../../../renderers/epub/epub_document.dart';
 import '../../../renderers/epub/epub_document_loader.dart';
@@ -32,6 +33,7 @@ import '../../../renderers/pdf/pdf_canvas_view.dart';
 import '../../../renderers/pdf/pdf_zoom.dart';
 import '../../../renderers/epub/epub_jump.dart';
 import '../../../renderers/epub/epub_renderer_view.dart';
+import '../../../renderers/markdown/markdown_document_loader.dart';
 import '../../ai/presentation/ai_panel.dart';
 import '../../import/application/import_intent.dart';
 import '../../ocr/application/ocr_page_controller.dart';
@@ -851,7 +853,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                               child: _DesktopContextPane(
                                 bookId: widget.bookId,
                                 bookPath: book.libraryFilePath,
-                                isEpub: book.format == BookFormat.epub,
+                                format: book.format,
                                 activeTab: _desktopContextTab,
                                 searchQuery: _rendererSearchQuery,
                                 currentLocator:
@@ -2314,7 +2316,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
     try {
-      final document = await EpubDocumentLoader().load(book.libraryFilePath);
+      final document = await _documentLoaderFor(
+        book,
+      ).load(book.libraryFilePath);
       if (!context.mounted) {
         return;
       }
@@ -2331,15 +2335,23 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                   .clamp(0, document.chapters.length - 1)
                   .toInt();
               final chapter = document.chapters[chapterIndex];
-              final locator = ReadingLocator.epub(
-                href: item.href,
+              final progress = document.progressForChapter(
                 chapterIndex: chapter.index,
-                chapterOffset: item.chapterOffset,
-                progress: document.progressForChapter(
-                  chapterIndex: chapter.index,
-                  chapterOffset: item.chapterOffset ?? 0,
-                ),
+                chapterOffset: item.chapterOffset ?? 0,
               );
+              final locator = book.format == BookFormat.markdown
+                  ? ReadingLocator.markdown(
+                      href: item.href,
+                      chapterIndex: chapter.index,
+                      chapterOffset: item.chapterOffset,
+                      progress: progress,
+                    )
+                  : ReadingLocator.epub(
+                      href: item.href,
+                      chapterIndex: chapter.index,
+                      chapterOffset: item.chapterOffset,
+                      progress: progress,
+                    );
               setState(() {
                 _jumpProgress = ReadingProgressSnapshot(
                   bookId: widget.bookId,
@@ -3524,7 +3536,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         child: AiPanel(
           bookId: widget.bookId,
           bookPath: book?.libraryFilePath,
-          isEpub: book?.format == BookFormat.epub,
+          format: book!.format,
           locator:
               locatorOverride ??
               selectedText?.locator ??
@@ -5349,7 +5361,7 @@ final class _DesktopContextPane extends StatelessWidget {
     required this.onAction,
     required this.onAskAi,
     this.bookPath,
-    this.isEpub = true,
+    required this.format,
     this.onNoteSaved,
   });
 
@@ -5358,7 +5370,7 @@ final class _DesktopContextPane extends StatelessWidget {
   /// The book on disk, so the AI panel can read a page or chapter.
   final String? bookPath;
 
-  final bool isEpub;
+  final BookFormat format;
   final _ReaderContextTab activeTab;
   final String? searchQuery;
   final ReadingLocator? currentLocator;
@@ -5490,7 +5502,7 @@ final class _DesktopContextPane extends StatelessWidget {
       _ReaderContextTab.ai => AiPanel(
         bookId: bookId,
         bookPath: bookPath,
-        isEpub: isEpub,
+        format: format,
         locator: selectedLocator ?? currentLocator,
         initialContext: selectedText ?? currentLocator?.excerpt,
         onJumpTo: onPreviewResult,
@@ -5999,7 +6011,7 @@ double? _notebookLocatorSortKey(ReadingLocator? locator) {
   }
   return switch (locator.type) {
     ReadingLocatorType.pdf => (locator.page ?? 1).toDouble(),
-    ReadingLocatorType.epub =>
+    ReadingLocatorType.epub || ReadingLocatorType.markdown =>
       ((locator.chapterIndex ?? 0) * 1000000000 + (locator.chapterOffset ?? 0))
           .toDouble(),
   };
@@ -6747,8 +6759,8 @@ final class _DesktopTocPaneState extends State<_DesktopTocPane> {
   }
 
   void _updateDocumentFuture() {
-    _epubDocumentFuture = widget.book.format == BookFormat.epub
-        ? EpubDocumentLoader().load(widget.book.libraryFilePath)
+    _epubDocumentFuture = widget.book.format.isReflowable
+        ? _documentLoaderFor(widget.book).load(widget.book.libraryFilePath)
         : null;
   }
 
@@ -7454,6 +7466,13 @@ Future<void> _deleteAnnotation(
   }
 }
 
+/// The loader that opens this book's file.
+BookDocumentLoader _documentLoaderFor(Book book) {
+  return book.format == BookFormat.markdown
+      ? const MarkdownDocumentLoader()
+      : const EpubDocumentLoader();
+}
+
 final class _DefaultRendererHost extends StatelessWidget {
   const _DefaultRendererHost({required this.config});
 
@@ -7478,6 +7497,21 @@ final class _DefaultRendererHost extends StatelessWidget {
       // selection, search and annotation overlays; the canvas renderer has
       // all three, so keeping two paths would just mean two sets of bugs.
       // See docs/10-pdf-renderer-migration.md.
+      // A Markdown book is read by the same renderer as an EPUB: chapters,
+      // blocks and character offsets. Only the loader that turns the file
+      // into that document is different.
+      BookFormat.markdown => EpubRendererView(
+        key: ValueKey('md-${config.book.id}-${config.version}'),
+        book: config.book,
+        settings: config.settings,
+        initialProgress: config.progress,
+        annotations: config.annotations,
+        searchQuery: config.searchQuery,
+        focusLocator: config.focusLocator,
+        jumpToken: config.jumpToken,
+        documentLoader: const MarkdownDocumentLoader(),
+        onEvent: config.onEvent,
+      ),
       BookFormat.pdf => PdfCanvasView(
         key: ValueKey('pdf-canvas-${config.book.id}-${config.version}'),
         book: config.book,
@@ -8303,7 +8337,7 @@ String _readerLocationText({
 
 String _readerScaleText(Book book, ReaderSettings settings) {
   return switch (book.format) {
-    BookFormat.epub => '字号 ${settings.fontSize.round()}',
+    BookFormat.epub || BookFormat.markdown => '字号 ${settings.fontSize.round()}',
     BookFormat.pdf => switch (settings.pdfZoomMode) {
       PdfZoomMode.fitWidth => '适宽',
       PdfZoomMode.fitPage => '整页',
@@ -8317,6 +8351,7 @@ String _readerFormatLabel(BookFormat format) {
   return switch (format) {
     BookFormat.epub => 'EPUB',
     BookFormat.pdf => 'PDF',
+    BookFormat.markdown => 'MD',
   };
 }
 

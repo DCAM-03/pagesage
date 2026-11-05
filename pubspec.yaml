@@ -15,6 +15,10 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_markdown: ^0.7.7+1
+  # The Markdown reader parses with the same parser flutter_markdown uses;
+  # declaring it directly keeps the reader from depending on another
+  # package's dependency list.
+  markdown: ^7.3.1
   flutter_riverpod: ^3.3.2
   flutter_secure_storage: ^11.2.0
   go_router: ^17.3.0

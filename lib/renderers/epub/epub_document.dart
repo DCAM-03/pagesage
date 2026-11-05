@@ -115,7 +115,7 @@ final class EpubChapter {
 }
 
 /// What a run of text in a chapter is.
-enum EpubBlockType { paragraph, heading, code, caption, image }
+enum EpubBlockType { paragraph, heading, code, caption, image, quote }
 
 /// One piece of a chapter's flow.
 sealed class EpubBlock {

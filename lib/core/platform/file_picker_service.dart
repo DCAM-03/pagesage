@@ -133,8 +133,8 @@ final class FilePickerService {
     final files = await _adapter.pickFiles(
       const FilePickerRequest(
         allowMultiple: false,
-        allowedExtensions: ['epub', 'pdf'],
-        dialogTitle: '导入 EPUB/PDF',
+        allowedExtensions: ['epub', 'pdf', 'md', 'markdown'],
+        dialogTitle: '导入 EPUB/PDF/Markdown',
       ),
     );
 
@@ -149,8 +149,8 @@ final class FilePickerService {
     final files = await _adapter.pickFiles(
       const FilePickerRequest(
         allowMultiple: true,
-        allowedExtensions: ['epub', 'pdf'],
-        dialogTitle: '导入 EPUB/PDF',
+        allowedExtensions: ['epub', 'pdf', 'md', 'markdown'],
+        dialogTitle: '导入 EPUB/PDF/Markdown',
       ),
     );
 

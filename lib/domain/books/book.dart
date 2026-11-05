@@ -1,10 +1,15 @@
 enum BookFormat {
   epub('epub'),
-  pdf('pdf');
+  pdf('pdf'),
+  markdown('md');
 
   const BookFormat(this.value);
 
   final String value;
+
+  /// Whether this format is read as reflowable text: chapters, paragraphs,
+  /// and character offsets rather than fixed pages.
+  bool get isReflowable => this != BookFormat.pdf;
 
   static BookFormat? fromValue(String value) {
     for (final format in values) {

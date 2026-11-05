@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/platform/file_picker_service.dart';
 
 void main() {
-  test('pickBookFile requests a single EPUB or PDF file', () async {
+  test('pickBookFile requests a single EPUB, PDF, or Markdown file', () async {
     final adapter = _FakeFilePickerAdapter([
       const PickedPlatformFile(path: r'C:\books\demo.epub', name: 'demo.epub'),
     ]);
@@ -13,24 +13,37 @@ void main() {
     expect(file?.path, r'C:\books\demo.epub');
     expect(file?.name, 'demo.epub');
     expect(adapter.requests.single.allowMultiple, isFalse);
-    expect(adapter.requests.single.allowedExtensions, ['epub', 'pdf']);
-    expect(adapter.requests.single.dialogTitle, '导入 EPUB/PDF');
-  });
-
-  test('pickBookFiles requests multiple EPUB or PDF files', () async {
-    final adapter = _FakeFilePickerAdapter([
-      const PickedPlatformFile(path: r'C:\books\a.epub', name: 'a.epub'),
-      const PickedPlatformFile(path: r'C:\books\b.pdf', name: 'b.pdf'),
+    expect(adapter.requests.single.allowedExtensions, [
+      'epub',
+      'pdf',
+      'md',
+      'markdown',
     ]);
-    final service = FilePickerService(adapter: adapter);
-
-    final files = await service.pickBookFiles();
-
-    expect(files.map((file) => file.name), ['a.epub', 'b.pdf']);
-    expect(adapter.requests.single.allowMultiple, isTrue);
-    expect(adapter.requests.single.allowedExtensions, ['epub', 'pdf']);
-    expect(adapter.requests.single.dialogTitle, '导入 EPUB/PDF');
+    expect(adapter.requests.single.dialogTitle, '导入 EPUB/PDF/Markdown');
   });
+
+  test(
+    'pickBookFiles requests multiple EPUB, PDF, or Markdown files',
+    () async {
+      final adapter = _FakeFilePickerAdapter([
+        const PickedPlatformFile(path: r'C:\books\a.epub', name: 'a.epub'),
+        const PickedPlatformFile(path: r'C:\books\b.pdf', name: 'b.pdf'),
+      ]);
+      final service = FilePickerService(adapter: adapter);
+
+      final files = await service.pickBookFiles();
+
+      expect(files.map((file) => file.name), ['a.epub', 'b.pdf']);
+      expect(adapter.requests.single.allowMultiple, isTrue);
+      expect(adapter.requests.single.allowedExtensions, [
+        'epub',
+        'pdf',
+        'md',
+        'markdown',
+      ]);
+      expect(adapter.requests.single.dialogTitle, '导入 EPUB/PDF/Markdown');
+    },
+  );
 
   test('pickBackupZipFile requests a single zip file', () async {
     final adapter = _FakeFilePickerAdapter([

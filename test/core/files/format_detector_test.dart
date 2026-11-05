@@ -25,6 +25,37 @@ void main() {
     expect(await detector.detect(pdf), BookFormat.pdf);
   });
 
+  test('detects Markdown by extension and text content', () async {
+    final tempDir = await Directory.systemTemp.createTemp('pagesage_format_');
+    addTearDown(() => tempDir.delete(recursive: true));
+
+    final md = File('${tempDir.path}/notes.md')
+      ..writeAsStringSync('# 标题\n\n正文。');
+    final long = File('${tempDir.path}/notes.markdown')
+      ..writeAsStringSync('前记\n\n## 一节');
+
+    final detector = FormatDetector();
+    expect(await detector.detect(md), BookFormat.markdown);
+    expect(await detector.detect(long), BookFormat.markdown);
+
+    // An empty file is still a Markdown document: it opens to a readable
+    // "no text" message instead of failing as an unknown format.
+    final empty = File('${tempDir.path}/empty.md')..writeAsStringSync('');
+    expect(await detector.detect(empty), BookFormat.markdown);
+  });
+
+  test('a binary file named .md is not a Markdown book', () async {
+    final tempDir = await Directory.systemTemp.createTemp('pagesage_format_');
+    addTearDown(() => tempDir.delete(recursive: true));
+
+    final fake = File('${tempDir.path}/fake.md')
+      ..writeAsBytesSync(<int>[0x00, 0x01, 0x02, 0x03]);
+    expect(
+      () => FormatDetector().detect(fake),
+      throwsA(isA<UnsupportedBookFormatException>()),
+    );
+  });
+
   test('rejects unsupported formats', () async {
     final tempDir = await Directory.systemTemp.createTemp('pagesage_format_');
     addTearDown(() => tempDir.delete(recursive: true));

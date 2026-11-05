@@ -2,7 +2,9 @@ import '../../domain/books/book.dart';
 import '../../domain/books/book_repository.dart';
 import '../../domain/books/reading_position.dart';
 import '../../domain/search/search_models.dart';
+import '../../renderers/epub/epub_document.dart';
 import '../../renderers/epub/epub_document_loader.dart';
+import '../../renderers/markdown/markdown_document_loader.dart';
 import '../../renderers/epub/epub_jump.dart';
 import '../tasks/task_cancellation.dart';
 import 'pdf_text_extractor.dart';
@@ -62,6 +64,11 @@ final class SearchIndexer {
           onProgress: onProgress,
         ),
         BookFormat.pdf => await _indexPdf(
+          book,
+          cancelToken: cancelToken,
+          onProgress: onProgress,
+        ),
+        BookFormat.markdown => await _indexMarkdown(
           book,
           cancelToken: cancelToken,
           onProgress: onProgress,
@@ -175,7 +182,49 @@ final class SearchIndexer {
     cancelToken?.throwIfCancelled();
     onProgress?.call(0.15, message: '解析 EPUB');
     final document = await _epubLoader.load(book.libraryFilePath);
+    return _indexReflowable(
+      book,
+      document,
+      cancelToken: cancelToken,
+      onProgress: onProgress,
+      sourceTag: 'epub',
+      statusMessage: 'EPUB',
+    );
+  }
+
+  Future<String> _indexMarkdown(
+    Book book, {
+    TaskCancelToken? cancelToken,
+    void Function(double progress, {String? message})? onProgress,
+  }) async {
     cancelToken?.throwIfCancelled();
+    onProgress?.call(0.15, message: '解析 Markdown');
+    final document = await const MarkdownDocumentLoader().load(
+      book.libraryFilePath,
+    );
+    return _indexReflowable(
+      book,
+      document,
+      cancelToken: cancelToken,
+      onProgress: onProgress,
+      sourceTag: 'md',
+      statusMessage: 'Markdown',
+    );
+  }
+
+  /// Indexes a book that is read by chapter and character offset.
+  ///
+  /// EPUB and Markdown have the same shape here — chapters of text — so they
+  /// share one pass. Only the locator type differs, and that is what the
+  /// stored position has to say truthfully.
+  Future<String> _indexReflowable(
+    Book book,
+    EpubDocument document, {
+    TaskCancelToken? cancelToken,
+    void Function(double progress, {String? message})? onProgress,
+    required String sourceTag,
+    required String statusMessage,
+  }) async {
     const batchSize = 64;
     var pending = <SearchIndexEntry>[];
     final totalChapters = document.chapters.length;
@@ -209,11 +258,12 @@ final class SearchIndexer {
         pending.add(
           SearchIndexEntry(
             sourceType: 'book',
-            sourceId: '${book.id}:epub:${chapter.index}:$i',
+            sourceId: '${book.id}:$sourceTag:${chapter.index}:$i',
             bookId: book.id,
             title: chapter.title,
             text: chunk.text,
-            locator: ReadingLocator.epub(
+            locator: _locatorFor(
+              book,
               href: chapter.href,
               chapterIndex: chapter.index,
               chapterOffset: start,
@@ -249,8 +299,37 @@ final class SearchIndexer {
       }
     }
     await flushPending();
-    onProgress?.call(0.99, message: '完成 EPUB 索引');
+    onProgress?.call(0.99, message: '完成 $statusMessage 索引');
     return 'done';
+  }
+
+  ReadingLocator _locatorFor(
+    Book book, {
+    required String href,
+    required int chapterIndex,
+    required int chapterOffset,
+    required int chapterEndOffset,
+    required double progress,
+    String? excerpt,
+  }) {
+    if (book.format == BookFormat.markdown) {
+      return ReadingLocator.markdown(
+        href: href,
+        chapterIndex: chapterIndex,
+        chapterOffset: chapterOffset,
+        chapterEndOffset: chapterEndOffset,
+        progress: progress,
+        excerpt: excerpt,
+      );
+    }
+    return ReadingLocator.epub(
+      href: href,
+      chapterIndex: chapterIndex,
+      chapterOffset: chapterOffset,
+      chapterEndOffset: chapterEndOffset,
+      progress: progress,
+      excerpt: excerpt,
+    );
   }
 
   /// Splits [text] into search chunks while preserving source offsets.

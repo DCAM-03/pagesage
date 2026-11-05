@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/features/ai/application/ai_context_range.dart';
+import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/features/ai/application/ai_context_source.dart';
 
 /// Writes a two-chapter EPUB into [dir] and returns its path.
@@ -66,7 +67,7 @@ void main() {
         chapterOffset: 0,
         progress: 0,
       ),
-      isEpub: true,
+      format: BookFormat.epub,
     );
 
     expect(loaded, isNull);
@@ -86,7 +87,7 @@ void main() {
         chapterOffset: 0,
         progress: 1,
       ),
-      isEpub: true,
+      format: BookFormat.epub,
     );
 
     expect(loaded, isNotNull);
@@ -110,7 +111,7 @@ void main() {
         chapterOffset: 0,
         progress: 1,
       ),
-      isEpub: true,
+      format: BookFormat.epub,
     );
 
     expect(loaded?.title, '第二章');
@@ -129,7 +130,7 @@ void main() {
           chapterOffset: 0,
           progress: 0,
         ),
-        isEpub: true,
+        format: BookFormat.epub,
       ),
       throwsA(isA<BookUnreadableException>()),
     );
@@ -141,7 +142,7 @@ void main() {
         range: AiContextRange.currentPage,
         bookPath: '/does/not/exist.pdf',
         locator: ReadingLocator.pdf(page: 1),
-        isEpub: false,
+        format: BookFormat.pdf,
       ),
       throwsA(isA<BookUnreadableException>()),
     );
@@ -158,7 +159,7 @@ void main() {
       range: AiContextRange.currentPage,
       bookPath: file.path,
       locator: ReadingLocator.pdf(page: 1),
-      isEpub: false,
+      format: BookFormat.pdf,
     );
 
     expect(loaded, isNotNull);
@@ -178,7 +179,7 @@ void main() {
       range: AiContextRange.currentPage,
       bookPath: file.path,
       locator: ReadingLocator.pdf(page: 9999),
-      isEpub: false,
+      format: BookFormat.pdf,
     );
 
     expect(loaded, isNull);
@@ -189,7 +190,7 @@ void main() {
       range: AiContextRange.currentPage,
       bookPath: 'poc_pdf_canvas/samples/chinese-embedded.pdf',
       locator: null,
-      isEpub: false,
+      format: BookFormat.pdf,
     );
 
     expect(loaded, isNull);

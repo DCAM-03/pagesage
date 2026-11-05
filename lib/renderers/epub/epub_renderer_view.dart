@@ -1,3 +1,4 @@
+import '../common/book_document_loader.dart';
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -47,7 +48,7 @@ final class EpubRendererView extends StatefulWidget {
   ///
   /// A widget test passes its own, because a file read from inside the
   /// fake-async zone of `testWidgets` never settles.
-  final EpubDocumentLoader? documentLoader;
+  final BookDocumentLoader? documentLoader;
 
   @override
   State<EpubRendererView> createState() => _EpubRendererViewState();
@@ -180,6 +181,39 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     return epubFocusRangeFor(locator);
   }
 
+  /// A position in this book, typed the way this book is read.
+  ///
+  /// A Markdown book and an EPUB are read the same way, but a stored position
+  /// that calls a Markdown chapter an EPUB one is a small lie that costs
+  /// nothing to avoid.
+  ReadingLocator _locator({
+    String? href,
+    required int chapterIndex,
+    required int chapterOffset,
+    int? chapterEndOffset,
+    required double progress,
+    String? excerpt,
+  }) {
+    if (widget.book.format == BookFormat.markdown) {
+      return ReadingLocator.markdown(
+        href: href,
+        chapterIndex: chapterIndex,
+        chapterOffset: chapterOffset,
+        chapterEndOffset: chapterEndOffset,
+        progress: progress,
+        excerpt: excerpt,
+      );
+    }
+    return ReadingLocator.epub(
+      href: href,
+      chapterIndex: chapterIndex,
+      chapterOffset: chapterOffset,
+      chapterEndOffset: chapterEndOffset,
+      progress: progress,
+      excerpt: excerpt,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = widget.settings;
@@ -188,9 +222,9 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
       future: _documentFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          final message = snapshot.error is EpubLoadException
-              ? (snapshot.error! as EpubLoadException).message
-              : '无法解析 EPUB 文件';
+          final message = snapshot.error is BookLoadException
+              ? (snapshot.error! as BookLoadException).message
+              : '无法解析这本书';
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               widget.onEvent(RendererFailed(message));
@@ -823,7 +857,7 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
           RendererSearchResult(
             title: chapter.title,
             snippet: snippet,
-            locator: ReadingLocator.epub(
+            locator: _locator(
               href: chapter.href,
               chapterIndex: chapter.index,
               chapterOffset: index,
@@ -876,7 +910,7 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     );
     widget.onEvent(
       RendererLocationChanged(
-        locator: ReadingLocator.epub(
+        locator: _locator(
           href: chapter.href,
           chapterIndex: chapter.index,
           chapterOffset: chapterOffset,
@@ -938,7 +972,7 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     final excerpt = _excerptAtChapterOffset(page.chapter, page.startOffset);
     widget.onEvent(
       RendererLocationChanged(
-        locator: ReadingLocator.epub(
+        locator: _locator(
           href: page.chapter.href,
           chapterIndex: page.chapter.index,
           chapterOffset: page.startOffset,
@@ -1000,7 +1034,7 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     widget.onEvent(
       RendererTextSelected(
         text: selected,
-        locator: ReadingLocator.epub(
+        locator: _locator(
           href: selection.chapter.href,
           chapterIndex: selection.chapter.index,
           chapterOffset: selection.startOffset,
@@ -1854,6 +1888,10 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
           child: text,
         ),
         EpubBlockType.caption => _EpubCaption(child: text),
+        EpubBlockType.quote => _EpubQuoteBlock(
+          settings: widget.settings,
+          child: text,
+        ),
         EpubBlockType.image ||
         EpubBlockType.heading ||
         EpubBlockType.paragraph => text,
@@ -1888,6 +1926,7 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       EpubBlockType.code => widget.settings.paragraphSpacing * 1.35,
       EpubBlockType.caption => widget.settings.paragraphSpacing * 0.6,
       EpubBlockType.image => widget.settings.paragraphSpacing * 1.2,
+      EpubBlockType.quote ||
       EpubBlockType.paragraph => widget.settings.paragraphSpacing,
     };
   }
@@ -1908,6 +1947,9 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
         fontSize: baseStyle.fontSize! * 0.88,
         height: (baseStyle.height ?? 1.5) * 0.95,
         color: baseStyle.color?.withValues(alpha: 0.72),
+      ),
+      EpubBlockType.quote => baseStyle.copyWith(
+        color: baseStyle.color?.withValues(alpha: 0.86),
       ),
       EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
     };
@@ -2316,6 +2358,32 @@ final class _EpubImageView extends StatelessWidget {
 }
 
 /// A figure's caption: quieter than the prose around it.
+/// A quote: the words sit behind a bar, quieter than the prose.
+///
+/// The bar is what makes a quote readable as a quote without indenting the
+/// text into a shape that collides with the page margin.
+final class _EpubQuoteBlock extends StatelessWidget {
+  const _EpubQuoteBlock({required this.settings, required this.child});
+
+  final ReaderSettings settings;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            color: settings.themePreset.link.withValues(alpha: 0.45),
+            width: 3,
+          ),
+        ),
+      ),
+      child: Padding(padding: const EdgeInsets.only(left: 12), child: child),
+    );
+  }
+}
+
 final class _EpubCaption extends StatelessWidget {
   const _EpubCaption({required this.child});
 

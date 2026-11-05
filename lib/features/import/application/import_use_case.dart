@@ -162,7 +162,7 @@ final class ImportUseCase {
     );
   }
 
-  /// Recursively finds `.epub` / `.pdf` under [folderPath].
+  /// Recursively finds the supported book files under [folderPath].
   static Future<List<String>> discoverBookPaths(String folderPath) async {
     final root = Directory(folderPath);
     if (!await root.exists()) {
@@ -174,7 +174,10 @@ final class ImportUseCase {
         continue;
       }
       final ext = p.extension(entity.path).toLowerCase();
-      if (ext == '.epub' || ext == '.pdf') {
+      if (ext == '.epub' ||
+          ext == '.pdf' ||
+          ext == '.md' ||
+          ext == '.markdown') {
         paths.add(entity.path);
       }
     }

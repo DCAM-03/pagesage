@@ -1165,7 +1165,7 @@ final class _AboutPageSageCard extends StatelessWidget {
         content: const SingleChildScrollView(
           child: Text(
             'PageSage 默认把书籍副本、阅读进度、书签、标注、笔记、全文索引、AI 对话记录和应用设置保存在本机。\n\n'
-            '导入 EPUB/PDF 时会复制到应用书库目录；从 PageSage 删除书籍不会删除用户原始路径文件。\n\n'
+            '导入 EPUB/PDF/Markdown 时会复制到应用书库目录；从 PageSage 删除书籍不会删除用户原始路径文件。\n\n'
             'AI 功能必须由用户主动触发，默认不会自动上传整本书。AI 面板会展示将发送的选中文本或上下文范围。API Key 存在系统安全存储中，不写入 SQLite，也不进入普通日志。\n\n'
             '默认日志不记录 API key、AI 请求正文、选中文本、完整上下文或大段书籍正文。备份和恢复仅处理本地文件，恢复前会创建回滚副本。',
           ),

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -31,6 +32,15 @@ final class FormatDetector {
       return BookFormat.pdf;
     }
 
+    // Markdown has no magic number: the extension is the claim and the
+    // content is the check. A readable, non-empty text file is a Markdown
+    // document; a binary file that happens to be named `.md` is not.
+    if ((extension == 'md' || extension == 'markdown') &&
+        _mimeMatches(BookFormat.markdown, mimeType) &&
+        await _looksLikeText(file)) {
+      return BookFormat.markdown;
+    }
+
     throw UnsupportedBookFormatException(
       extension.isEmpty ? 'unknown' : extension,
     );
@@ -45,6 +55,10 @@ final class FormatDetector {
       BookFormat.epub => normalized == 'application/epub+zip',
       BookFormat.pdf =>
         normalized == 'application/pdf' || normalized == 'application/x-pdf',
+      BookFormat.markdown =>
+        normalized == 'text/markdown' ||
+            normalized == 'text/x-markdown' ||
+            normalized == 'text/plain',
     };
   }
 
@@ -56,6 +70,39 @@ final class FormatDetector {
         bytes[2] == 0x44 &&
         bytes[3] == 0x46 &&
         bytes[4] == 0x2d;
+  }
+
+  /// Whether the file holds readable text.
+  ///
+  /// A book is something a person reads, so a NUL byte or an invalid UTF-8
+  /// sequence in the first few kilobytes means this is not one, whatever its
+  /// name says. An empty file is text too — it opens to an empty chapter
+  /// instead of failing as an unknown format.
+  Future<bool> _looksLikeText(File file) async {
+    final bytes = await _readHeader(file, 4096);
+    if (bytes.isEmpty) {
+      return true;
+    }
+    for (final byte in bytes) {
+      if (byte == 0x00) {
+        return false;
+      }
+    }
+    try {
+      utf8.decode(bytes, allowMalformed: false);
+    } on FormatException {
+      // A multi-byte character can be cut by the 4096-byte window. Only the
+      // end of the sample may be truncated, so retry without the tail.
+      final trimmed = bytes.length > 4
+          ? bytes.sublist(0, bytes.length - 4)
+          : bytes;
+      try {
+        utf8.decode(trimmed, allowMalformed: false);
+      } on FormatException {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<bool> _hasZipHeader(File file) async {

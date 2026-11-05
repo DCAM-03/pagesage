@@ -4,9 +4,12 @@ import 'dart:isolate';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
+import '../../../domain/books/book.dart';
 import '../../../domain/books/reading_position.dart';
+import '../../../renderers/common/book_document_loader.dart';
 import '../../../renderers/epub/epub_document.dart';
 import '../../../renderers/epub/epub_document_loader.dart';
+import '../../../renderers/markdown/markdown_document_loader.dart';
 import 'ai_context_range.dart';
 
 /// A block of text the AI request will carry, with where it came from.
@@ -82,22 +85,22 @@ class AiContextSource {
     required AiContextRange range,
     required String bookPath,
     required ReadingLocator? locator,
-    required bool isEpub,
+    required BookFormat format,
   }) async {
     switch (range) {
       case AiContextRange.selectedText:
         return null;
       case AiContextRange.currentPage:
-        return isEpub
-            ? _epubChapter(bookPath, locator)
+        return format.isReflowable
+            ? _chapter(bookPath, locator, format)
             : _pdfPage(bookPath, locator);
       case AiContextRange.currentChapter:
-        return _epubChapter(bookPath, locator);
+        return _chapter(bookPath, locator, format);
       case AiContextRange.surroundingParagraphs:
         // Narrowed from the body of text the selection sits in; the builder
         // cuts the paragraphs.
-        return isEpub
-            ? _epubChapter(bookPath, locator)
+        return format.isReflowable
+            ? _chapter(bookPath, locator, format)
             : _pdfPage(bookPath, locator);
       case AiContextRange.wholeBook || AiContextRange.folder:
         // Not one file read: these ranges are answered by retrieval over the
@@ -135,13 +138,17 @@ class AiContextSource {
   }
 
   /// One EPUB chapter, or null when it has no text.
-  Future<ContextSource?> _epubChapter(
+  Future<ContextSource?> _chapter(
     String bookPath,
     ReadingLocator? locator,
+    BookFormat format,
   ) async {
+    final BookDocumentLoader loader = format == BookFormat.markdown
+        ? const MarkdownDocumentLoader()
+        : _epubLoader;
     final EpubDocument document;
     try {
-      document = await _epubLoader.load(bookPath);
+      document = await loader.load(bookPath);
     } on Object {
       throw const BookUnreadableException();
     }
@@ -155,15 +162,25 @@ class AiContextSource {
     return ContextSource(
       title: chapter.title,
       text: chapter.text,
-      locator: ReadingLocator.epub(
-        href: chapter.href,
-        chapterIndex: chapter.index,
-        chapterOffset: 0,
-        progress: document.progressForChapter(
-          chapterIndex: chapter.index,
-          chapterOffset: 0,
-        ),
-      ),
+      locator: format == BookFormat.markdown
+          ? ReadingLocator.markdown(
+              href: chapter.href,
+              chapterIndex: chapter.index,
+              chapterOffset: 0,
+              progress: document.progressForChapter(
+                chapterIndex: chapter.index,
+                chapterOffset: 0,
+              ),
+            )
+          : ReadingLocator.epub(
+              href: chapter.href,
+              chapterIndex: chapter.index,
+              chapterOffset: 0,
+              progress: document.progressForChapter(
+                chapterIndex: chapter.index,
+                chapterOffset: 0,
+              ),
+            ),
     );
   }
 }

@@ -576,7 +576,7 @@ final class _LibraryHeaderActions extends StatelessWidget {
         if (compact) ...[
           IconButton(
             key: const ValueKey('header-import-books-button'),
-            tooltip: '导入 EPUB/PDF',
+            tooltip: '导入 EPUB/PDF/Markdown',
             onPressed: isImporting ? null : onImport,
             icon: isImporting
                 ? const SizedBox.square(
@@ -1881,7 +1881,7 @@ final class _EmptyLibrary extends StatelessWidget {
       icon: Icons.local_library_outlined,
       illustrationAsset: 'assets/images/empty-states/empty-library.png',
       title: '还没有书籍',
-      message: '导入 EPUB/PDF 文件，或扫描文件夹批量加入书库。',
+      message: '导入 EPUB/PDF/Markdown 文件，或扫描文件夹批量加入书库。',
       action: FilledButton.icon(
         key: const ValueKey('import-books-button'),
         onPressed: isImporting ? null : onImport,
@@ -1891,7 +1891,7 @@ final class _EmptyLibrary extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.upload_file),
-        label: const Text('导入 EPUB/PDF'),
+        label: const Text('导入 EPUB/PDF/Markdown'),
       ),
       secondaryAction: OutlinedButton.icon(
         key: const ValueKey('import-folder-button'),
@@ -3812,6 +3812,7 @@ ReadingLocator _startLocatorForBook(Book book) {
   return switch (book.format) {
     BookFormat.epub => ReadingLocator.epub(progress: 0),
     BookFormat.pdf => ReadingLocator.pdf(page: 1, progress: 0),
+    BookFormat.markdown => ReadingLocator.markdown(progress: 0),
   };
 }
 
@@ -4256,7 +4257,7 @@ final class _BookCover extends StatelessWidget {
                     icon,
                     const SizedBox(height: 6),
                     Text(
-                      format == BookFormat.pdf ? 'PDF' : 'EPUB',
+                      formatBookFormat(format),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: colorScheme.textSecondary,
                         fontWeight: FontWeight.w600,

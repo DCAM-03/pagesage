@@ -380,6 +380,7 @@ final class EpubPageMetrics {
         fontSize: baseStyle.fontSize! * 0.88,
         height: (baseStyle.height ?? 1.5) * 0.95,
       ),
+      EpubBlockType.quote => baseStyle,
       EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
     };
   }
@@ -388,6 +389,9 @@ final class EpubPageMetrics {
     final chrome = switch (type) {
       EpubBlockType.code => 28.0,
       EpubBlockType.image => 0.0,
+      // A quote sits behind a bar and an indent; its lines are that much
+      // shorter, so the measurement has to know.
+      EpubBlockType.quote => 16.0,
       EpubBlockType.heading ||
       EpubBlockType.caption ||
       EpubBlockType.paragraph => 0.0,
@@ -400,6 +404,7 @@ final class EpubPageMetrics {
     return switch (type) {
       EpubBlockType.code => 22.0,
       EpubBlockType.image => 0.0,
+      EpubBlockType.quote ||
       EpubBlockType.heading ||
       EpubBlockType.caption ||
       EpubBlockType.paragraph => 0.0,
@@ -412,7 +417,7 @@ final class EpubPageMetrics {
       EpubBlockType.code => paragraphSpacing * 1.35,
       EpubBlockType.caption => paragraphSpacing * 0.6,
       EpubBlockType.image => paragraphSpacing * 1.2,
-      EpubBlockType.paragraph => paragraphSpacing,
+      EpubBlockType.quote || EpubBlockType.paragraph => paragraphSpacing,
     };
   }
 

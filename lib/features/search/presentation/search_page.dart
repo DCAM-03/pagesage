@@ -623,6 +623,7 @@ final class _SearchFilters extends ConsumerWidget {
     return switch (format) {
       BookFormat.epub => 'EPUB',
       BookFormat.pdf => 'PDF',
+      BookFormat.markdown => 'MD',
     };
   }
 

@@ -211,7 +211,7 @@ final class AppCommandBar extends StatelessWidget {
                 const SizedBox(width: AppSpacing.x2),
               ],
               _CommandButton(
-                tooltip: '导入 EPUB/PDF',
+                tooltip: '导入 EPUB/PDF/Markdown',
                 icon: Icons.upload_file_outlined,
                 label: '导入',
                 filled: true,

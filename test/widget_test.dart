@@ -144,7 +144,12 @@ void main() {
     await tester.pump();
     expect(adapter.pickRequests, hasLength(1));
     expect(adapter.pickRequests.single.allowMultiple, isTrue);
-    expect(adapter.pickRequests.single.allowedExtensions, ['epub', 'pdf']);
+    expect(adapter.pickRequests.single.allowedExtensions, [
+      'epub',
+      'pdf',
+      'md',
+      'markdown',
+    ]);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyO);
@@ -152,7 +157,7 @@ void main() {
     await tester.pump();
 
     expect(adapter.pickRequests, hasLength(2));
-    expect(adapter.pickRequests.last.dialogTitle, '导入 EPUB/PDF');
+    expect(adapter.pickRequests.last.dialogTitle, '导入 EPUB/PDF/Markdown');
   });
 
   testWidgets(

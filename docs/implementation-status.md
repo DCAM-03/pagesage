@@ -18,7 +18,7 @@
 
 | 编号 | 用户故事 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| US-001 | 导入 EPUB/PDF，集中管理 | [x] | 文件选择、拖拽、hash 去重、复制到书库 |
+| US-001 | 导入 EPUB/PDF/Markdown，集中管理 | [x] | 文件选择、拖拽、hash 去重、复制到书库 |
 | US-002 | 打开书籍并自动恢复进度 | [x] | EPUB/PDF 均有进度表；会话保存已加固 |
 | US-003 | 调整字号、背景和样式 | [x] | 阅读设置持久化；多主题 |
 | US-004 | 按目录跳转 | [x] | EPUB TOC + PDF 大纲/页码；软跳转已接 |
@@ -28,7 +28,7 @@
 | US-008 | 划词问 AI | [x] | 用户主动触发；四种上下文范围均已取真实页/章全文（`AiContextSource`，见 `docs/12-ai-retrieval-strategy.md` §7.1） |
 | US-009 | AI 回答保存为笔记 | [x] | AI 面板可保存；可被搜索索引 |
 | US-010 | 导出笔记 | [x] | 设置页：Markdown / Notebook / 标注 JSON / 书签 CSV / AI Markdown |
-| US-011 | 扫描文件夹批量导入 | [x] | 书库「扫描文件夹」+ 递归发现 EPUB/PDF |
+| US-011 | 扫描文件夹批量导入 | [x] | 书库「扫描文件夹」+ 递归发现 EPUB/PDF/Markdown |
 | US-012 | 备份数据库 | [x] | 备份 zip + 恢复 + 回滚副本 |
 
 **用户故事合计：** 12 完成
@@ -98,6 +98,14 @@ PDF 渲染迁移（`docs/10-pdf-renderer-migration.md`，2026-10-21）：
 - B2 完成：标注时裁图进 `<cache>/images/<bookId>/`（文件名按图的同一性，不按矩形）、设置页「导出图片批注」（Markdown + 同级图片目录 + 相对路径）、「清理图片缓存」、删书/删批注清缓存、标注 JSON 补上 `target` 与 `imageAnchor`。裁图不挡读者的路：批注先写库，裁图在之后自己跑。
 - B3 完成（2026-10-22）：EPUB 真正显示书中的插图。加载器改为解析 XHTML 的结构（`epub_chapter_parser.dart`），章节文本仍是「只有字」的一条字符串，图片作为并列的块插在文字之间且不占字符，因此搜索、进度、跳转、划词偏移全部不受影响。图片字节从 archive 读，`data:` URI 支持、远程图片不加载；单图字节与像素预算硬限制，尺寸在解码前从头部读。图注是正文的一部分（参与排版与搜索）。失败降级为带原因和 `alt` 的占位块，不留空白。已在真实 Linux 窗口里验证图片被画出（`integration_test/reader_epub_image_test.dart`）；同时修好样本本身：`image.epub` 原先内嵌的插图是一张 144 字节的坏图，任何解码器都读不出来，样本改由生成器现场产出可解码的真图。详见 `docs/tasks/epub-images.md`。
 - **待办**：B4、B5；以及「重启后批注仍在原位」的真实应用手动确认。
+
+Markdown 阅读（`docs/tasks/markdown-reading.md` / TASK-31，2026-11-05）：
+- P1 完成：单个 `.md` / `.markdown` 文件即一本书。解析成与 EPUB 相同的文档模型（章节 → 块 → 字符偏移），因此分页、连续滚动、目录、进度、全文搜索、图片渲染直接复用，没有第二个阅读器。
+- 章节按一级标题切分，二级标题进目录子项；列表、引用、围栏代码、表格（等宽对齐，表头下有横线）、图片都是有结构的块。行内强调与 EPUB 一致地只保留文字。
+- 图片只读本地（相对路径 / `data:`），远程图片不加载并给出原因；front matter 只用来取标题，不进正文与索引。
+- `books.format` 写入 `md`，无 schema 变更；`ReadingLocator` 新增 `markdown` 类型，字段复用 EPUB 那组。
+- 验证：解析器/格式识别/widget 测试通过；真实 Linux 窗口集成测试打开 `.codex-run/samples/markdown-note.md`，排版见 `build/integration-captures/markdown-01-prose.png`（该图早于表头横线的调整）。
+- P2（目录当一本书）未开始，排在 P1 手测验收之后。
 
 AI 检索层（`docs/12-ai-retrieval-strategy.md`，2026-10-21）：
 - **选型已定**：全书 / 文件夹关联采用「结构感知的词法检索」（复用 FTS5 + EPUB 目录树 / PDF 大纲），**不采用 DCI，不引入向量 RAG**。

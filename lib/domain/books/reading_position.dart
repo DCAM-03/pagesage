@@ -4,7 +4,14 @@ import 'book.dart';
 
 enum ReadingLocatorType {
   epub('epub'),
-  pdf('pdf');
+  pdf('pdf'),
+
+  /// A position in a reflowable text document that is not an EPUB.
+  ///
+  /// It carries the same fields as [epub] because the two are read the same
+  /// way — by chapter and by character offset. It is a separate type so a
+  /// stored locator still says which kind of book it came from.
+  markdown('md');
 
   const ReadingLocatorType(this.value);
 
@@ -60,6 +67,27 @@ final class ReadingLocator {
     );
   }
 
+  factory ReadingLocator.markdown({
+    String? href,
+    int? chapterIndex,
+    int? chapterOffset,
+    int? chapterEndOffset,
+    double progress = 0,
+    String? excerpt,
+    List<ReaderRect> selectionRects = const [],
+  }) {
+    return ReadingLocator(
+      type: ReadingLocatorType.markdown,
+      href: href,
+      chapterIndex: chapterIndex,
+      chapterOffset: chapterOffset,
+      chapterEndOffset: chapterEndOffset,
+      progress: progress,
+      excerpt: excerpt,
+      selectionRects: selectionRects,
+    );
+  }
+
   factory ReadingLocator.pdf({
     int page = 1,
     double scrollOffset = 0,
@@ -90,6 +118,18 @@ final class ReadingLocator {
         scrollOffset: _asDouble(json['scrollOffset']) ?? 0,
         pageOffsetFraction: _asDouble(json['pageOffsetFraction']),
         zoom: _asDouble(json['zoom']) ?? 1,
+        progress: _asDouble(json['progress']) ?? 0,
+        excerpt: json['excerpt'] as String?,
+        selectionRects: selectionRects,
+      );
+    }
+
+    if (type == ReadingLocatorType.markdown) {
+      return ReadingLocator.markdown(
+        href: json['href'] as String?,
+        chapterIndex: _asInt(json['chapterIndex']),
+        chapterOffset: _asInt(json['chapterOffset']),
+        chapterEndOffset: _asInt(json['chapterEndOffset']),
         progress: _asDouble(json['progress']) ?? 0,
         excerpt: json['excerpt'] as String?,
         selectionRects: selectionRects,
@@ -171,7 +211,8 @@ final class ReadingLocator {
       return false;
     }
     return switch (type) {
-      ReadingLocatorType.epub => _matchesEpub(other),
+      ReadingLocatorType.epub ||
+      ReadingLocatorType.markdown => _matchesEpub(other),
       ReadingLocatorType.pdf => _matchesPdf(other),
     };
   }
@@ -181,6 +222,8 @@ final class ReadingLocator {
       ReadingLocatorType.pdf => '第 ${page ?? 1} 页',
       ReadingLocatorType.epub =>
         chapterIndex == null ? 'EPUB 位置' : '章节 ${chapterIndex! + 1}',
+      ReadingLocatorType.markdown =>
+        chapterIndex == null ? 'Markdown 位置' : '章节 ${chapterIndex! + 1}',
     };
   }
 

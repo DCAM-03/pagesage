@@ -5,6 +5,7 @@ import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 
+import '../common/book_document_loader.dart';
 import 'epub_chapter_parser.dart';
 import 'epub_document.dart';
 
@@ -13,13 +14,14 @@ import 'epub_document.dart';
 /// Not `final`: a widget test subclasses this to hand the renderer a
 /// document it has already built, because a file read from inside the
 /// fake-async zone of `testWidgets` never settles.
-class EpubDocumentLoader {
+class EpubDocumentLoader implements BookDocumentLoader {
   const EpubDocumentLoader();
 
   static final Map<String, Future<EpubDocument>> _inFlight = {};
   static final Map<String, _CachedEpubDocument> _cache = {};
   static const int _maxCacheEntries = 4;
 
+  @override
   Future<EpubDocument> load(String filePath) async {
     final file = File(filePath);
     if (!await file.exists()) {
@@ -631,9 +633,10 @@ class EpubDocumentLoader {
   }
 }
 
-final class EpubLoadException implements Exception {
+final class EpubLoadException implements BookLoadException {
   const EpubLoadException(this.message);
 
+  @override
   final String message;
 
   @override

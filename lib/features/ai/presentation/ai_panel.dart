@@ -17,6 +17,7 @@ import '../application/ai_context_range.dart';
 import '../application/ai_context_reference.dart';
 import '../application/ai_context_source.dart';
 import '../application/ai_providers.dart';
+import '../../../domain/books/book.dart';
 import '../application/context_builder.dart';
 import '../application/retrieval_context_source.dart';
 
@@ -27,7 +28,7 @@ final class AiPanel extends ConsumerStatefulWidget {
     required this.locator,
     required this.initialContext,
     this.bookPath,
-    this.isEpub = false,
+    required this.format,
     this.onJumpTo,
     this.onNoteSaved,
     this.embedded = false,
@@ -45,7 +46,9 @@ final class AiPanel extends ConsumerStatefulWidget {
   /// to the selection rather than pretending to have read the chapter.
   final String? bookPath;
 
-  final bool isEpub;
+  /// What kind of book this is: it decides whether a page or a chapter is
+  /// the unit the AI reads.
+  final BookFormat format;
   final ValueChanged<ReadingLocator>? onJumpTo;
   final VoidCallback? onNoteSaved;
   final bool embedded;
@@ -959,7 +962,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
           range: range,
           bookPath: path,
           locator: widget.locator,
-          isEpub: widget.isEpub,
+          format: widget.format,
         );
   }
 

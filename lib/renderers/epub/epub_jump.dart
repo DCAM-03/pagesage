@@ -144,7 +144,7 @@ enum JumpPrecision {
 
 JumpPrecision jumpPrecisionFor(ReadingLocator locator) {
   return switch (locator.type) {
-    ReadingLocatorType.epub => () {
+    ReadingLocatorType.epub || ReadingLocatorType.markdown => () {
       final hasChapter = locator.chapterIndex != null;
       final hasOffset = locator.chapterOffset != null;
       final hasExcerpt = (locator.excerpt?.trim().isNotEmpty ?? false);
@@ -176,7 +176,8 @@ String jumpStatusLabelFor(
 }) {
   final precision = jumpPrecisionFor(locator);
   return switch (locator.type) {
-    ReadingLocatorType.epub => switch (precision) {
+    ReadingLocatorType.epub ||
+    ReadingLocatorType.markdown => switch (precision) {
       JumpPrecision.phrase =>
         locator.chapterIndex == null
             ? '已定位到原文'
@@ -232,6 +233,15 @@ ReadingLocator enrichLocatorForJump(
   return switch (locator.type) {
     ReadingLocatorType.epub => ReadingLocator.epub(
       cfi: locator.cfi,
+      href: locator.href,
+      chapterIndex: locator.chapterIndex,
+      chapterOffset: locator.chapterOffset,
+      chapterEndOffset: locator.chapterEndOffset,
+      progress: locator.progress,
+      excerpt: excerpt,
+      selectionRects: locator.selectionRects,
+    ),
+    ReadingLocatorType.markdown => ReadingLocator.markdown(
       href: locator.href,
       chapterIndex: locator.chapterIndex,
       chapterOffset: locator.chapterOffset,

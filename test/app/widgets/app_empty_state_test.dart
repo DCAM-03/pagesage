@@ -16,7 +16,7 @@ void main() {
             action: FilledButton.icon(
               onPressed: () {},
               icon: const Icon(Icons.upload_file),
-              label: const Text('导入 EPUB/PDF'),
+              label: const Text('导入 EPUB/PDF/Markdown'),
             ),
           ),
         ),
@@ -31,7 +31,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('导入 EPUB/PDF'), findsOneWidget);
+    expect(find.text('导入 EPUB/PDF/Markdown'), findsOneWidget);
   });
 
   testWidgets('AppEmptyState supports informational states without actions', (

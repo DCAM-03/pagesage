@@ -126,7 +126,8 @@ final class ContextBuilder {
   /// Human-readable reading location for UI chips (not mixed into payload copy).
   String? locationLabel(ReadingLocator? locator) {
     return switch (locator?.type) {
-      ReadingLocatorType.epub => locator?.displayLabel,
+      ReadingLocatorType.epub ||
+      ReadingLocatorType.markdown => locator?.displayLabel,
       ReadingLocatorType.pdf =>
         locator?.page == null ? null : '第 ${locator!.page} 页',
       null => null,
