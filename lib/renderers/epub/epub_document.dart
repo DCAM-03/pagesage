@@ -115,7 +115,7 @@ final class EpubChapter {
 }
 
 /// What a run of text in a chapter is.
-enum EpubBlockType { paragraph, heading, code, caption, image, quote }
+enum EpubBlockType { paragraph, heading, code, caption, image, quote, table }
 
 /// One piece of a chapter's flow.
 sealed class EpubBlock {
@@ -140,6 +140,37 @@ final class EpubTextBlock extends EpubBlock {
   final int endOffset;
   final String text;
   final EpubBlockType type;
+}
+
+/// A table, kept as rows of cells.
+///
+/// Its words are part of the chapter's text, exactly like a paragraph's, so
+/// search, progress and selection need to know nothing about tables. The
+/// rows are what the renderer draws as a grid instead of as lines of pipes.
+final class EpubTableBlock extends EpubBlock {
+  const EpubTableBlock({
+    required this.startOffset,
+    required this.endOffset,
+    required this.text,
+    required this.rows,
+    this.hasHeader = false,
+  });
+
+  @override
+  final int startOffset;
+  @override
+  final int endOffset;
+
+  /// The cells laid out as text, one row per line, for search and progress.
+  final String text;
+
+  /// Every row padded to the same width; the first row is the header when
+  /// [hasHeader] is true.
+  final List<List<String>> rows;
+
+  final bool hasHeader;
+
+  int get columnCount => rows.isEmpty ? 0 : rows.first.length;
 }
 
 /// A picture.

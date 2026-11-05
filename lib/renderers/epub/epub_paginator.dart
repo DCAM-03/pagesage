@@ -4,6 +4,25 @@ import '../../domain/books/reader_fonts.dart';
 import '../../domain/books/reader_settings.dart';
 import 'epub_document.dart';
 
+/// A table cell's padding, shared with the renderer so that what the
+/// paginator measures and what the page draws agree.
+const double epubTableCellPaddingHorizontal = 6;
+const double epubTableCellPaddingVertical = 4;
+
+/// The rule above, below and between a table's rows.
+const double epubTableBorderWidth = 1;
+
+/// The style a table's cells are set in.
+///
+/// A table puts more on a line than prose does, so its text is a touch
+/// smaller than the paragraph around it.
+TextStyle epubTableTextStyle(TextStyle baseStyle) {
+  return baseStyle.copyWith(
+    fontSize: baseStyle.fontSize! * 0.94,
+    height: (baseStyle.height ?? 1.5) * 0.95,
+  );
+}
+
 final class EpubPaginator {
   const EpubPaginator();
 
@@ -102,6 +121,73 @@ final class EpubPaginator {
     final blocks = epubBlocks(chapter);
     for (var blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
       final block = blocks[blockIndex];
+      if (block.type == EpubBlockType.table) {
+        final rows = block.tableRows ?? const <List<String>>[];
+        if (rows.isEmpty) {
+          continue;
+        }
+        final tableStyle = metrics.styleFor(EpubBlockType.table);
+        final cellWidth = metrics.tableTextWidthFor(rows.length);
+        final rowHeights = <double>[
+          for (final row in rows) _tableRowHeight(row, tableStyle, cellWidth),
+        ];
+        final hasHeader = block.tableHasHeader;
+        final headerHeight = hasHeader ? rowHeights.first : 0.0;
+        final spacing = metrics.spacingFor(EpubBlockType.table);
+        var cursor = hasHeader ? 1 : 0;
+        var firstFragment = true;
+        while (firstFragment || cursor < rows.length) {
+          // The header goes on every page the table continues onto: a row
+          // lifted away from its columns still has to say what they are.
+          final frame = <List<String>>[if (hasHeader) rows.first];
+          final headerCount = frame.length;
+          var frameHeight =
+              spacing + (hasHeader ? headerHeight + epubTableBorderWidth : 0);
+          if (current.isNotEmpty &&
+              currentHeight +
+                      frameHeight +
+                      (cursor < rows.length
+                          ? rowHeights[cursor] + epubTableBorderWidth
+                          : 0) >
+                  metrics.contentHeight) {
+            flush();
+          }
+          while (cursor < rows.length) {
+            final candidate =
+                frameHeight + rowHeights[cursor] + epubTableBorderWidth;
+            // The first row always goes on the page: a row cut in three is
+            // unreadable, and a page one row too tall is still a page.
+            if (frame.length > headerCount &&
+                currentHeight + candidate > metrics.contentHeight) {
+              break;
+            }
+            frame.add(rows[cursor]);
+            frameHeight = candidate;
+            cursor += 1;
+          }
+          addMeasured(
+            _MeasuredFragment(
+              fragment: EpubPageFragment(
+                chapterIndex: block.chapter.index,
+                href: block.chapter.href,
+                startOffset: block.startOffset,
+                endOffset: block.endOffset,
+                text: frame.map((row) => row.join('   ')).join('\n'),
+                blockType: EpubBlockType.table,
+                isContinuation: !firstFragment,
+                tableRows: List<List<String>>.unmodifiable(frame),
+                tableHasHeader: headerCount > 0,
+              ),
+              height: frameHeight,
+            ),
+          );
+          firstFragment = false;
+          if (cursor < rows.length) {
+            flush();
+          }
+        }
+        continue;
+      }
       final measured = _measureBlock(block, metrics);
 
       if (block.type == EpubBlockType.heading &&
@@ -195,7 +281,7 @@ final class EpubPaginator {
             metrics.spacingFor(block.type),
       );
     }
-    final height = _measure(
+    final height = _measureText(
       block.text,
       metrics.styleFor(block.type),
       metrics.measureWidthFor(block.type),
@@ -261,7 +347,7 @@ final class EpubPaginator {
     while (low <= high) {
       final mid = ((low + high) / 2).floor();
       final candidate = text.substring(0, mid);
-      if (_measure(candidate, style, width) <= textMaxHeight) {
+      if (_measureText(candidate, style, width) <= textMaxHeight) {
         best = mid;
         low = mid + 1;
       } else {
@@ -280,7 +366,7 @@ final class EpubPaginator {
     }
     final fragmentText = text.substring(0, end).trimRight();
     final endOffset = block.startOffset + localStart + fragmentText.length;
-    final height = _measure(fragmentText, style, width);
+    final height = _measureText(fragmentText, style, width);
     return _MeasuredFragment(
       fragment: EpubPageFragment(
         chapterIndex: block.chapter.index,
@@ -294,18 +380,35 @@ final class EpubPaginator {
       height: height + chromeHeight + spacing,
     );
   }
+}
 
-  double _measure(String text, TextStyle style, double width) {
-    // Match the renderer: SelectableText uses forceStrutHeight, which is
-    // often taller than a bare TextPainter layout of the same style.
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-      strutStyle: StrutStyle.fromTextStyle(style, forceStrutHeight: true),
-      maxLines: null,
-    )..layout(maxWidth: width);
-    return painter.height;
+/// How tall [text] is when laid out at [width].
+///
+/// Match the renderer: SelectableText uses forceStrutHeight, which is often
+/// taller than a bare TextPainter layout of the same style.
+double _measureText(String text, TextStyle style, double width) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+    strutStyle: StrutStyle.fromTextStyle(style, forceStrutHeight: true),
+    maxLines: null,
+  )..layout(maxWidth: width);
+  return painter.height;
+}
+
+/// How tall one table row is: its tallest cell, plus the cell's own padding.
+double _tableRowHeight(List<String> cells, TextStyle style, double cellWidth) {
+  var height = 0.0;
+  for (final cell in cells) {
+    if (cell.isEmpty) {
+      continue;
+    }
+    final cellHeight = _measureText(cell, style, cellWidth);
+    if (cellHeight > height) {
+      height = cellHeight;
+    }
   }
+  return height + epubTableCellPaddingVertical * 2;
 }
 
 final class EpubPageMetrics {
@@ -380,6 +483,7 @@ final class EpubPageMetrics {
         fontSize: baseStyle.fontSize! * 0.88,
         height: (baseStyle.height ?? 1.5) * 0.95,
       ),
+      EpubBlockType.table => epubTableTextStyle(baseStyle),
       EpubBlockType.quote => baseStyle,
       EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
     };
@@ -394,10 +498,22 @@ final class EpubPageMetrics {
       EpubBlockType.quote => 16.0,
       EpubBlockType.heading ||
       EpubBlockType.caption ||
+      EpubBlockType.table ||
       EpubBlockType.paragraph => 0.0,
     };
     final width = contentWidth - chrome;
     return width < 120 ? contentWidth : width;
+  }
+
+  /// How wide a table cell's text is: an equal share of the column, less the
+  /// cell's own padding.
+  double tableTextWidthFor(int columns) {
+    if (columns <= 0) {
+      return contentWidth;
+    }
+    final textWidth =
+        contentWidth / columns - epubTableCellPaddingHorizontal * 2;
+    return textWidth < 24 ? 24 : textWidth;
   }
 
   double chromeHeightFor(EpubBlockType type) {
@@ -407,6 +523,7 @@ final class EpubPageMetrics {
       EpubBlockType.quote ||
       EpubBlockType.heading ||
       EpubBlockType.caption ||
+      EpubBlockType.table ||
       EpubBlockType.paragraph => 0.0,
     };
   }
@@ -417,6 +534,7 @@ final class EpubPageMetrics {
       EpubBlockType.code => paragraphSpacing * 1.35,
       EpubBlockType.caption => paragraphSpacing * 0.6,
       EpubBlockType.image => paragraphSpacing * 1.2,
+      EpubBlockType.table => paragraphSpacing * 1.1,
       EpubBlockType.quote || EpubBlockType.paragraph => paragraphSpacing,
     };
   }
@@ -475,6 +593,8 @@ final class EpubPageFragment {
     required this.blockType,
     this.isContinuation = false,
     this.image,
+    this.tableRows,
+    this.tableHasHeader = false,
   });
 
   final int chapterIndex;
@@ -487,6 +607,16 @@ final class EpubPageFragment {
 
   /// The picture, when this fragment is one.
   final EpubImage? image;
+
+  /// The rows this fragment draws, when it is part of a table.
+  ///
+  /// A table taller than a page is split between rows, and every fragment
+  /// repeats the header, so [tableRows] is what this page shows rather than
+  /// the whole table.
+  final List<List<String>>? tableRows;
+
+  /// Whether the first row of [tableRows] is a header.
+  final bool tableHasHeader;
 }
 
 final class EpubBlock {
@@ -497,6 +627,8 @@ final class EpubBlock {
     required this.text,
     required this.type,
     this.image,
+    this.tableRows,
+    this.tableHasHeader = false,
   });
 
   final EpubChapter chapter;
@@ -507,6 +639,12 @@ final class EpubBlock {
 
   /// The picture, when this block is one.
   final EpubImage? image;
+
+  /// The cells, when this block is a table.
+  final List<List<String>>? tableRows;
+
+  /// Whether the first row of [tableRows] is a header.
+  final bool tableHasHeader;
 }
 
 final class _MeasuredFragment {
@@ -533,6 +671,16 @@ List<EpubBlock> epubBlocks(EpubChapter chapter) {
             endOffset: block.endOffset,
             text: block.text,
             type: block.type,
+          )
+        else if (block is EpubTableBlock)
+          EpubBlock(
+            chapter: chapter,
+            startOffset: block.startOffset,
+            endOffset: block.endOffset,
+            text: block.text,
+            type: EpubBlockType.table,
+            tableRows: block.rows,
+            tableHasHeader: block.hasHeader,
           )
         else if (block is EpubImageBlock)
           EpubBlock(

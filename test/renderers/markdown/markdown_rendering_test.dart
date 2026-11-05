@@ -120,7 +120,62 @@ void main() {
     // And it is decoded at the size the page shows, not at the file's own.
     expect(resized.width, isNotNull);
   });
+
+  testWidgets('a table is drawn as a table, not as lines of pipes', (
+    tester,
+  ) async {
+    final document = await tester.runAsync(_loadTableDocument);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubRendererView(
+            book: Book(
+              id: 'note-table',
+              title: '表格',
+              format: BookFormat.markdown,
+              libraryFilePath: '/unused.md',
+              fileHash: 'hash',
+              fileSize: 1,
+              createdAt: 0,
+              updatedAt: 0,
+            ),
+            settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+            initialProgress: null,
+            annotations: const [],
+            onEvent: (_) {},
+            documentLoader: _StubLoader(document!),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(Table), findsOneWidget);
+    expect(find.text('名称'), findsOneWidget);
+    expect(find.text('苹果'), findsOneWidget);
+    // The markup that made the table is not on the page.
+    expect(find.textContaining('|'), findsNothing);
+    expect(find.textContaining('---'), findsNothing);
+  });
 }
+
+/// A note with one table in it.
+Future<EpubDocument> _loadTableDocument() async {
+  final dir = await Directory.systemTemp.createTemp('pagesage_md_table_ui_');
+  addTearDown(() => dir.delete(recursive: true));
+  await File('${dir.path}/note.md').writeAsString('''
+# 表格
+
+| 名称 | 数量 |
+| --- | --- |
+| 苹果 | 3 |
+| 香蕉 | 12 |
+''');
+  return const MarkdownDocumentLoader().load('${dir.path}/note.md');
+}
+
+/// A note with one picture beside it.
 
 /// A note with one picture beside it.
 Future<EpubDocument> _loadPictureDocument() async {

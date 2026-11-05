@@ -116,7 +116,7 @@ final a = 1;
     expect(code.text, 'final a = 1;');
   });
 
-  test('a table is laid out in columns', () async {
+  test('a table keeps its rows and columns apart', () async {
     final document = await parse('''
 # 表格
 
@@ -126,18 +126,64 @@ final a = 1;
 | 香蕉 | 12 |
 ''');
 
-    final block = document.chapters.single.blocks
-        .whereType<EpubTextBlock>()
-        .firstWhere((block) => block.type == EpubBlockType.code);
-    final lines = block.text.split('\n');
-    expect(lines.first, contains('名称'));
-    expect(lines.first, contains('数量'));
-    expect(lines[0].indexOf('|'), 0);
-    // The separator row marks the header.
-    expect(lines[1], contains('---'));
-    // Cells are padded to the widest value, so the columns line up — in
-    // display columns, which is what a CJK glyph takes two of.
-    expect(lines.map(displayWidth).toSet(), hasLength(1));
+    final chapter = document.chapters.single;
+    final table = chapter.blocks.whereType<EpubTableBlock>().single;
+
+    expect(table.hasHeader, isTrue);
+    expect(table.rows, [
+      ['名称', '数量'],
+      ['苹果', '3'],
+      ['香蕉', '12'],
+    ]);
+    // The words are still in the chapter's text, which is what search and
+    // progress work on.
+    expect(
+      chapter.text.substring(table.startOffset, table.endOffset),
+      table.text,
+    );
+    expect(chapter.text, contains('香蕉'));
+    // …and no markup leaked into what the reader sees.
+    expect(chapter.text, isNot(contains('---')));
+    expect(chapter.text, isNot(contains('|')));
+  });
+
+  test('a delimiter row with the wrong number of cells still parses', () async {
+    // Written by hand: the header has two cells, the delimiter three, and
+    // package:markdown would drop the whole table.
+    final document = await parse('''
+# 表格
+
+| 名称 | 数量 |
+| --- | --- | --- |
+| 苹果 | 3 |
+''');
+
+    final table = document.chapters.single.blocks
+        .whereType<EpubTableBlock>()
+        .single;
+    expect(table.rows, [
+      ['名称', '数量'],
+      ['苹果', '3'],
+    ]);
+  });
+
+  test('a table in a fenced code block stays code', () async {
+    final document = await parse('''
+# 代码
+
+```
+| a | b |
+| --- | --- |
+| 1 | 2 |
+```
+''');
+
+    final chapter = document.chapters.single;
+    expect(chapter.blocks.whereType<EpubTableBlock>(), isEmpty);
+    final code = chapter.blocks.whereType<EpubTextBlock>().singleWhere(
+      (block) => block.type == EpubBlockType.code,
+    );
+    expect(code.text, contains('| a | b |'));
   });
 
   test(

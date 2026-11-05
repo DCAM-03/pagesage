@@ -42,6 +42,54 @@ void main() {
     }
   });
 
+  test('a table longer than a page is split by rows, header repeated', () {
+    final rows = <List<String>>[
+      ['名称', '说明'],
+      for (var index = 0; index < 40; index++) ['第$index项', '这一行的说明文字。'],
+    ];
+    final text = rows.map((row) => row.join('   ')).join('\n');
+    final chapter = EpubChapter(
+      index: 0,
+      href: 'table.md',
+      title: '表格',
+      text: text,
+      blocks: [
+        EpubTableBlock(
+          startOffset: 0,
+          endOffset: text.length,
+          text: text,
+          rows: rows,
+          hasHeader: true,
+        ),
+      ],
+    );
+    const settings = ReaderSettings(
+      fontSize: 18,
+      lineHeight: 1.7,
+      paragraphSpacing: 12,
+      pageMargin: 24,
+    );
+
+    final pages = const EpubPaginator().paginate(
+      document: EpubDocument(chapters: [chapter]),
+      settings: settings,
+      viewport: const Size(420, 520),
+    );
+
+    expect(pages.length, greaterThan(1));
+    final bodyRows = <List<String>>[];
+    for (final page in pages) {
+      final fragment = page.fragments.single;
+      expect(fragment.blockType, EpubBlockType.table);
+      expect(fragment.tableRows, isNotNull);
+      // Every page of the table says what its columns are.
+      expect(fragment.tableRows!.first, ['名称', '说明']);
+      bodyRows.addAll(fragment.tableRows!.skip(1));
+    }
+    // Every row appears once, in order, and none is lost at a page break.
+    expect(bodyRows, rows.skip(1).toList());
+  });
+
   test('pagination progress is monotonic across chapters and sizes', () {
     final document = EpubDocument(
       chapters: [

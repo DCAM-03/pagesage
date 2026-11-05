@@ -46,7 +46,9 @@ final class MarkdownParser {
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
     );
-    final nodes = document.parseLines(source.body.split('\n'));
+    final nodes = document.parseLines(
+      _repairTableDelimiters(source.body).split('\n'),
+    );
     final builder = _DocumentBuilder(
       fallbackTitle: source.title ?? fallbackTitle,
       parser: this,
@@ -236,7 +238,7 @@ final class _DocumentBuilder {
       case 'pre':
         _addText(_codeText(node), EpubBlockType.code, code: true);
       case 'table':
-        _addText(_tableText(node), EpubBlockType.code, code: true);
+        _addTable(node);
       case 'hr':
         return;
       case 'img':
@@ -343,16 +345,108 @@ final class _DocumentBuilder {
     if (text.trim().isEmpty) {
       return;
     }
-    _writeSeparator();
-    final start = _textLength;
-    _text.write(text);
-    _textLength += text.length;
+    final start = _appendText(text);
     _blocks.add(
       EpubTextBlock(
         startOffset: start,
         endOffset: _textLength,
         text: text,
         type: type,
+      ),
+    );
+    _lastBlockStart = start;
+  }
+
+  /// Writes [text] into the chapter after a separator, returning its start.
+  int _appendText(String text) {
+    _writeSeparator();
+    final start = _textLength;
+    _write(text);
+    return start;
+  }
+
+  /// The last two characters written, which is all the separator needs to
+  /// know. Reading them back from the buffer would copy the chapter's whole
+  /// text on every block — quadratic work in a long chapter, for a check
+  /// worth two characters.
+  String _tail = '';
+
+  void _write(String value) {
+    _text.write(value);
+    _textLength += value.length;
+    if (value.isEmpty) {
+      return;
+    }
+    final combined = _tail + value;
+    _tail = combined.length <= 2
+        ? combined
+        : combined.substring(combined.length - 2);
+  }
+
+  /// A table is drawn as a table, so its cells are kept apart rather than
+  /// laid out as lines of text. The words still go into the chapter's text,
+  /// which is what keeps search, progress and selection working on it.
+  void _addTable(md.Element node) {
+    final rows = <List<String>>[];
+    var hasHeader = false;
+
+    void collect(md.Node node, {required bool inHead}) {
+      if (node is md.Element && node.tag == 'tr') {
+        final cells = <String>[];
+        for (final cell in node.children ?? const <md.Node>[]) {
+          if (cell is md.Element && (cell.tag == 'th' || cell.tag == 'td')) {
+            cells.add(_collapse(_inlineText(cell)));
+          }
+        }
+        if (cells.isEmpty) {
+          return;
+        }
+        rows.add(cells);
+        if (inHead && !hasHeader) {
+          hasHeader = true;
+        }
+        return;
+      }
+      if (node is md.Element) {
+        final isHeadSection = node.tag == 'thead';
+        for (final child in node.children ?? const <md.Node>[]) {
+          collect(child, inHead: inHead || isHeadSection);
+        }
+      }
+    }
+
+    for (final child in node.children ?? const <md.Node>[]) {
+      collect(child, inHead: false);
+    }
+    if (rows.isEmpty) {
+      return;
+    }
+
+    // A ragged row would break the grid; every row gets the same cells.
+    final columns = rows.fold<int>(
+      0,
+      (max, row) => row.length > max ? row.length : max,
+    );
+    final padded = <List<String>>[
+      for (final row in rows)
+        List<String>.unmodifiable(<String>[
+          for (var column = 0; column < columns; column += 1)
+            column < row.length ? row[column] : '',
+        ]),
+    ];
+
+    final text = padded.map((row) => row.join('   ')).join('\n');
+    if (text.trim().isEmpty) {
+      return;
+    }
+    final start = _appendText(text);
+    _blocks.add(
+      EpubTableBlock(
+        startOffset: start,
+        endOffset: _textLength,
+        text: text,
+        rows: List<List<String>>.unmodifiable(padded),
+        hasHeader: hasHeader,
       ),
     );
     _lastBlockStart = start;
@@ -393,6 +487,7 @@ final class _DocumentBuilder {
     }
     _text = StringBuffer();
     _textLength = 0;
+    _tail = '';
     _blocks = <EpubBlock>[];
     _chapterTitle = null;
     _openToc = null;
@@ -413,93 +508,14 @@ final class _DocumentBuilder {
     if (_textLength == 0) {
       return;
     }
-    final current = _text.toString();
-    if (current.endsWith('\n\n')) {
+    if (_tail.endsWith('\n\n')) {
       return;
     }
-    final endsWithNewline = current.endsWith('\n');
-    _text.write(endsWithNewline ? '\n' : '\n\n');
-    _textLength += endsWithNewline ? 1 : 2;
+    _write(_tail.endsWith('\n') ? '\n' : '\n\n');
   }
 
   String _codeText(md.Element pre) {
     return pre.textContent.replaceAll(RegExp(r'\s+$'), '');
-  }
-
-  /// A table drawn as aligned text.
-  ///
-  /// The reader has no table layout, but a table's meaning is its columns:
-  /// set in a monospace block, with the columns padded to their widest cell,
-  /// it stays readable. Prose that wrapped would destroy the alignment and
-  /// with it the meaning.
-  String _tableText(md.Element table) {
-    final rows = <List<String>>[];
-    var header = false;
-
-    void collect(md.Node node, {required bool isHeader}) {
-      if (node is md.Element && node.tag == 'tr') {
-        final cells = <String>[];
-        for (final cell in node.children ?? const <md.Node>[]) {
-          if (cell is md.Element && (cell.tag == 'th' || cell.tag == 'td')) {
-            cells.add(_collapse(_inlineText(cell)).replaceAll('\n', ' '));
-          }
-        }
-        if (cells.isNotEmpty) {
-          rows.add(cells);
-          if (isHeader && !header) {
-            header = true;
-          }
-        }
-        return;
-      }
-      if (node is md.Element) {
-        final isHeaderSection = node.tag == 'thead';
-        for (final child in node.children ?? const <md.Node>[]) {
-          collect(child, isHeader: isHeader || isHeaderSection);
-        }
-      }
-    }
-
-    for (final child in table.children ?? const <md.Node>[]) {
-      collect(child, isHeader: false);
-    }
-    if (rows.isEmpty) {
-      return '';
-    }
-
-    final columns = rows.fold<int>(
-      0,
-      (max, row) => row.length > max ? row.length : max,
-    );
-    final widths = List<int>.filled(columns, 1);
-    for (final row in rows) {
-      for (var i = 0; i < row.length; i += 1) {
-        final width = displayWidth(row[i]);
-        if (width > widths[i]) {
-          widths[i] = width;
-        }
-      }
-    }
-
-    final out = StringBuffer();
-    for (var i = 0; i < rows.length; i += 1) {
-      final row = rows[i];
-      final cells = <String>[];
-      for (var column = 0; column < columns; column += 1) {
-        final cell = column < row.length ? row[column] : '';
-        cells.add(cell + ' ' * (widths[column] - displayWidth(cell)));
-      }
-      out.writeln('| ${cells.join(' | ')} |');
-      if (header && i == 0) {
-        // A rule under the header, not the source's `|---|` row: the reader
-        // shows the table, not the markup that described it. It is exactly as
-        // wide as the rows so the columns stay framed.
-        final ruleWidth =
-            widths.fold<int>(0, (sum, width) => sum + width) + 3 * columns + 1;
-        out.writeln('-' * ruleWidth);
-      }
-    }
-    return out.toString().trimRight();
   }
 
   String _inlineText(md.Node node) {
@@ -528,30 +544,6 @@ final class _DocumentBuilder {
         return children.map(_inlineText).join();
     }
   }
-}
-
-/// Roughly how many terminal columns [text] takes.
-///
-/// A CJK glyph is twice as wide as a Latin one, and a table padded by code
-/// units would be visibly crooked in exactly the documents most likely to
-/// have Chinese in them.
-int displayWidth(String text) {
-  var width = 0;
-  for (final rune in text.runes) {
-    width += _isWide(rune) ? 2 : 1;
-  }
-  return width;
-}
-
-bool _isWide(int rune) {
-  return (rune >= 0x1100 && rune <= 0x115F) ||
-      (rune >= 0x2E80 && rune <= 0xA4CF) ||
-      (rune >= 0xAC00 && rune <= 0xD7A3) ||
-      (rune >= 0xF900 && rune <= 0xFAFF) ||
-      (rune >= 0xFE30 && rune <= 0xFE4F) ||
-      (rune >= 0xFF00 && rune <= 0xFF60) ||
-      (rune >= 0xFFE0 && rune <= 0xFFE6) ||
-      (rune >= 0x20000 && rune <= 0x3FFFD);
 }
 
 /// Collapses whitespace the way a paragraph is read.
@@ -611,4 +603,141 @@ final class _TocChild {
 
   final String title;
   final int offset;
+}
+
+/// Makes a table's delimiter row agree with its header row.
+///
+/// `package:markdown` decides a table's column count from the delimiter row
+/// (`| --- | --- |`) and then throws the whole table away when the header row
+/// does not have exactly that many cells. Hand-written notes break that rule
+/// constantly — a missing pipe, a cell added later — and losing the table is
+/// a far worse answer than trusting the header.
+///
+/// The delimiter row is markup, not content: it says how many columns there
+/// are and how they align, and nothing a reader ever sees. So it is rewritten
+/// to match the header, keeping each column's alignment. Fenced code is left
+/// alone: a code block that happens to contain pipes is code.
+String _repairTableDelimiters(String body) {
+  final lines = body.split('\n');
+  String? fence;
+  var changed = false;
+  for (var index = 1; index < lines.length; index += 1) {
+    final line = lines[index];
+    final fenceMatch = RegExp(r'^ {0,3}(`{3,}|~{3,})').firstMatch(line);
+    if (fenceMatch != null) {
+      final marker = fenceMatch.group(1)!;
+      if (fence == null) {
+        fence = marker[0];
+      } else if (marker[0] == fence) {
+        fence = null;
+      }
+      continue;
+    }
+    if (fence != null) {
+      continue;
+    }
+    final header = lines[index - 1];
+    if (!_looksLikeDelimiter(line) || !header.contains('|')) {
+      continue;
+    }
+    if (line.trimLeft() != line || header.trimLeft() != header) {
+      // Indented lines are code, or at least not a table at the top level.
+      continue;
+    }
+    final headerCells = _rowCells(header);
+    if (headerCells.isEmpty) {
+      continue;
+    }
+    final alignments = _delimiterAlignments(line);
+    if (alignments.length == headerCells.length) {
+      continue;
+    }
+    lines[index] = _delimiterRow(headerCells.length, alignments);
+    changed = true;
+  }
+  return changed ? lines.join('\n') : body;
+}
+
+/// Whether [line] is a table's delimiter row and nothing else.
+bool _looksLikeDelimiter(String line) {
+  final trimmed = line.trim();
+  if (trimmed.isEmpty || !trimmed.contains('-')) {
+    return false;
+  }
+  final cells = _rowCells(trimmed);
+  if (cells.isEmpty) {
+    return false;
+  }
+  for (final cell in cells) {
+    if (!RegExp(r'^:?-+:?$').hasMatch(cell)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// The alignment of each column in a delimiter row: `left`, `right`, `center`
+/// or `none`.
+List<String> _delimiterAlignments(String line) {
+  return [
+    for (final cell in _rowCells(line))
+      switch ((cell.startsWith(':'), cell.endsWith(':'))) {
+        (true, true) => 'center',
+        (true, false) => 'left',
+        (false, true) => 'right',
+        _ => 'none',
+      },
+  ];
+}
+
+String _delimiterRow(int columns, List<String> alignments) {
+  final cells = <String>[];
+  for (var column = 0; column < columns; column += 1) {
+    final alignment = column < alignments.length ? alignments[column] : 'none';
+    cells.add(switch (alignment) {
+      'left' => ':---',
+      'right' => '---:',
+      'center' => ':---:',
+      _ => '---',
+    });
+  }
+  return '| ${cells.join(' | ')} |';
+}
+
+/// Splits a table row into its cells the way `package:markdown` does: one
+/// leading and one trailing pipe frame the row rather than making empty
+/// cells, and `\|` is a literal pipe inside a cell.
+List<String> _rowCells(String line) {
+  final text = line.trim();
+  final cells = <String>[];
+  final buffer = StringBuffer();
+  var started = false;
+  var index = 0;
+  while (index < text.length) {
+    final char = text.codeUnitAt(index);
+    if (char == 0x5C && index + 1 < text.length) {
+      buffer.writeCharCode(text.codeUnitAt(index + 1));
+      started = true;
+      index += 2;
+      continue;
+    }
+    if (char == 0x7C) {
+      if (!started) {
+        started = true;
+        index += 1;
+        continue;
+      }
+      cells.add(buffer.toString().trim());
+      buffer.clear();
+      index += 1;
+      continue;
+    }
+    started = true;
+    buffer.writeCharCode(char);
+    index += 1;
+  }
+  if (buffer.isNotEmpty) {
+    cells.add(buffer.toString().trim());
+  }
+  return cells;
 }

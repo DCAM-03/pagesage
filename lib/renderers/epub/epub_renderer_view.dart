@@ -1787,6 +1787,8 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
             text: block.text,
             blockType: block.type,
             image: block.image,
+            tableRows: block.tableRows,
+            tableHasHeader: block.tableHasHeader,
           ),
         )
         .toList(growable: false);
@@ -1871,6 +1873,17 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
         child: _EpubImageView(settings: widget.settings, image: fragment.image),
       );
     }
+    final tableRows = fragment.tableRows;
+    if (tableRows != null) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
+        child: _EpubTableBlock(
+          settings: widget.settings,
+          rows: tableRows,
+          hasHeader: fragment.tableHasHeader,
+        ),
+      );
+    }
     final style = _styleForFragment(fragment, _baseStyle());
     // Use plain Text.rich so a parent SelectionArea can span multiple
     // paragraphs. SelectableText creates isolated selection regions.
@@ -1895,6 +1908,7 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
           child: text,
         ),
         EpubBlockType.image ||
+        EpubBlockType.table ||
         EpubBlockType.heading ||
         EpubBlockType.paragraph => text,
       },
@@ -1928,6 +1942,7 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       EpubBlockType.code => widget.settings.paragraphSpacing * 1.35,
       EpubBlockType.caption => widget.settings.paragraphSpacing * 0.6,
       EpubBlockType.image => widget.settings.paragraphSpacing * 1.2,
+      EpubBlockType.table => widget.settings.paragraphSpacing * 1.1,
       EpubBlockType.quote ||
       EpubBlockType.paragraph => widget.settings.paragraphSpacing,
     };
@@ -1953,6 +1968,7 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       EpubBlockType.quote => baseStyle.copyWith(
         color: baseStyle.color?.withValues(alpha: 0.86),
       ),
+      EpubBlockType.table => epubTableTextStyle(baseStyle),
       EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
     };
   }
@@ -2406,6 +2422,82 @@ final class _EpubQuoteBlock extends StatelessWidget {
         ),
       ),
       child: Padding(padding: const EdgeInsets.only(left: 12), child: child),
+    );
+  }
+}
+
+/// A table, drawn as a table.
+///
+/// Equal columns, ruled rows and a bold header: the point of a table is that
+/// the eye can follow a column down, which is exactly what a run of pipes
+/// cannot offer. Cells wrap rather than making the table wider than the page,
+/// because a reader who raises the font size must not be handed a table that
+/// runs off the edge. A table taller than a page is split between rows, and
+/// each part repeats its header — that happens in the paginator.
+final class _EpubTableBlock extends StatelessWidget {
+  const _EpubTableBlock({
+    required this.settings,
+    required this.rows,
+    required this.hasHeader,
+  });
+
+  final ReaderSettings settings;
+
+  /// The rows this page shows; the header row first, when there is one.
+  final List<List<String>> rows;
+
+  final bool hasHeader;
+
+  @override
+  Widget build(BuildContext context) {
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final foreground = settings.themePreset.foreground;
+    final family = ReaderFonts.renderFamilyFor(settings.fontFamily);
+    final style = epubTableTextStyle(
+      TextStyle(
+        color: foreground,
+        fontFamily: family.isEmpty ? null : family,
+        fontSize: settings.fontSize,
+        height: settings.lineHeight,
+        fontWeight: settings.themePreset.epubInk ? FontWeight.w400 : null,
+      ),
+    );
+    final rule = BorderSide(
+      color: foreground.withValues(alpha: 0.18),
+      width: epubTableBorderWidth,
+    );
+    return Semantics(
+      label: '表格',
+      child: Table(
+        defaultColumnWidth: const FlexColumnWidth(),
+        defaultVerticalAlignment: TableCellVerticalAlignment.top,
+        border: TableBorder(top: rule, bottom: rule, horizontalInside: rule),
+        children: [
+          for (var row = 0; row < rows.length; row += 1)
+            TableRow(
+              decoration: hasHeader && row == 0
+                  ? BoxDecoration(color: foreground.withValues(alpha: 0.06))
+                  : null,
+              children: [
+                for (final cell in rows[row])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: epubTableCellPaddingHorizontal,
+                      vertical: epubTableCellPaddingVertical,
+                    ),
+                    child: Text(
+                      cell,
+                      style: hasHeader && row == 0
+                          ? style.copyWith(fontWeight: FontWeight.w600)
+                          : style,
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
