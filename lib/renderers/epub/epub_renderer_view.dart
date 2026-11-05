@@ -2468,10 +2468,18 @@ final class _EpubTableBlock extends StatelessWidget {
       color: foreground.withValues(alpha: 0.18),
       width: epubTableBorderWidth,
     );
+    // Columns share the line the way their contents ask for it, so a column
+    // of sentences is not squeezed into the slot of a column of numbers. The
+    // paginator measures rows from the same shares.
+    final flex = epubTableColumnFlex(rows);
     return Semantics(
       label: '表格',
       child: Table(
         defaultColumnWidth: const FlexColumnWidth(),
+        columnWidths: <int, TableColumnWidth>{
+          for (var column = 0; column < flex.length; column += 1)
+            column: FlexColumnWidth(flex[column].toDouble()),
+        },
         defaultVerticalAlignment: TableCellVerticalAlignment.top,
         border: TableBorder(top: rule, bottom: rule, horizontalInside: rule),
         children: [

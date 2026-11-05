@@ -127,9 +127,9 @@ final class EpubPaginator {
           continue;
         }
         final tableStyle = metrics.styleFor(EpubBlockType.table);
-        final cellWidth = metrics.tableTextWidthFor(rows.length);
+        final cellWidths = metrics.tableColumnTextWidths(rows);
         final rowHeights = <double>[
-          for (final row in rows) _tableRowHeight(row, tableStyle, cellWidth),
+          for (final row in rows) _tableRowHeight(row, tableStyle, cellWidths),
         ];
         final hasHeader = block.tableHasHeader;
         final headerHeight = hasHeader ? rowHeights.first : 0.0;
@@ -397,18 +397,51 @@ double _measureText(String text, TextStyle style, double width) {
 }
 
 /// How tall one table row is: its tallest cell, plus the cell's own padding.
-double _tableRowHeight(List<String> cells, TextStyle style, double cellWidth) {
+double _tableRowHeight(
+  List<String> cells,
+  TextStyle style,
+  List<double> cellWidths,
+) {
   var height = 0.0;
-  for (final cell in cells) {
+  for (var column = 0; column < cells.length; column += 1) {
+    final cell = cells[column];
     if (cell.isEmpty) {
       continue;
     }
-    final cellHeight = _measureText(cell, style, cellWidth);
+    final width = column < cellWidths.length
+        ? cellWidths[column]
+        : cellWidths.isEmpty
+        ? 24.0
+        : cellWidths.last;
+    final cellHeight = _measureText(cell, style, width);
     if (cellHeight > height) {
       height = cellHeight;
     }
   }
   return height + epubTableCellPaddingVertical * 2;
+}
+
+/// The relative width each column deserves.
+///
+/// A column of prose should not be squeezed into the same slot as a column of
+/// numbers: notes are full of tables where one column holds a paragraph and
+/// the next holds `3`. Each column asks for as many shares as its longest cell
+/// takes, bounded so one verbose cell cannot push the others off the page.
+List<int> epubTableColumnFlex(List<List<String>> rows) {
+  if (rows.isEmpty) {
+    return const <int>[];
+  }
+  final columns = rows.first.length;
+  final longest = List<int>.filled(columns, 1);
+  for (final row in rows) {
+    for (var column = 0; column < columns && column < row.length; column++) {
+      final length = row[column].length;
+      if (length > longest[column]) {
+        longest[column] = length;
+      }
+    }
+  }
+  return <int>[for (final length in longest) length.clamp(4, 28)];
 }
 
 final class EpubPageMetrics {
@@ -505,15 +538,21 @@ final class EpubPageMetrics {
     return width < 120 ? contentWidth : width;
   }
 
-  /// How wide a table cell's text is: an equal share of the column, less the
-  /// cell's own padding.
-  double tableTextWidthFor(int columns) {
-    if (columns <= 0) {
-      return contentWidth;
+  /// How wide each table cell's text is: the column's share of the line, less
+  /// the cell's own padding.
+  List<double> tableColumnTextWidths(List<List<String>> rows) {
+    final flex = epubTableColumnFlex(rows);
+    if (flex.isEmpty) {
+      return const <double>[];
     }
-    final textWidth =
-        contentWidth / columns - epubTableCellPaddingHorizontal * 2;
-    return textWidth < 24 ? 24 : textWidth;
+    final total = flex.fold<int>(0, (sum, share) => sum + share);
+    final widths = <double>[];
+    for (final share in flex) {
+      final textWidth =
+          contentWidth * share / total - epubTableCellPaddingHorizontal * 2;
+      widths.add(textWidth < 24 ? 24 : textWidth);
+    }
+    return widths;
   }
 
   double chromeHeightFor(EpubBlockType type) {

@@ -42,6 +42,18 @@ void main() {
     }
   });
 
+  test('a table gives its wide column the wider share of the line', () {
+    final flex = epubTableColumnFlex([
+      ['数量', '说明'],
+      ['3', '这一列是整段说明文字，应该分到更多宽度。'],
+    ]);
+
+    expect(flex, hasLength(2));
+    expect(flex[1], greaterThan(flex[0]));
+    // Bounded: one verbose cell cannot push the other columns off the page.
+    expect(flex.every((share) => share >= 4 && share <= 28), isTrue);
+  });
+
   test('a table longer than a page is split by rows, header repeated', () {
     final rows = <List<String>>[
       ['名称', '说明'],
