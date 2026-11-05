@@ -198,6 +198,9 @@ final class _ChapterBuilder {
   /// The kind of paragraph being written.
   EpubBlockType _paragraphType = EpubBlockType.paragraph;
 
+  /// The level of the heading being written, 1 to 6, when it is one.
+  int? _paragraphLevel;
+
   void walk(XmlNode node) {
     for (final child in node.children) {
       if (child is XmlElement) {
@@ -235,7 +238,11 @@ final class _ChapterBuilder {
       return;
     }
     if (name == 'hr') {
+      // A rule is a block of its own: it carries no words, but it still has
+      // a place in the flow, so the next paragraph starts below it.
       _closeParagraph();
+      _writeSeparator();
+      _blocks.add(EpubDividerBlock(startOffset: _textLength));
       return;
     }
 
@@ -243,7 +250,7 @@ final class _ChapterBuilder {
 
     if (_isBlockLevel(name)) {
       _closeParagraph();
-      _openParagraph(_typeFor(name));
+      _openParagraph(_typeFor(name), level: _headingLevel(name));
       walk(element);
       _closeParagraph();
       return;
@@ -290,6 +297,14 @@ final class _ChapterBuilder {
     }.contains(name);
   }
 
+  /// 1 to 6 for an `<h1>`-`<h6>`, otherwise null.
+  int? _headingLevel(String name) {
+    if (name.length != 2 || name[0] != 'h') {
+      return null;
+    }
+    return int.tryParse(name.substring(1));
+  }
+
   EpubBlockType _typeFor(String name) {
     if (name == 'figcaption') {
       return EpubBlockType.caption;
@@ -311,12 +326,13 @@ final class _ChapterBuilder {
     _anchors.putIfAbsent(id, () => _textLength);
   }
 
-  void _openParagraph(EpubBlockType type) {
+  void _openParagraph(EpubBlockType type, {int? level}) {
     if (_inParagraph) {
       return;
     }
     _inParagraph = true;
     _paragraphType = type;
+    _paragraphLevel = type == EpubBlockType.heading ? level : null;
   }
 
   void _appendText(String value) {
@@ -351,6 +367,7 @@ final class _ChapterBuilder {
         endOffset: _textLength,
         text: body,
         type: _paragraphType,
+        headingLevel: _paragraphLevel,
       ),
     );
   }

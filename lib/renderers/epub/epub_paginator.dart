@@ -12,6 +12,46 @@ const double epubTableCellPaddingVertical = 4;
 /// The rule above, below and between a table's rows.
 const double epubTableBorderWidth = 1;
 
+/// How much larger than body text a heading of [level] is set.
+///
+/// Typora's hierarchy is mostly size: an h2 is clearly bigger than an h3, and
+/// the reader should see the document's shape without reading the words.
+double epubHeadingScale(int? level) {
+  return switch (level) {
+    1 => 1.62,
+    2 => 1.36,
+    3 => 1.16,
+    4 => 1.06,
+    5 => 1.0,
+    6 => 0.96,
+    _ => 1.22,
+  };
+}
+
+/// The space above a heading of [level], as a multiple of paragraph spacing.
+double epubHeadingSpacingFactor(int? level) {
+  return switch (level) {
+    1 => 1.95,
+    2 => 1.7,
+    3 => 1.5,
+    4 => 1.35,
+    5 => 1.25,
+    6 => 1.2,
+    _ => 1.55,
+  };
+}
+
+TextStyle epubHeadingTextStyle(TextStyle baseStyle, int? level) {
+  return baseStyle.copyWith(
+    fontSize: baseStyle.fontSize! * epubHeadingScale(level),
+    fontWeight: FontWeight.w700,
+    height: (baseStyle.height ?? 1.5) * 0.92,
+  );
+}
+
+/// How tall a rule drawn across the column is, with its breathing room.
+const double epubDividerHeight = 18;
+
 /// The style a table's cells are set in.
 ///
 /// A table puts more on a line than prose does, so its text is a touch
@@ -210,8 +250,9 @@ final class EpubPaginator {
       }
 
       // A picture is never split: it either fits on a page or it is
-      // scaled to fit one.
-      if (block.type == EpubBlockType.image) {
+      // scaled to fit one. A rule is a line, not a paragraph.
+      if (block.type == EpubBlockType.image ||
+          block.type == EpubBlockType.divider) {
         flush();
         addMeasured(measured);
         flush();
@@ -264,6 +305,22 @@ final class EpubPaginator {
   }
 
   _MeasuredFragment _measureBlock(EpubBlock block, EpubPageMetrics metrics) {
+    if (block.type == EpubBlockType.divider) {
+      return _MeasuredFragment(
+        fragment: EpubPageFragment(
+          chapterIndex: block.chapter.index,
+          href: block.chapter.href,
+          startOffset: block.startOffset,
+          endOffset: block.endOffset,
+          text: '',
+          blockType: EpubBlockType.divider,
+        ),
+        height:
+            epubDividerHeight +
+            metrics.chromeHeightFor(block.type) +
+            metrics.spacingFor(block.type, headingLevel: block.headingLevel),
+      );
+    }
     if (block.type == EpubBlockType.image) {
       return _MeasuredFragment(
         fragment: EpubPageFragment(
@@ -278,12 +335,12 @@ final class EpubPaginator {
         height:
             _imageHeight(block.image, metrics) +
             metrics.chromeHeightFor(block.type) +
-            metrics.spacingFor(block.type),
+            metrics.spacingFor(block.type, headingLevel: block.headingLevel),
       );
     }
     final height = _measureText(
       block.text,
-      metrics.styleFor(block.type),
+      metrics.styleFor(block.type, headingLevel: block.headingLevel),
       metrics.measureWidthFor(block.type),
     );
     return _MeasuredFragment(
@@ -294,11 +351,13 @@ final class EpubPaginator {
         endOffset: block.endOffset,
         text: block.text,
         blockType: block.type,
+        inlineRuns: block.inlineRuns,
+        headingLevel: block.headingLevel,
       ),
       height:
           height +
           metrics.chromeHeightFor(block.type) +
-          metrics.spacingFor(block.type),
+          metrics.spacingFor(block.type, headingLevel: block.headingLevel),
     );
   }
 
@@ -333,10 +392,16 @@ final class EpubPaginator {
     required bool isContinuation,
   }) {
     final text = block.text.substring(localStart);
-    final style = metrics.styleFor(block.type);
+    final style = metrics.styleFor(
+      block.type,
+      headingLevel: block.headingLevel,
+    );
     final width = metrics.measureWidthFor(block.type);
     final chromeHeight = metrics.chromeHeightFor(block.type);
-    final spacing = metrics.spacingFor(block.type);
+    final spacing = metrics.spacingFor(
+      block.type,
+      headingLevel: block.headingLevel,
+    );
     // Reserve spacing inside the budget so measuredHeight never exceeds maxHeight.
     final textMaxHeight = (maxHeight - chromeHeight - spacing)
         .clamp(metrics.minLineHeight, maxHeight)
@@ -376,6 +441,8 @@ final class EpubPaginator {
         text: fragmentText,
         blockType: block.type,
         isContinuation: isContinuation,
+        inlineRuns: block.inlineRuns,
+        headingLevel: block.headingLevel,
       ),
       height: height + chromeHeight + spacing,
     );
@@ -500,13 +567,9 @@ final class EpubPageMetrics {
 
   double get minLineHeight => baseStyle.fontSize! * (baseStyle.height ?? 1.4);
 
-  TextStyle styleFor(EpubBlockType type) {
+  TextStyle styleFor(EpubBlockType type, {int? headingLevel}) {
     return switch (type) {
-      EpubBlockType.heading => baseStyle.copyWith(
-        fontSize: baseStyle.fontSize! * 1.22,
-        fontWeight: FontWeight.w700,
-        height: (baseStyle.height ?? 1.5) * 0.92,
-      ),
+      EpubBlockType.heading => epubHeadingTextStyle(baseStyle, headingLevel),
       EpubBlockType.code => baseStyle.copyWith(
         fontFamily: 'monospace',
         fontSize: baseStyle.fontSize! * 0.92,
@@ -518,7 +581,9 @@ final class EpubPageMetrics {
       ),
       EpubBlockType.table => epubTableTextStyle(baseStyle),
       EpubBlockType.quote => baseStyle,
-      EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
+      EpubBlockType.divider ||
+      EpubBlockType.image ||
+      EpubBlockType.paragraph => baseStyle,
     };
   }
 
@@ -532,6 +597,7 @@ final class EpubPageMetrics {
       EpubBlockType.heading ||
       EpubBlockType.caption ||
       EpubBlockType.table ||
+      EpubBlockType.divider ||
       EpubBlockType.paragraph => 0.0,
     };
     final width = contentWidth - chrome;
@@ -563,17 +629,20 @@ final class EpubPageMetrics {
       EpubBlockType.heading ||
       EpubBlockType.caption ||
       EpubBlockType.table ||
+      EpubBlockType.divider ||
       EpubBlockType.paragraph => 0.0,
     };
   }
 
-  double spacingFor(EpubBlockType type) {
+  double spacingFor(EpubBlockType type, {int? headingLevel}) {
     return switch (type) {
-      EpubBlockType.heading => paragraphSpacing * 1.55,
+      EpubBlockType.heading =>
+        paragraphSpacing * epubHeadingSpacingFactor(headingLevel),
       EpubBlockType.code => paragraphSpacing * 1.35,
       EpubBlockType.caption => paragraphSpacing * 0.6,
       EpubBlockType.image => paragraphSpacing * 1.2,
       EpubBlockType.table => paragraphSpacing * 1.1,
+      EpubBlockType.divider => paragraphSpacing * 1.6,
       EpubBlockType.quote || EpubBlockType.paragraph => paragraphSpacing,
     };
   }
@@ -634,6 +703,8 @@ final class EpubPageFragment {
     this.image,
     this.tableRows,
     this.tableHasHeader = false,
+    this.inlineRuns = const <EpubInlineRun>[],
+    this.headingLevel,
   });
 
   final int chapterIndex;
@@ -656,6 +727,12 @@ final class EpubPageFragment {
 
   /// Whether the first row of [tableRows] is a header.
   final bool tableHasHeader;
+
+  /// The styled stretches of [text], in chapter offsets.
+  final List<EpubInlineRun> inlineRuns;
+
+  /// The heading level this fragment was written at, 1 to 6.
+  final int? headingLevel;
 }
 
 final class EpubBlock {
@@ -668,6 +745,8 @@ final class EpubBlock {
     this.image,
     this.tableRows,
     this.tableHasHeader = false,
+    this.inlineRuns = const <EpubInlineRun>[],
+    this.headingLevel,
   });
 
   final EpubChapter chapter;
@@ -684,6 +763,12 @@ final class EpubBlock {
 
   /// Whether the first row of [tableRows] is a header.
   final bool tableHasHeader;
+
+  /// The styled stretches of [text], in chapter offsets.
+  final List<EpubInlineRun> inlineRuns;
+
+  /// The heading level this block was written at, 1 to 6.
+  final int? headingLevel;
 }
 
 final class _MeasuredFragment {
@@ -710,6 +795,16 @@ List<EpubBlock> epubBlocks(EpubChapter chapter) {
             endOffset: block.endOffset,
             text: block.text,
             type: block.type,
+            inlineRuns: block.runs,
+            headingLevel: block.headingLevel,
+          )
+        else if (block is EpubDividerBlock)
+          EpubBlock(
+            chapter: chapter,
+            startOffset: block.startOffset,
+            endOffset: block.endOffset,
+            text: '',
+            type: EpubBlockType.divider,
           )
         else if (block is EpubTableBlock)
           EpubBlock(

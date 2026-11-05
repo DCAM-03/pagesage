@@ -209,4 +209,99 @@ void main() {
       expect(pages[i].totalPagesInChapter, pages.length);
     }
   });
+
+  test('a heading of a higher level is set larger but leaves less air', () {
+    const settings = ReaderSettings(
+      fontSize: 18,
+      lineHeight: 1.7,
+      paragraphSpacing: 12,
+      pageMargin: 24,
+    );
+    final metrics = EpubPageMetrics.from(
+      settings: settings,
+      viewport: const Size(420, 520),
+    );
+
+    final h2 = metrics.styleFor(EpubBlockType.heading, headingLevel: 2);
+    final h3 = metrics.styleFor(EpubBlockType.heading, headingLevel: 3);
+    expect(h2.fontSize, greaterThan(h3.fontSize!));
+    expect(
+      metrics.spacingFor(EpubBlockType.heading, headingLevel: 1),
+      greaterThan(metrics.spacingFor(EpubBlockType.heading, headingLevel: 3)),
+    );
+  });
+
+  test('inline styles travel with the text they belong to', () {
+    final text = '一段粗体的文字。';
+    final chapter = EpubChapter(
+      index: 0,
+      href: 'note.md',
+      title: '笔记',
+      text: text,
+      blocks: [
+        EpubTextBlock(
+          startOffset: 0,
+          endOffset: text.length,
+          text: text,
+          type: EpubBlockType.paragraph,
+          runs: const [
+            EpubInlineRun(start: 2, end: 4, style: EpubInlineStyle.strong),
+          ],
+        ),
+      ],
+    );
+
+    final pages = const EpubPaginator().paginate(
+      document: EpubDocument(chapters: [chapter]),
+      settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+      viewport: const Size(420, 520),
+    );
+
+    final fragment = pages.single.fragments.single;
+    expect(fragment.text, text);
+    expect(fragment.inlineRuns.single.style, EpubInlineStyle.strong);
+    // The run still points at the same words in chapter coordinates.
+    expect(text.substring(2, 4), '粗体');
+  });
+
+  test('a rule is a block of its own, between the paragraphs', () {
+    const first = '上面。';
+    const second = '下面。';
+    final text = '\$first\n\n\$second';
+    final chapter = EpubChapter(
+      index: 0,
+      href: 'note.md',
+      title: '笔记',
+      text: text,
+      blocks: [
+        const EpubTextBlock(
+          startOffset: 0,
+          endOffset: first.length,
+          text: first,
+          type: EpubBlockType.paragraph,
+        ),
+        const EpubDividerBlock(startOffset: first.length + 2),
+        EpubTextBlock(
+          startOffset: first.length + 4,
+          endOffset: text.length,
+          text: second,
+          type: EpubBlockType.paragraph,
+        ),
+      ],
+    );
+
+    final pages = const EpubPaginator().paginate(
+      document: EpubDocument(chapters: [chapter]),
+      settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+      viewport: const Size(420, 520),
+    );
+
+    final fragments = pages.expand((page) => page.fragments).toList();
+    final divider = fragments.indexWhere(
+      (fragment) => fragment.blockType == EpubBlockType.divider,
+    );
+    expect(divider, greaterThan(0));
+    expect(fragments[divider + 1].blockType, EpubBlockType.paragraph);
+    expect(pages.first.measuredHeight, greaterThan(epubDividerHeight));
+  });
 }

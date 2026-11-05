@@ -115,7 +115,54 @@ final class EpubChapter {
 }
 
 /// What a run of text in a chapter is.
-enum EpubBlockType { paragraph, heading, code, caption, image, quote, table }
+enum EpubBlockType {
+  paragraph,
+  heading,
+  code,
+  caption,
+  image,
+  quote,
+  table,
+  divider,
+}
+
+/// How part of a text block is set.
+///
+/// The text stays the book's text, character for character; this says only
+/// that some of it was written bold, italic, in code, struck through or as a
+/// link. Keeping it beside the text rather than inside it is what lets the
+/// same string serve search, progress and selection.
+enum EpubInlineStyle { strong, emphasis, code, strike, link }
+
+/// A stretch of a text block set in [style].
+///
+/// Offsets are chapter offsets, the same space as [EpubBlock.startOffset], so
+/// a fragment of a block can carry the runs that reach into it.
+final class EpubInlineRun {
+  const EpubInlineRun({
+    required this.start,
+    required this.end,
+    required this.style,
+  });
+
+  final int start;
+  final int end;
+  final EpubInlineStyle style;
+
+  @override
+  bool operator ==(Object other) {
+    return other is EpubInlineRun &&
+        other.start == start &&
+        other.end == end &&
+        other.style == style;
+  }
+
+  @override
+  int get hashCode => Object.hash(start, end, style);
+
+  @override
+  String toString() => 'EpubInlineRun($start-$end, ${style.name})';
+}
 
 /// One piece of a chapter's flow.
 sealed class EpubBlock {
@@ -132,6 +179,8 @@ final class EpubTextBlock extends EpubBlock {
     required this.endOffset,
     required this.text,
     required this.type,
+    this.runs = const <EpubInlineRun>[],
+    this.headingLevel,
   });
 
   @override
@@ -140,6 +189,13 @@ final class EpubTextBlock extends EpubBlock {
   final int endOffset;
   final String text;
   final EpubBlockType type;
+
+  /// The styled stretches of [text], in chapter offsets.
+  final List<EpubInlineRun> runs;
+
+  /// 1 to 6 when this block is a heading, so it can be set at its level's
+  /// size. A heading block without one is set like a book heading.
+  final int? headingLevel;
 }
 
 /// A table, kept as rows of cells.
@@ -171,6 +227,19 @@ final class EpubTableBlock extends EpubBlock {
   final bool hasHeader;
 
   int get columnCount => rows.isEmpty ? 0 : rows.first.length;
+}
+
+/// A horizontal rule.
+///
+/// Like a picture it occupies no characters: its position is the number where
+/// it sits between two runs of text.
+final class EpubDividerBlock extends EpubBlock {
+  const EpubDividerBlock({required this.startOffset});
+
+  @override
+  final int startOffset;
+  @override
+  int get endOffset => startOffset;
 }
 
 /// A picture.

@@ -121,6 +121,148 @@ void main() {
     expect(resized.width, isNotNull);
   });
 
+  testWidgets('bold, italic, code and links are set apart from the prose', (
+    tester,
+  ) async {
+    final document = await tester.runAsync(_loadInlineDocument);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubRendererView(
+            book: Book(
+              id: 'note-inline',
+              title: '样式',
+              format: BookFormat.markdown,
+              libraryFilePath: '/unused.md',
+              fileHash: 'hash',
+              fileSize: 1,
+              createdAt: 0,
+              updatedAt: 0,
+            ),
+            settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+            initialProgress: null,
+            annotations: const [],
+            onEvent: (_) {},
+            documentLoader: _StubLoader(document!),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final paragraph = tester
+        .widgetList<Text>(find.byType(Text))
+        .firstWhere(
+          (widget) => widget.textSpan?.toPlainText().contains('粗体') ?? false,
+        );
+    final spans = <TextSpan>[];
+    paragraph.textSpan!.visitChildren((span) {
+      if (span is TextSpan) {
+        spans.add(span);
+      }
+      return true;
+    });
+    TextSpan spanFor(String words) =>
+        spans.firstWhere((span) => span.text == words);
+
+    expect(spanFor('粗体').style?.fontWeight, FontWeight.w700);
+    expect(spanFor('斜体').style?.fontStyle, FontStyle.italic);
+    expect(spanFor('代码').style?.fontFamily, 'monospace');
+    expect(
+      spanFor('链接').style?.decoration,
+      TextDecoration.combine(const [TextDecoration.underline]),
+    );
+    // The plain words beside them are set in nothing special.
+    expect(spanFor('普通').style?.fontWeight, isNot(FontWeight.w700));
+    expect(spanFor('普通').style?.decoration, isNull);
+  });
+
+  testWidgets('a heading is set at the size its level asks for', (
+    tester,
+  ) async {
+    final document = await tester.runAsync(_loadHeadingDocument);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubRendererView(
+            book: Book(
+              id: 'note-heading',
+              title: '标题',
+              format: BookFormat.markdown,
+              libraryFilePath: '/unused.md',
+              fileHash: 'hash',
+              fileSize: 1,
+              createdAt: 0,
+              updatedAt: 0,
+            ),
+            settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+            initialProgress: null,
+            annotations: const [],
+            onEvent: (_) {},
+            documentLoader: _StubLoader(document!),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    double sizeOf(String words) {
+      final text = tester
+          .widgetList<Text>(find.byType(Text))
+          .firstWhere(
+            (widget) => widget.textSpan?.toPlainText().contains(words) ?? false,
+          );
+      return text.textSpan!.style!.fontSize!;
+    }
+
+    expect(sizeOf('二级'), greaterThan(sizeOf('三级')));
+    expect(sizeOf('三级'), greaterThan(sizeOf('正文')));
+  });
+
+  testWidgets('a horizontal rule is drawn as a rule, not as dashes', (
+    tester,
+  ) async {
+    final document = await tester.runAsync(_loadDividerDocument);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubRendererView(
+            book: Book(
+              id: 'note-divider',
+              title: '分隔线',
+              format: BookFormat.markdown,
+              libraryFilePath: '/unused.md',
+              fileHash: 'hash',
+              fileSize: 1,
+              createdAt: 0,
+              updatedAt: 0,
+            ),
+            settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+            initialProgress: null,
+            annotations: const [],
+            onEvent: (_) {},
+            documentLoader: _StubLoader(document!),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is SizedBox &&
+            widget.height == 1 &&
+            widget.width == double.infinity,
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('---'), findsNothing);
+  });
+
   testWidgets('a table is drawn as a table, not as lines of pipes', (
     tester,
   ) async {
@@ -158,6 +300,50 @@ void main() {
     expect(find.textContaining('|'), findsNothing);
     expect(find.textContaining('---'), findsNothing);
   });
+}
+
+/// A note with every inline style on one line.
+Future<EpubDocument> _loadInlineDocument() async {
+  final dir = await Directory.systemTemp.createTemp('pagesage_md_inline_ui_');
+  addTearDown(() => dir.delete(recursive: true));
+  await File('${dir.path}/note.md').writeAsString('''
+# 样式
+
+普通**粗体**和*斜体*还有`代码`与[链接](https://example.com)。
+''');
+  return const MarkdownDocumentLoader().load('${dir.path}/note.md');
+}
+
+/// A note with headings of two levels above a paragraph.
+Future<EpubDocument> _loadHeadingDocument() async {
+  final dir = await Directory.systemTemp.createTemp('pagesage_md_head_ui_');
+  addTearDown(() => dir.delete(recursive: true));
+  await File('${dir.path}/note.md').writeAsString('''
+# 一级
+
+## 二级
+
+### 三级
+
+正文。
+''');
+  return const MarkdownDocumentLoader().load('${dir.path}/note.md');
+}
+
+/// A note with a rule between two paragraphs.
+Future<EpubDocument> _loadDividerDocument() async {
+  final dir = await Directory.systemTemp.createTemp('pagesage_md_rule_ui_');
+  addTearDown(() => dir.delete(recursive: true));
+  await File('${dir.path}/note.md').writeAsString('''
+# 分隔线
+
+上面。
+
+---
+
+下面。
+''');
+  return const MarkdownDocumentLoader().load('${dir.path}/note.md');
 }
 
 /// A note with one table in it.

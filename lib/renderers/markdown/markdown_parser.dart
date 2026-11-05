@@ -216,8 +216,15 @@ final class _DocumentBuilder {
 
     switch (node.tag) {
       case 'h1':
-        _startChapter(node.textContent.trim());
-        _addText(node.textContent, EpubBlockType.heading);
+        final built = _draftFor(node).finish();
+        _startChapter(built.text.trim());
+        _addText(
+          built.text,
+          EpubBlockType.heading,
+          prepared: true,
+          runs: built.runs,
+          headingLevel: 1,
+        );
       case 'h2':
       case 'h3':
       case 'h4':
@@ -240,7 +247,9 @@ final class _DocumentBuilder {
       case 'table':
         _addTable(node);
       case 'hr':
-        return;
+        // A rule is a mark between two runs of text, and takes no characters
+        // of its own, so offsets either side stay what they were.
+        _blocks.add(EpubDividerBlock(startOffset: _textLength));
       case 'img':
         await _addImage(node);
       default:
@@ -252,11 +261,18 @@ final class _DocumentBuilder {
   }
 
   void _addHeading(md.Element node, EpubBlockType type) {
-    final text = node.textContent.trim();
+    final built = _draftFor(node).finish();
+    final text = built.text.trim();
     if (text.isEmpty) {
       return;
     }
-    _addText(text, EpubBlockType.heading);
+    _addText(
+      text,
+      EpubBlockType.heading,
+      prepared: true,
+      runs: built.runs,
+      headingLevel: int.tryParse(node.tag.substring(1)),
+    );
     // Level-two headings are the table of contents inside a chapter; deeper
     // ones are structure in the text, not places a reader jumps to.
     if (node.tag == 'h2') {
@@ -265,12 +281,15 @@ final class _DocumentBuilder {
   }
 
   Future<void> _addParagraph(md.Element node, EpubBlockType type) async {
-    final buffer = StringBuffer();
+    var draft = _InlineDraft();
 
     Future<void> flush() async {
-      final text = buffer.toString();
-      buffer.clear();
-      _addText(text, type);
+      final built = draft.finish();
+      draft = _InlineDraft();
+      if (built.text.trim().isEmpty) {
+        return;
+      }
+      _addText(built.text, type, prepared: true, runs: built.runs);
     }
 
     for (final child in node.children ?? const <md.Node>[]) {
@@ -279,7 +298,7 @@ final class _DocumentBuilder {
         await _addImage(child);
         continue;
       }
-      buffer.write(_inlineText(child));
+      draft.writeNode(child);
     }
     await flush();
   }
@@ -297,20 +316,33 @@ final class _DocumentBuilder {
       }
       final marker = ordered ? '${index++}.' : '•';
       final indent = '  ' * depth;
-      final buffer = StringBuffer();
+      final draft = _InlineDraft();
       final nested = <md.Element>[];
       for (final item in child.children ?? const <md.Node>[]) {
         if (item is md.Element && (item.tag == 'ul' || item.tag == 'ol')) {
           nested.add(item);
           continue;
         }
-        buffer.write(_inlineText(item));
+        draft.writeNode(item);
       }
-      final text = _collapse(buffer.toString());
-      if (text.isNotEmpty) {
+      final built = draft.finish();
+      if (built.text.isNotEmpty) {
         // The indent is built after collapsing: a nested item's own leading
         // spaces are structure, and the paragraph rule would eat them.
-        _addText('$indent$marker $text', type, prepared: true);
+        final prefix = '$indent$marker ';
+        _addText(
+          '$prefix${built.text}',
+          type,
+          prepared: true,
+          runs: [
+            for (final run in built.runs)
+              EpubInlineRun(
+                start: run.start + prefix.length,
+                end: run.end + prefix.length,
+                style: run.style,
+              ),
+          ],
+        );
       }
       for (final sub in nested) {
         await _addList(
@@ -338,6 +370,8 @@ final class _DocumentBuilder {
     EpubBlockType type, {
     bool code = false,
     bool prepared = false,
+    List<EpubInlineRun> runs = const <EpubInlineRun>[],
+    int? headingLevel,
   }) {
     final text = prepared
         ? raw.trimRight()
@@ -345,6 +379,9 @@ final class _DocumentBuilder {
     if (text.trim().isEmpty) {
       return;
     }
+    // A collapsed or prepared string can differ in length from its source, so
+    // runs only ever arrive with text that was already built to match them.
+    assert(prepared || runs.isEmpty, 'inline runs need prepared text');
     final start = _appendText(text);
     _blocks.add(
       EpubTextBlock(
@@ -352,9 +389,29 @@ final class _DocumentBuilder {
         endOffset: _textLength,
         text: text,
         type: type,
+        headingLevel: headingLevel,
+        runs: runs.isEmpty
+            ? const <EpubInlineRun>[]
+            : <EpubInlineRun>[
+                for (final run in runs)
+                  EpubInlineRun(
+                    start: run.start + start,
+                    end: run.end + start,
+                    style: run.style,
+                  ),
+              ],
       ),
     );
     _lastBlockStart = start;
+  }
+
+  /// The inline content of [node], with its styling runs.
+  _InlineDraft _draftFor(md.Element node) {
+    final draft = _InlineDraft();
+    for (final child in node.children ?? const <md.Node>[]) {
+      draft.writeNode(child);
+    }
+    return draft;
   }
 
   /// Writes [text] into the chapter after a separator, returning its start.
@@ -567,6 +624,111 @@ String _prepareCode(String raw) {
       .replaceAll('\r\n', '\n')
       .replaceAll('\r', '\n')
       .replaceAll(RegExp(r'\s+$'), '');
+}
+
+/// Builds a block's inline text together with the styling inside it.
+///
+/// Emphasis nests — bold inside italic, code inside a link — so a style is
+/// recorded as a run over a range rather than as a property of a word: the
+/// ranges overlap, and the renderer applies every run that reaches a
+/// character. Nothing is rewritten into the text itself, which is why search
+/// and progress keep working on the same characters the writer typed.
+final class _InlineDraft {
+  final StringBuffer _buffer = StringBuffer();
+  final List<EpubInlineRun> _runs = <EpubInlineRun>[];
+
+  void write(String text) {
+    if (text.isEmpty) {
+      return;
+    }
+    _buffer.write(text);
+  }
+
+  void writeNode(md.Node node) {
+    if (node is md.Text) {
+      // A newline in the source is a wrap in the file, not in the text.
+      write(_collapseInline(node.text));
+      return;
+    }
+    if (node is! md.Element) {
+      return;
+    }
+    switch (node.tag) {
+      case 'br':
+        write('\n');
+      case 'img':
+        // Pictures are placed by the block walker, not inline in text.
+        break;
+      case 'input':
+        if (node.attributes['type'] == 'checkbox') {
+          write(node.attributes['checked'] != null ? '☑ ' : '☐ ');
+        }
+      case 'strong':
+        _styled(node, EpubInlineStyle.strong);
+      case 'em':
+        _styled(node, EpubInlineStyle.emphasis);
+      case 'del':
+        _styled(node, EpubInlineStyle.strike);
+      case 'code':
+        _styled(node, EpubInlineStyle.code);
+      case 'a':
+        _styled(node, EpubInlineStyle.link);
+      default:
+        _writeChildren(node);
+    }
+  }
+
+  void _writeChildren(md.Element node) {
+    for (final child in node.children ?? const <md.Node>[]) {
+      writeNode(child);
+    }
+  }
+
+  void _styled(md.Element node, EpubInlineStyle style) {
+    final start = _buffer.length;
+    _writeChildren(node);
+    if (_buffer.length > start) {
+      _runs.add(EpubInlineRun(start: start, end: _buffer.length, style: style));
+    }
+  }
+
+  /// The block's text with its ends trimmed, and the runs moved to match.
+  _BuiltInline finish() {
+    final raw = _buffer.toString();
+    final text = raw.trim();
+    if (text.isEmpty) {
+      return const _BuiltInline(text: '', runs: <EpubInlineRun>[]);
+    }
+    final leading = raw.length - raw.trimLeft().length;
+    final runs = <EpubInlineRun>[];
+    for (final run in _runs) {
+      final start = (run.start - leading).clamp(0, text.length);
+      final end = (run.end - leading).clamp(0, text.length);
+      if (start < end) {
+        runs.add(EpubInlineRun(start: start, end: end, style: run.style));
+      }
+    }
+    return _BuiltInline(
+      text: text,
+      runs: List<EpubInlineRun>.unmodifiable(runs),
+    );
+  }
+}
+
+final class _BuiltInline {
+  const _BuiltInline({required this.text, required this.runs});
+
+  final String text;
+  final List<EpubInlineRun> runs;
+}
+
+/// Whitespace collapsed inside one piece of inline text, without trimming:
+/// the space between "a" and a bold "b" belongs to one of them.
+String _collapseInline(String raw) {
+  return raw
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\r', '\n')
+      .replaceAll(RegExp(r'[ \t\f\u00a0\n]+'), ' ');
 }
 
 /// A table-of-contents entry while its chapter is still open.

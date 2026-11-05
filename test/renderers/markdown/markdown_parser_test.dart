@@ -260,6 +260,76 @@ tags: [a, b]
     expect(document.chapters.single.text, contains('只有正文'));
   });
 
+  test('inline styles are kept as runs over the chapter\'s own text', () async {
+    final document = await parse(
+      '这一段有**粗体**、*斜体*、~~删除~~、`代码`和[链接](https://example.com)。',
+    );
+    final chapter = document.chapters.single;
+    final paragraph = chapter.blocks.whereType<EpubTextBlock>().firstWhere(
+      (block) => block.text.contains('粗体'),
+    );
+
+    String wordsIn(EpubInlineStyle style) {
+      final run = paragraph.runs.firstWhere((run) => run.style == style);
+      return chapter.text.substring(run.start, run.end);
+    }
+
+    expect(wordsIn(EpubInlineStyle.strong), '粗体');
+    expect(wordsIn(EpubInlineStyle.emphasis), '斜体');
+    expect(wordsIn(EpubInlineStyle.strike), '删除');
+    expect(wordsIn(EpubInlineStyle.code), '代码');
+    expect(wordsIn(EpubInlineStyle.link), '链接');
+    // The words themselves stay the book's words: no asterisks or backticks.
+    expect(paragraph.text, isNot(contains('*')));
+    expect(paragraph.text, isNot(contains('`')));
+  });
+
+  test('two styles over the same words compose', () async {
+    final document = await parse('***又粗又斜***');
+    final block = document.chapters.single.blocks
+        .whereType<EpubTextBlock>()
+        .first;
+    final styles = block.runs.map((run) => run.style).toSet();
+    expect(styles, contains(EpubInlineStyle.strong));
+    expect(styles, contains(EpubInlineStyle.emphasis));
+    // Both runs cover the same words rather than one replacing the other.
+    final strong = block.runs.firstWhere(
+      (run) => run.style == EpubInlineStyle.strong,
+    );
+    final emphasis = block.runs.firstWhere(
+      (run) => run.style == EpubInlineStyle.emphasis,
+    );
+    expect(strong.start, emphasis.start);
+    expect(strong.end, emphasis.end);
+  });
+
+  test('a heading remembers the level it was written at', () async {
+    final document = await parse('# 一\n\n## 二\n\n### 三\n\n正文。');
+    final levels = <int>[
+      for (final chapter in document.chapters)
+        for (final block in chapter.blocks.whereType<EpubTextBlock>())
+          if (block.headingLevel != null) block.headingLevel!,
+    ];
+    expect(levels, [1, 2, 3]);
+  });
+
+  test('a horizontal rule is a divider where it stands', () async {
+    final document = await parse('上面。\n\n---\n\n下面。');
+    final blocks = document.chapters.single.blocks;
+    final index = blocks.indexWhere((block) => block is EpubDividerBlock);
+    expect(index, greaterThan(0));
+    expect(blocks[index - 1], isA<EpubTextBlock>());
+    expect(blocks[index + 1], isA<EpubTextBlock>());
+    final divider = blocks[index] as EpubDividerBlock;
+    // Text blocks are separated by the blank line the next block writes, so
+    // a rule can share the offset the paragraph before it ends on.
+    expect(
+      divider.startOffset,
+      greaterThanOrEqualTo(blocks[index - 1].endOffset),
+    );
+    expect(divider.startOffset, lessThan(blocks[index + 1].startOffset));
+  });
+
   test('the loader refuses a file with nothing to read', () async {
     final file = File('${tempDir.path}/empty.md')..writeAsStringSync('');
     expect(

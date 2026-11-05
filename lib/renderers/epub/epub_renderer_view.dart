@@ -490,6 +490,8 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
           image: blocks[index].image,
           tableRows: blocks[index].tableRows,
           tableHasHeader: blocks[index].tableHasHeader,
+          inlineRuns: blocks[index].inlineRuns,
+          headingLevel: blocks[index].headingLevel,
         ),
     ];
   }
@@ -1986,6 +1988,8 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
             image: block.image,
             tableRows: block.tableRows,
             tableHasHeader: block.tableHasHeader,
+            inlineRuns: block.inlineRuns,
+            headingLevel: block.headingLevel,
           ),
         )
         .toList(growable: false);
@@ -2081,6 +2085,12 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
         ),
       );
     }
+    if (fragment.blockType == EpubBlockType.divider) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
+        child: _EpubDivider(settings: widget.settings),
+      );
+    }
     final style = _styleForFragment(fragment, _baseStyle());
     // Use plain Text.rich so a parent SelectionArea can span multiple
     // paragraphs. SelectableText creates isolated selection regions.
@@ -2106,6 +2116,7 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
         ),
         EpubBlockType.image ||
         EpubBlockType.table ||
+        EpubBlockType.divider ||
         EpubBlockType.heading ||
         EpubBlockType.paragraph => text,
       },
@@ -2135,11 +2146,14 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
 
   double _spacingForFragment(EpubPageFragment fragment) {
     return switch (fragment.blockType) {
-      EpubBlockType.heading => widget.settings.paragraphSpacing * 1.55,
+      EpubBlockType.heading =>
+        widget.settings.paragraphSpacing *
+            epubHeadingSpacingFactor(fragment.headingLevel),
       EpubBlockType.code => widget.settings.paragraphSpacing * 1.35,
       EpubBlockType.caption => widget.settings.paragraphSpacing * 0.6,
       EpubBlockType.image => widget.settings.paragraphSpacing * 1.2,
       EpubBlockType.table => widget.settings.paragraphSpacing * 1.1,
+      EpubBlockType.divider => widget.settings.paragraphSpacing * 1.1,
       EpubBlockType.quote ||
       EpubBlockType.paragraph => widget.settings.paragraphSpacing,
     };
@@ -2147,10 +2161,9 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
 
   TextStyle _styleForFragment(EpubPageFragment fragment, TextStyle baseStyle) {
     return switch (fragment.blockType) {
-      EpubBlockType.heading => baseStyle.copyWith(
-        fontSize: baseStyle.fontSize! * 1.22,
-        fontWeight: FontWeight.w700,
-        height: (baseStyle.height ?? 1.5) * 0.92,
+      EpubBlockType.heading => epubHeadingTextStyle(
+        baseStyle,
+        fragment.headingLevel,
       ),
       EpubBlockType.code => baseStyle.copyWith(
         fontFamily: 'monospace',
@@ -2166,7 +2179,9 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
         color: baseStyle.color?.withValues(alpha: 0.86),
       ),
       EpubBlockType.table => epubTableTextStyle(baseStyle),
-      EpubBlockType.image || EpubBlockType.paragraph => baseStyle,
+      EpubBlockType.image ||
+      EpubBlockType.divider ||
+      EpubBlockType.paragraph => baseStyle,
     };
   }
 
@@ -2176,6 +2191,7 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       widget.fragment.startOffset,
       widget.fragment.endOffset,
       widget.fragment.text,
+      Object.hashAll(widget.fragment.inlineRuns),
       widget.searchQuery,
       focus?.chapterIndex,
       focus?.start,
@@ -2217,7 +2233,9 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     final focusRange = widget.focusRange;
     final hasFocus =
         focusRange != null && focusRange.chapterIndex == chapter.index;
-    if (chapterAnnotations.isEmpty &&
+    final runs = _inlineRunsFor(fragment);
+    if (runs.isEmpty &&
+        chapterAnnotations.isEmpty &&
         (query == null || query.isEmpty) &&
         !hasFocus) {
       return [TextSpan(text: text)];
@@ -2366,61 +2384,190 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       }
       return a.isSearchHit ? 1 : -1;
     });
-    if (matches.isEmpty) {
+    // The leftmost match wins where two overlap, as it always has.
+    final kept = <_AnnotationMatch>[];
+    var cursor = 0;
+    for (final match in matches) {
+      if (match.start < cursor) {
+        continue;
+      }
+      kept.add(match);
+      cursor = match.end;
+    }
+    if (kept.isEmpty && runs.isEmpty) {
       return [TextSpan(text: text)];
     }
 
+    // A span is as long as the stretch where nothing changes: a run of styled
+    // text, an annotation, a search hit. Cutting at every boundary keeps the
+    // styles honest instead of letting one of them swallow the others.
+    final points = <int>{0, text.length};
+    for (final run in runs) {
+      points.add(run.start);
+      points.add(run.end);
+    }
+    for (final match in kept) {
+      points.add(match.start);
+      points.add(match.end);
+    }
+    final boundaries =
+        points.where((point) => point >= 0 && point <= text.length).toList()
+          ..sort();
+
     final spans = <InlineSpan>[];
-    var offset = 0;
-    for (final match in matches) {
-      if (match.start < offset) {
+    var matchIndex = 0;
+    for (var index = 0; index + 1 < boundaries.length; index += 1) {
+      final start = boundaries[index];
+      final end = boundaries[index + 1];
+      if (start >= end) {
         continue;
       }
-      if (match.start > offset) {
-        spans.add(TextSpan(text: text.substring(offset, match.start)));
+      while (matchIndex < kept.length && kept[matchIndex].end <= start) {
+        matchIndex += 1;
       }
-      if (match.isFocusHit) {
-        spans.add(
-          TextSpan(
-            text: text.substring(match.start, match.end),
-            style: baseStyle.copyWith(backgroundColor: _focusHitColor()),
-          ),
-        );
-      } else if (match.isSearchHit) {
-        spans.add(
-          TextSpan(
-            text: text.substring(match.start, match.end),
-            style: baseStyle.copyWith(backgroundColor: _searchHitColor()),
-          ),
-        );
-      } else {
-        final annotation = match.annotation!;
-        final recognizer = TapGestureRecognizer()
-          ..onTap = () => widget.onAnnotationSelected(annotation);
-        _inlineRecognizers.add(recognizer);
-        spans.add(
-          TextSpan(
-            text: text.substring(match.start, match.end),
-            recognizer: recognizer,
-            style: baseStyle.copyWith(
-              backgroundColor: annotation.style == AnnotationStyle.highlight
-                  ? _highlightColor(annotation.color)
-                  : null,
-              decoration: annotation.style == AnnotationStyle.underline
-                  ? TextDecoration.underline
-                  : TextDecoration.none,
-              decorationColor: _highlightColor(annotation.color),
-              decorationThickness: 2,
-            ),
-          ),
-        );
+      final match =
+          matchIndex < kept.length &&
+              kept[matchIndex].start <= start &&
+              kept[matchIndex].end >= end
+          ? kept[matchIndex]
+          : null;
+      var style = _styleWithInlineRuns(baseStyle, runs, start, end);
+      TapGestureRecognizer? recognizer;
+      if (match != null) {
+        if (match.isFocusHit) {
+          style = style.copyWith(backgroundColor: _focusHitColor());
+        } else if (match.isSearchHit) {
+          style = style.copyWith(backgroundColor: _searchHitColor());
+        } else {
+          final annotation = match.annotation!;
+          recognizer = TapGestureRecognizer()
+            ..onTap = () => widget.onAnnotationSelected(annotation);
+          _inlineRecognizers.add(recognizer);
+          style = style.copyWith(
+            backgroundColor: annotation.style == AnnotationStyle.highlight
+                ? _highlightColor(annotation.color)
+                : style.backgroundColor,
+            decoration: annotation.style == AnnotationStyle.underline
+                ? TextDecoration.combine([
+                    if (style.decoration != null &&
+                        style.decoration != TextDecoration.none)
+                      style.decoration!,
+                    TextDecoration.underline,
+                  ])
+                : style.decoration,
+            decorationColor: _highlightColor(annotation.color),
+            decorationThickness: 2,
+          );
+        }
       }
-      offset = match.end;
-    }
-    if (offset < text.length) {
-      spans.add(TextSpan(text: text.substring(offset)));
+      spans.add(
+        TextSpan(
+          text: text.substring(start, end),
+          recognizer: recognizer,
+          style: style,
+        ),
+      );
     }
     return spans;
+  }
+
+  /// The styled stretches of [fragment], in offsets local to its text.
+  ///
+  /// A block can be split across pages, so a run may reach past the fragment;
+  /// only the part that lands inside it is kept, cut to the fragment's ends.
+  List<EpubInlineRun> _inlineRunsFor(EpubPageFragment fragment) {
+    final runs = fragment.inlineRuns;
+    if (runs.isEmpty) {
+      return const <EpubInlineRun>[];
+    }
+    final start = fragment.startOffset;
+    final end = fragment.endOffset;
+    final local = <EpubInlineRun>[];
+    for (final run in runs) {
+      final runStart = run.start > start ? run.start : start;
+      final runEnd = run.end < end ? run.end : end;
+      if (runStart >= runEnd) {
+        continue;
+      }
+      local.add(
+        EpubInlineRun(
+          start: runStart - start,
+          end: runEnd - start,
+          style: run.style,
+        ),
+      );
+    }
+    return local;
+  }
+
+  /// [baseStyle] with every inline style reaching across this stretch applied.
+  ///
+  /// Two styles over the same words compose rather than fight: bold italic
+  /// stays both, and a strikethrough link keeps its underline.
+  TextStyle _styleWithInlineRuns(
+    TextStyle baseStyle,
+    List<EpubInlineRun> runs,
+    int start,
+    int end,
+  ) {
+    var strong = false;
+    var emphasis = false;
+    var code = false;
+    var strike = false;
+    var link = false;
+    for (final run in runs) {
+      if (run.start > start || run.end < end) {
+        continue;
+      }
+      switch (run.style) {
+        case EpubInlineStyle.strong:
+          strong = true;
+        case EpubInlineStyle.emphasis:
+          emphasis = true;
+        case EpubInlineStyle.code:
+          code = true;
+        case EpubInlineStyle.strike:
+          strike = true;
+        case EpubInlineStyle.link:
+          link = true;
+      }
+    }
+    if (!strong && !emphasis && !code && !strike && !link) {
+      return baseStyle;
+    }
+    final accent = widget.settings.themePreset.link;
+    var style = baseStyle;
+    if (strong) {
+      style = style.copyWith(fontWeight: FontWeight.w700);
+    }
+    if (emphasis) {
+      style = style.copyWith(fontStyle: FontStyle.italic);
+    }
+    if (code) {
+      style = style.copyWith(
+        fontFamily: 'monospace',
+        fontSize: style.fontSize! * 0.94,
+        backgroundColor: widget.settings.themePreset.foreground.withValues(
+          alpha: 0.06,
+        ),
+      );
+    }
+    if (link) {
+      style = style.copyWith(color: accent);
+    }
+    final decorations = <TextDecoration>[
+      if (style.decoration != null && style.decoration != TextDecoration.none)
+        style.decoration!,
+      if (strike) TextDecoration.lineThrough,
+      if (link) TextDecoration.underline,
+    ];
+    if (decorations.isNotEmpty) {
+      style = style.copyWith(
+        decoration: TextDecoration.combine(decorations),
+        decorationColor: link ? accent : style.color,
+      );
+    }
+    return style;
   }
 
   Color _highlightColor(AnnotationColor color) {
@@ -2638,6 +2785,35 @@ final class _EpubQuoteBlock extends StatelessWidget {
         ),
       ),
       child: Padding(padding: const EdgeInsets.only(left: 12), child: child),
+    );
+  }
+}
+
+/// A rule across the column.
+///
+/// It stands where a `---` does in the source: a breath between two passages,
+/// not a box around anything. Its height is fixed so the paginator and the
+/// view agree on how much room it takes.
+final class _EpubDivider extends StatelessWidget {
+  const _EpubDivider({required this.settings});
+
+  final ReaderSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: SizedBox(
+        height: epubDividerHeight,
+        child: Center(
+          child: SizedBox(
+            width: double.infinity,
+            height: 1,
+            child: ColoredBox(
+              color: settings.themePreset.foreground.withValues(alpha: 0.16),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
