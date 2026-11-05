@@ -105,7 +105,7 @@ Markdown 阅读（`docs/tasks/markdown-reading.md` / TASK-31，2026-11-05）：
 - 图片只读本地（相对路径 / `data:`），远程图片不加载并给出原因；front matter 只用来取标题，不进正文与索引。
 - `books.format` 写入 `md`，无 schema 变更；`ReadingLocator` 新增 `markdown` 类型，字段复用 EPUB 那组。
 - 验证：解析器/格式识别/widget 测试通过；真实 Linux 窗口集成测试打开 `.codex-run/samples/markdown-note.md`，排版见 `build/integration-captures/markdown-01-prose.png`（该图早于表头横线的调整）。
-- P2（目录当一本书）未开始，排在 P1 手测验收之后。
+- P2 完成：**一个 Markdown 文件夹即一本书**，原地读取、不复制（`AGENTS.md` 里唯一例外），`fileHash` 为目录路径指纹；每篇按单文件规则成章、`href` 记相对路径，隐藏目录与 `node_modules` 跳过，超过 2000 文件 / 64 MB 明确报错，读不了的文件在末尾「无法读取的文件」一章里列出。同一个加载器按路径类型分派，阅读器/搜索/AI/目录无需分支；删除书不会删目录（`Book.isFolderBook`）。入口是书库「文件夹」菜单的「把文件夹作为一本书」。
 
 AI 检索层（`docs/12-ai-retrieval-strategy.md`，2026-10-21）：
 - **选型已定**：全书 / 文件夹关联采用「结构感知的词法检索」（复用 FTS5 + EPUB 目录树 / PDF 大纲），**不采用 DCI，不引入向量 RAG**。

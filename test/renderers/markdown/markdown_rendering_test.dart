@@ -49,6 +49,47 @@ void main() {
     expect(find.textContaining('# '), findsNothing);
     expect(find.textContaining('**'), findsNothing);
   });
+
+  testWidgets('a folder of notes opens as one book', (tester) async {
+    final document = await tester.runAsync(_loadFolderDocument);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EpubRendererView(
+            book: Book(
+              id: 'notes-folder',
+              title: '笔记库',
+              format: BookFormat.markdown,
+              libraryFilePath: '/unused-folder',
+              fileHash: 'hash',
+              fileSize: 1,
+              createdAt: 0,
+              updatedAt: 0,
+            ),
+            settings: const ReaderSettings(fontSize: 18, lineHeight: 1.7),
+            initialProgress: null,
+            annotations: const [],
+            onEvent: (_) {},
+            documentLoader: _StubLoader(document!),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('第一篇的正文'), findsWidgets);
+    expect(find.textContaining('# '), findsNothing);
+  });
+}
+
+/// Builds a small folder of notes and opens it the way the app does.
+Future<EpubDocument> _loadFolderDocument() async {
+  final dir = await Directory.systemTemp.createTemp('pagesage_md_folder_ui_');
+  addTearDown(() => dir.delete(recursive: true));
+  await File('${dir.path}/a.md').writeAsString('# 第一篇\n\n第一篇的正文。');
+  await File('${dir.path}/b.md').writeAsString('# 第二篇\n\n第二篇的正文。');
+  return const MarkdownDocumentLoader().load(dir.path);
 }
 
 /// Builds a small Markdown book on disk and opens it the way the app does.

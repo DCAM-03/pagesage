@@ -75,7 +75,7 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
                 children: [
                   AppPageHeader(
                     title: '书库',
-                    subtitle: '本地 EPUB/PDF 阅读库',
+                    subtitle: '本地 EPUB/PDF/Markdown 阅读库',
                     showThemeMode: true,
                     actions: [
                       _LibraryHeaderActions(
@@ -88,7 +88,9 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
                         onGridSizeChanged: libraryController.setGridSize,
                         onSearch: () => context.go('/search'),
                         onImport: () => _pickAndImport(context),
-                        onImportFolder: () => _pickAndImportFolder(context),
+                        onScanFolder: () => _pickAndImportFolder(context),
+                        onImportFolderBook: () =>
+                            _pickAndImportFolderAsBook(context),
                       ),
                     ],
                   ),
@@ -96,7 +98,9 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
                     child: _EmptyLibrary(
                       isImporting: _isImporting,
                       onImport: () => _pickAndImport(context),
-                      onImportFolder: () => _pickAndImportFolder(context),
+                      onScanFolder: () => _pickAndImportFolder(context),
+                      onImportFolderBook: () =>
+                          _pickAndImportFolderAsBook(context),
                     ),
                   ),
                 ],
@@ -130,7 +134,9 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
                       onGridSizeChanged: libraryController.setGridSize,
                       onSearch: () => context.go('/search'),
                       onImport: () => _pickAndImport(context),
-                      onImportFolder: () => _pickAndImportFolder(context),
+                      onScanFolder: () => _pickAndImportFolder(context),
+                      onImportFolderBook: () =>
+                          _pickAndImportFolderAsBook(context),
                     ),
                   ],
                 ),
@@ -224,11 +230,28 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
           result.duplicates.isEmpty &&
           result.failures.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('该文件夹中没有找到 EPUB 或 PDF 文件')),
+          const SnackBar(content: Text('该文件夹中没有找到 EPUB、PDF 或 Markdown 文件')),
         );
         return;
       }
       await _handleImportBooksResult(context, result);
+    } finally {
+      if (mounted) {
+        setState(() => _isImporting = false);
+      }
+    }
+  }
+
+  Future<void> _pickAndImportFolderAsBook(BuildContext context) async {
+    setState(() => _isImporting = true);
+    try {
+      final result = await ref
+          .read(importUseCaseProvider)
+          .pickAndImportFolderAsBook();
+      if (!context.mounted) {
+        return;
+      }
+      await _handleImportResult(context, result);
     } finally {
       if (mounted) {
         setState(() => _isImporting = false);
@@ -257,14 +280,17 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
     if (_isImporting || !mounted) {
       return;
     }
+    // A dropped folder is not a book here: what it holds decides whether it
+    // is a shelf of books or one Markdown book, and guessing that from a drop
+    // would import the wrong thing. The folder menu asks instead.
     final validPaths = paths
         .where((path) => _isSupportedBookPath(path))
         .toList(growable: false);
     final invalidCount = paths.length - validPaths.length;
     if (validPaths.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('请拖入 EPUB 或 PDF 文件')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请拖入 EPUB、PDF 或 Markdown 文件')),
+      );
       return;
     }
     setState(() => _isImporting = true);
@@ -272,8 +298,7 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
       final successes = <Book>[];
       final duplicates = <ImportBookDuplicate>[];
       final failures = <ImportBookFailure>[
-        if (invalidCount > 0)
-          ImportBookFailure('已跳过 $invalidCount 个非 EPUB/PDF 文件'),
+        if (invalidCount > 0) ImportBookFailure('已跳过 $invalidCount 个不支持的文件'),
       ];
       for (final path in validPaths) {
         final result = await ref.read(importUseCaseProvider).importPath(path);
@@ -309,7 +334,10 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
 
   bool _isSupportedBookPath(String path) {
     final extension = p.extension(path).toLowerCase();
-    return extension == '.epub' || extension == '.pdf';
+    return extension == '.epub' ||
+        extension == '.pdf' ||
+        extension == '.md' ||
+        extension == '.markdown';
   }
 
   Future<void> _handleImportBooksResult(
@@ -419,10 +447,14 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
                   Navigator.of(context).pop(_DuplicateAction.cancel),
               child: const Text('取消'),
             ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(_DuplicateAction.copy),
-              child: const Text('仍然导入副本'),
-            ),
+            // A folder book is the folder itself, not a copy of it; a second
+            // copy would be the same notes under a second name.
+            if (!existingBook.isFolderBook)
+              TextButton(
+                onPressed: () =>
+                    Navigator.of(context).pop(_DuplicateAction.copy),
+                child: const Text('仍然导入副本'),
+              ),
             FilledButton(
               onPressed: () =>
                   Navigator.of(context).pop(_DuplicateAction.openExisting),
@@ -474,7 +506,8 @@ final class _LibraryHeaderActions extends StatelessWidget {
     required this.onGridSizeChanged,
     required this.onSearch,
     required this.onImport,
-    required this.onImportFolder,
+    required this.onScanFolder,
+    required this.onImportFolderBook,
   });
 
   final bool isImporting;
@@ -486,7 +519,8 @@ final class _LibraryHeaderActions extends StatelessWidget {
   final ValueChanged<LibraryGridSize> onGridSizeChanged;
   final VoidCallback onSearch;
   final VoidCallback onImport;
-  final VoidCallback onImportFolder;
+  final VoidCallback onScanFolder;
+  final VoidCallback onImportFolderBook;
 
   @override
   Widget build(BuildContext context) {
@@ -585,11 +619,11 @@ final class _LibraryHeaderActions extends StatelessWidget {
                   )
                 : const Icon(Icons.upload_file),
           ),
-          IconButton(
-            key: const ValueKey('header-import-folder-button'),
-            tooltip: '扫描文件夹',
-            onPressed: isImporting ? null : onImportFolder,
-            icon: const Icon(Icons.folder_open_outlined),
+          _FolderImportButton(
+            compact: true,
+            enabled: !isImporting,
+            onScanFolder: onScanFolder,
+            onOpenFolderAsBook: onImportFolderBook,
           ),
         ] else ...[
           FilledButton.icon(
@@ -603,14 +637,84 @@ final class _LibraryHeaderActions extends StatelessWidget {
                 : const Icon(Icons.upload_file, size: 18),
             label: const Text('导入'),
           ),
-          OutlinedButton.icon(
-            key: const ValueKey('header-import-folder-button'),
-            onPressed: isImporting ? null : onImportFolder,
-            icon: const Icon(Icons.folder_open_outlined, size: 18),
-            label: const Text('扫描文件夹'),
+          _FolderImportButton(
+            compact: false,
+            enabled: !isImporting,
+            onScanFolder: onScanFolder,
+            onOpenFolderAsBook: onImportFolderBook,
           ),
         ],
       ],
+    );
+  }
+}
+
+/// The folder button, and the two meanings a folder has in PageSage.
+///
+/// A folder can be a container of books to scan, or a book in itself when it
+/// is a Markdown folder. Both start with the same picker, so they share one
+/// button; the menu names the difference rather than making the reader guess
+/// which of two folder buttons does what.
+final class _FolderImportButton extends StatelessWidget {
+  const _FolderImportButton({
+    required this.compact,
+    required this.enabled,
+    required this.onScanFolder,
+    required this.onOpenFolderAsBook,
+    this.keyName = 'header-import-folder-button',
+  });
+
+  final bool compact;
+  final bool enabled;
+  final VoidCallback onScanFolder;
+  final VoidCallback onOpenFolderAsBook;
+  final String keyName;
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuAnchor(
+      alignmentOffset: const Offset(0, 4),
+      menuChildren: [
+        MenuItemButton(
+          key: const ValueKey('import-folder-scan-item'),
+          leadingIcon: const Icon(Icons.folder_open_outlined),
+          onPressed: enabled ? onScanFolder : null,
+          child: const Text('扫描文件夹（每个文件一本书）'),
+        ),
+        MenuItemButton(
+          key: const ValueKey('import-folder-as-book-item'),
+          leadingIcon: const Icon(Icons.menu_book_outlined),
+          onPressed: enabled ? onOpenFolderAsBook : null,
+          child: const Text('把文件夹作为一本书'),
+        ),
+      ],
+      builder: (context, controller, child) {
+        void toggle() {
+          if (controller.isOpen) {
+            controller.close();
+          } else {
+            controller.open();
+          }
+        }
+
+        if (compact) {
+          return IconButton(
+            key: ValueKey<String>(keyName),
+            tooltip: '导入文件夹',
+            onPressed: enabled ? toggle : null,
+            icon: const Icon(Icons.folder_open_outlined),
+          );
+        }
+        return OutlinedButton.icon(
+          key: ValueKey<String>(keyName),
+          onPressed: enabled ? toggle : null,
+          icon: const Icon(Icons.folder_open_outlined, size: 18),
+          label: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [Text('文件夹'), Icon(Icons.arrow_drop_down, size: 18)],
+          ),
+        );
+      },
     );
   }
 }
@@ -1868,12 +1972,14 @@ final class _EmptyLibrary extends StatelessWidget {
   const _EmptyLibrary({
     required this.isImporting,
     required this.onImport,
-    required this.onImportFolder,
+    required this.onScanFolder,
+    required this.onImportFolderBook,
   });
 
   final bool isImporting;
   final VoidCallback onImport;
-  final VoidCallback onImportFolder;
+  final VoidCallback onScanFolder;
+  final VoidCallback onImportFolderBook;
 
   @override
   Widget build(BuildContext context) {
@@ -1881,7 +1987,7 @@ final class _EmptyLibrary extends StatelessWidget {
       icon: Icons.local_library_outlined,
       illustrationAsset: 'assets/images/empty-states/empty-library.png',
       title: '还没有书籍',
-      message: '导入 EPUB/PDF/Markdown 文件，或扫描文件夹批量加入书库。',
+      message: '导入 EPUB/PDF/Markdown 文件，或把一个 Markdown 文件夹作为一本书来读。',
       action: FilledButton.icon(
         key: const ValueKey('import-books-button'),
         onPressed: isImporting ? null : onImport,
@@ -1893,11 +1999,12 @@ final class _EmptyLibrary extends StatelessWidget {
             : const Icon(Icons.upload_file),
         label: const Text('导入 EPUB/PDF/Markdown'),
       ),
-      secondaryAction: OutlinedButton.icon(
-        key: const ValueKey('import-folder-button'),
-        onPressed: isImporting ? null : onImportFolder,
-        icon: const Icon(Icons.folder_open_outlined),
-        label: const Text('扫描文件夹'),
+      secondaryAction: _FolderImportButton(
+        keyName: 'import-folder-button',
+        compact: false,
+        enabled: !isImporting,
+        onScanFolder: onScanFolder,
+        onOpenFolderAsBook: onImportFolderBook,
       ),
     );
   }
@@ -3175,13 +3282,14 @@ final class _BookActionsMenu extends ConsumerWidget {
           title: Text('重建索引'),
         ),
       ),
-      const PopupMenuItem(
-        value: _BookAction.refreshCover,
-        child: ListTile(
-          leading: Icon(Icons.image_search_outlined),
-          title: Text('重新提取封面'),
+      if (!item.book.isFolderBook)
+        const PopupMenuItem(
+          value: _BookAction.refreshCover,
+          child: ListTile(
+            leading: Icon(Icons.image_search_outlined),
+            title: Text('重新提取封面'),
+          ),
         ),
-      ),
       const PopupMenuDivider(),
       const PopupMenuItem(
         value: _BookAction.delete,
@@ -3285,13 +3393,15 @@ final class _BookActionsMenu extends ConsumerWidget {
             title: Text('重建索引'),
           ),
         ),
-        const PopupMenuItem(
-          value: _BookAction.refreshCover,
-          child: ListTile(
-            leading: Icon(Icons.image_search_outlined),
-            title: Text('重新提取封面'),
+        // A folder book has no cover of its own to extract.
+        if (!item.book.isFolderBook)
+          const PopupMenuItem(
+            value: _BookAction.refreshCover,
+            child: ListTile(
+              leading: Icon(Icons.image_search_outlined),
+              title: Text('重新提取封面'),
+            ),
           ),
-        ),
         const PopupMenuDivider(),
         const PopupMenuItem(
           value: _BookAction.delete,
@@ -3610,7 +3720,11 @@ final class _BookActionsMenu extends ConsumerWidget {
     if (confirmed != true) {
       return;
     }
-    await _deleteIfExists(book.libraryFilePath);
+    // A folder book is read where the writer keeps it. There is no copy to
+    // delete, and deleting the path would take their notes with it.
+    if (!book.isFolderBook) {
+      await _deleteIfExists(book.libraryFilePath);
+    }
     await _deleteIfExists(book.coverPath);
     await ref.read(searchRepositoryProvider).deleteByBook(book.id);
     await ref.read(bookRepositoryProvider).deleteBook(book.id);
@@ -3886,8 +4000,10 @@ final class _BookDetailsPanel extends ConsumerWidget {
               runSpacing: 8,
               children: [
                 _DetailChip(
-                  icon: Icons.description_outlined,
-                  label: formatBookFormat(book.format),
+                  icon: book.isFolderBook
+                      ? Icons.folder_outlined
+                      : Icons.description_outlined,
+                  label: bookFormatLabel(book),
                 ),
                 _DetailChip(
                   icon: Icons.trending_up,
@@ -4027,8 +4143,10 @@ final class _BookDetailsSheet extends StatelessWidget {
             runSpacing: 8,
             children: [
               _DetailChip(
-                icon: Icons.description_outlined,
-                label: formatBookFormat(book.format),
+                icon: book.isFolderBook
+                    ? Icons.folder_outlined
+                    : Icons.description_outlined,
+                label: bookFormatLabel(book),
               ),
               _DetailChip(
                 icon: Icons.trending_up,

@@ -160,6 +160,55 @@ void main() {
     expect(adapter.pickRequests.last.dialogTitle, '导入 EPUB/PDF/Markdown');
   });
 
+  testWidgets('the folder menu asks which kind of folder import it is', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final adapter = _RecordingFilePickerAdapter();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(_FakeBookRepository()),
+          settingsRepositoryProvider.overrideWithValue(
+            _FakeSettingsRepository(),
+          ),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            const _FakeBookmarkRepository(),
+          ),
+          filePickerServiceProvider.overrideWithValue(
+            FilePickerService(adapter: adapter),
+          ),
+        ],
+        child: const PageSageApp(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(find.byKey(const ValueKey('import-folder-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('扫描文件夹（每个文件一本书）'), findsOneWidget);
+    expect(find.text('把文件夹作为一本书'), findsOneWidget);
+
+    // Reading a folder as one book is its own action, not a scan.
+    await tester.tap(find.text('把文件夹作为一本书'));
+    await tester.pumpAndSettle();
+    expect(adapter.directoryRequests, hasLength(1));
+
+    await tester.tap(find.byKey(const ValueKey('import-folder-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('扫描文件夹（每个文件一本书）'));
+    await tester.pumpAndSettle();
+    expect(adapter.directoryRequests, hasLength(2));
+  });
+
   testWidgets(
     'navigating back to 书库 after an import does not reopen the picker',
     (tester) async {
@@ -2229,8 +2278,13 @@ final class _FakePdfPageImageSource implements PdfPageImageSource {
 }
 
 final class _RecordingFilePickerAdapter implements FilePickerAdapter {
+  final directoryRequests = <String>[];
+
   @override
-  Future<String?> pickDirectory({required String dialogTitle}) async => null;
+  Future<String?> pickDirectory({required String dialogTitle}) async {
+    directoryRequests.add(dialogTitle);
+    return null;
+  }
 
   final pickRequests = <FilePickerRequest>[];
 

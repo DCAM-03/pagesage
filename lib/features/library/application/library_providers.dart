@@ -137,3 +137,13 @@ String formatBookFormat(BookFormat format) {
     BookFormat.markdown => 'MD',
   };
 }
+
+/// The format a book shows, including that it is a folder rather than a file.
+///
+/// A folder book is read where the writer keeps it; saying so on the card is
+/// the only place the reader can see the difference between one note and a
+/// folder of notes.
+String bookFormatLabel(Book book) {
+  final label = formatBookFormat(book.format);
+  return book.isFolderBook ? '$label · 文件夹' : label;
+}

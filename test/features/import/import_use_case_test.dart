@@ -20,6 +20,7 @@ import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/domain/search/search_models.dart';
 import 'package:pagesage/features/import/application/import_result.dart';
 import 'package:pagesage/features/import/application/import_use_case.dart';
+import 'package:pagesage/renderers/markdown/markdown_document_loader.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
@@ -199,6 +200,51 @@ void main() {
       expect(reopenedPdfProgress?.pageNumber, 3);
     },
   );
+  test('a Markdown folder becomes one book, read where it lives', () async {
+    final folder = Directory(p.join(tempDir.path, 'notes'))
+      ..createSync(recursive: true);
+    Directory(p.join(folder.path, 'sub')).createSync();
+    Directory(p.join(folder.path, '.git')).createSync();
+    File(p.join(folder.path, 'a.md')).writeAsStringSync('# 甲\n\n第一篇。');
+    File(p.join(folder.path, 'sub', 'b.md')).writeAsStringSync('# 乙\n\n第二篇。');
+    File(p.join(folder.path, '.git', 'HEAD.md')).writeAsStringSync('# 不该读');
+
+    final databaseFile = File(p.join(tempDir.path, 'folder.sqlite'));
+    final database = AppDatabase.forTesting(NativeDatabase(databaseFile));
+    addTearDown(database.close);
+    final harness = _RealImportHarness(database);
+
+    final result = await harness.useCase.importFolderAsBook(
+      folder.path,
+      taskId: 'import-folder',
+    );
+    expect(result, isA<ImportBookSuccess>());
+    final book = (result as ImportBookSuccess).book;
+
+    expect(book.format, BookFormat.markdown);
+    expect(book.isFolderBook, isTrue);
+    expect(book.title, 'notes');
+    // Read in place: the shelf points at the folder, not at a copy of it.
+    expect(book.libraryFilePath, folder.path);
+    expect(book.originalFilePath, folder.path);
+    expect(Directory(book.libraryFilePath).existsSync(), isTrue);
+    expect(book.fileSize, greaterThan(0));
+
+    await _waitForTaskDone(harness.taskRepository, 'import-folder');
+    final document = await const MarkdownDocumentLoader().load(
+      book.libraryFilePath,
+    );
+    expect(document.chapters.map((chapter) => chapter.title), ['甲', '乙']);
+
+    // The same folder is the same book, not a second one.
+    final again = await harness.useCase.importFolderAsBook(folder.path);
+    expect(again, isA<ImportBookDuplicate>());
+    expect((again as ImportBookDuplicate).existingBook.id, book.id);
+
+    await harness.bookRepository.deleteBook(book.id);
+    expect(await harness.bookRepository.getBook(book.id), isNull);
+    expect(File(p.join(folder.path, 'a.md')).existsSync(), isTrue);
+  });
 }
 
 final class _RealImportHarness {

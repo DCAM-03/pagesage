@@ -9,7 +9,8 @@ Primary product constraints:
 - Local-first by default: books, notes, annotations, progress, and search data stay on device.
 - AI is user-triggered only. Never upload a whole book automatically, and always make the AI context range explicit.
 - The MVP is the reading loop: import EPUB/PDF, open, read, save progress, reopen at the saved location.
-- Markdown reading was added by explicit request (2026-11-05, `docs/tasks/markdown-reading.md`): a single `.md` file is a book in P1, a directory of files is a book in P2. Its reading, progress, and search behavior follow the EPUB path rather than getting its own reader.
+- Markdown reading was added by explicit request (2026-11-05, `docs/tasks/markdown-reading.md`): a single `.md` file is a book, and a folder of Markdown files is also one book (P2, read in place — see the exception below). Its reading, progress, and search behavior follow the EPUB path rather than getting its own reader.
+- Read-in-place exception: a folder book is a view over the folder the writer keeps, so it is **not** copied into the library. PageSage never writes to that folder, and removing the book never deletes it. Every other import still copies into the library directory.
 - MOBI/AZW support and Calibre `ebook-convert` integration are deferred. Do not implement or document them as part of the current milestone unless the roadmap is explicitly changed.
 - Do not add cloud sync, accounts, DRM bypass, scanned-PDF OCR, online bookstores, or collaboration features unless the roadmap is intentionally changed.
 
@@ -38,7 +39,7 @@ If implementation and docs disagree, pause and update the relevant doc or call o
 - Represent reading positions with stable locator objects: EPUB CFI plus href/chapter/progress fallback, PDF page plus scroll/zoom.
 - Use UUID string primary keys, Unix milliseconds for timestamps, and JSON text only for structured locator/settings values that need flexible schema.
 - Every released schema change needs a Drift migration. Do not clear user data as a migration shortcut.
-- File import must copy books into the app library directory. Removing a book from PageSage must not delete the user's original file path.
+- File import must copy books into the app library directory. Removing a book from PageSage must not delete the user's original file path. The one exception is a Markdown folder book, which is read in place (see Project Context) and is never copied or deleted.
 - Store API keys only in secure storage. Never log API keys, AI request payloads, selected book text, or full AI context by default.
 
 ## UI And UX Rules

@@ -1,3 +1,5 @@
+import 'package:path/path.dart' as p;
+
 enum BookFormat {
   epub('epub'),
   pdf('pdf'),
@@ -82,6 +84,21 @@ final class Book {
   final int createdAt;
   final int updatedAt;
   final int? lastOpenedAt;
+
+  /// Whether this book is a whole folder of Markdown read as one book.
+  ///
+  /// A folder book is read where the writer keeps it rather than copied into
+  /// the library, so its library path is a directory. A Markdown file always
+  /// ends in `.md` or `.markdown`, so the path answers the question without a
+  /// schema change — which matters because every existing query that returns
+  /// a book would otherwise have to stat the disk.
+  bool get isFolderBook {
+    if (format != BookFormat.markdown) {
+      return false;
+    }
+    final extension = p.extension(libraryFilePath).toLowerCase();
+    return extension != '.md' && extension != '.markdown';
+  }
 }
 
 final class NewBookDraft {

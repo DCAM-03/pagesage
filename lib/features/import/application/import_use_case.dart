@@ -12,6 +12,7 @@ import '../../../core/platform/file_picker_service.dart';
 import '../../../core/search/search_indexer.dart';
 import '../../../core/tasks/task_cancellation.dart';
 import '../../../core/tasks/task_models.dart';
+import '../../../renderers/markdown/markdown_folder.dart';
 import '../../../domain/books/book.dart';
 import '../../../domain/books/book_repository.dart';
 import 'import_result.dart';
@@ -122,6 +123,140 @@ final class ImportUseCase {
       );
     }
     return importFolder(folderPath, allowDuplicate: allowDuplicate);
+  }
+
+  /// Picks a folder and adds it to the shelf as one book.
+  Future<ImportBookResult> pickAndImportFolderAsBook({
+    bool allowDuplicate = false,
+  }) async {
+    final folderPath = await _filePickerService.pickFolder();
+    if (folderPath == null || folderPath.trim().isEmpty) {
+      return const ImportBookCancelled();
+    }
+    return importFolderAsBook(folderPath, allowDuplicate: allowDuplicate);
+  }
+
+  /// Adds a folder of Markdown files to the shelf as one book.
+  ///
+  /// The files are not copied into the library. A folder book is a view over
+  /// the folder the writer keeps — usually notes that are edited, and often
+  /// version-controlled — so copying it would freeze a stale duplicate and
+  /// PageSage would be reading yesterday's notes. Nothing here writes to the
+  /// folder, and removing the book never deletes it.
+  ///
+  /// Identity is the folder's own absolute path: importing the same folder
+  /// twice is a duplicate, and moving the folder is a different book.
+  Future<ImportBookResult> importFolderAsBook(
+    String folderPath, {
+    bool allowDuplicate = false,
+    String? taskId,
+  }) async {
+    PageSageTask? task;
+    TaskCancelToken? cancelToken;
+    String? createdBookId;
+
+    try {
+      final folder = Directory(folderPath);
+      if (!await folder.exists()) {
+        return const ImportBookFailure('文件夹不可访问');
+      }
+
+      task = await _taskRepository.saveTask(
+        id: taskId,
+        type: PageSageTaskType.importBook,
+        status: PageSageTaskStatus.running,
+        sourcePath: folderPath,
+        progress: 0.05,
+        message: '正在读取文件夹',
+      );
+      cancelToken = _taskCancellationRegistry.register(task.id);
+      cancelToken.throwIfCancelled();
+
+      final files = await discoverMarkdownFiles(folderPath);
+      cancelToken.throwIfCancelled();
+      if (files.isEmpty) {
+        await _failTask(task, '这个文件夹里没有 Markdown 文件');
+        return const ImportBookFailure('这个文件夹里没有 Markdown 文件');
+      }
+
+      final location = p.normalize(p.absolute(folderPath));
+      final folderHash = 'dir:${_hashService.sha256Text(location)}';
+      final existingBook = await _bookRepository.findByHash(folderHash);
+      if (existingBook != null && !allowDuplicate) {
+        await _taskRepository.updateStatus(
+          id: task.id,
+          status: PageSageTaskStatus.cancelled,
+          progress: 1,
+          message: '发现重复文件夹',
+        );
+        _taskCancellationRegistry.complete(task.id);
+        return ImportBookDuplicate(
+          existingBook: existingBook,
+          sourcePath: folderPath,
+        );
+      }
+
+      await _taskRepository.updateStatus(
+        id: task.id,
+        status: PageSageTaskStatus.running,
+        progress: 0.4,
+        targetPath: location,
+        message: '正在统计 Markdown 文件',
+      );
+      var fileSize = 0;
+      for (final file in files) {
+        cancelToken.throwIfCancelled();
+        fileSize += await file.length();
+      }
+
+      final bookId = const Uuid().v4();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final title = p.basename(location).trim();
+      final book = await _bookRepository.createImportedBook(
+        NewBookDraft(
+          id: bookId,
+          title: title.isEmpty ? '未命名文件夹' : title,
+          originalTitle: title.isEmpty ? null : title,
+          format: BookFormat.markdown,
+          originalFilePath: location,
+          libraryFilePath: location,
+          fileHash: folderHash,
+          fileSize: fileSize,
+          createdAt: now,
+        ),
+      );
+      createdBookId = book.id;
+      cancelToken.throwIfCancelled();
+      await _taskRepository.updateStatus(
+        id: task.id,
+        status: PageSageTaskStatus.indexing,
+        progress: 0.82,
+        bookId: book.id,
+        targetPath: book.libraryFilePath,
+        message: '正在建立索引',
+      );
+      unawaited(
+        _completeImportIndexing(
+          taskId: task.id,
+          book: book,
+          cancelToken: cancelToken,
+        ),
+      );
+      return ImportBookSuccess(book);
+    } on TaskCancelledException {
+      if (createdBookId != null) {
+        await _bookRepository.deleteBook(createdBookId);
+      }
+      await _cancelTask(task);
+      return const ImportBookCancelled();
+    } on Object catch (error) {
+      // The folder itself is never touched: there is no copy to clean up.
+      if (createdBookId != null) {
+        await _bookRepository.deleteBook(createdBookId);
+      }
+      await _failTask(task, '导入失败，请检查文件夹权限', error);
+      return ImportBookFailure('导入失败，请检查文件夹权限', details: error);
+    }
   }
 
   Future<ImportBooksResult> importFolder(
@@ -323,8 +458,8 @@ final class ImportUseCase {
       await _cancelTask(task);
       return const ImportBookCancelled();
     } on UnsupportedBookFormatException {
-      await _failTask(task, '当前版本仅支持 EPUB 和 PDF 文件');
-      return const ImportBookFailure('当前版本仅支持 EPUB 和 PDF 文件');
+      await _failTask(task, '当前版本仅支持 EPUB、PDF 和 Markdown 文件');
+      return const ImportBookFailure('当前版本仅支持 EPUB、PDF 和 Markdown 文件');
     } on FileSystemException catch (error) {
       if (copiedFile != null && await copiedFile.exists()) {
         await copiedFile.delete();

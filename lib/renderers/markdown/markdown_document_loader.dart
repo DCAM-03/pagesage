@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../common/book_document_loader.dart';
 import '../epub/epub_document.dart';
+import 'markdown_folder.dart';
 import 'markdown_parser.dart';
 
 /// A Markdown document that could not be opened.
@@ -17,7 +18,12 @@ final class MarkdownLoadException implements BookLoadException {
   String toString() => message;
 }
 
-/// Opens a Markdown file into the reader's document model.
+/// Opens a Markdown source into the reader's document model.
+///
+/// Both shapes of a Markdown book are here: a single file, and a folder of
+/// files read as one book. The distinction is the path's own — a directory is
+/// a folder book — so every caller that already asks for a Markdown document
+/// gets whichever one the path names without learning about a second loader.
 ///
 /// The book's title comes from the file itself when it says one (front matter)
 /// and from the file name when it does not. A file with nothing to read is an
@@ -28,11 +34,15 @@ final class MarkdownDocumentLoader implements BookDocumentLoader {
 
   @override
   Future<EpubDocument> load(String filePath) async {
-    final file = File(filePath);
-    if (!await file.exists()) {
-      throw const MarkdownLoadException('Markdown 文件不存在');
+    final type = await FileSystemEntity.type(filePath);
+    if (type == FileSystemEntityType.directory) {
+      return const MarkdownFolderLoader().load(filePath);
+    }
+    if (type == FileSystemEntityType.notFound) {
+      throw const MarkdownLoadException('找不到这个 Markdown 文件或文件夹');
     }
 
+    final file = File(filePath);
     final String raw;
     try {
       raw = await file.readAsString();
