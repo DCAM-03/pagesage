@@ -241,11 +241,17 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// menu for the same selection.
   String? _emittedSelectionKey;
 
-  /// Page index -> the painted box of that page, in global coordinates.
-  ///
-  /// Selection needs to turn a global pointer into (page, caret); the page
-  /// widgets report their box whenever they lay out.
-  final Map<int, Rect> _pageGlobalRects = {};
+  final Map<int, GlobalKey> _pageKeys = {};
+
+  Map<int, Rect> get _pageGlobalRects {
+    final rects = <int, Rect>{};
+    for (final entry in _pageKeys.entries) {
+      final box = entry.value.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
+      rects[entry.key] = box.localToGlobal(Offset.zero) & box.size;
+    }
+    return rects;
+  }
 
   /// The current selection as per-page ranges, keyed by page index.
   Map<int, ({int start, int end})> get _selectionRanges {
@@ -977,7 +983,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               onSelectionTap: _tapSelection,
               onSelectionHandleDrag: _dragSelectionHandle,
               onSelectionHandleDragEnd: _endSelectionHandleDrag,
-              onPaintedRect: _recordPaintedRect,
+              onPageMounted: _registerPage,
+              onPageUnmounted: _unregisterPage,
               onAnnotationSelected: widget.onEvent,
               onExternalLink: widget.onEvent,
               onJumpToPage: _jumpToPageFromLink,
@@ -1055,7 +1062,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   onSelectionTap: _tapSelection,
                   onSelectionHandleDrag: _dragSelectionHandle,
                   onSelectionHandleDragEnd: _endSelectionHandleDrag,
-                  onPaintedRect: _recordPaintedRect,
+                  onPageMounted: _registerPage,
+                  onPageUnmounted: _unregisterPage,
                   onAnnotationSelected: widget.onEvent,
                   onExternalLink: widget.onEvent,
                   onJumpToPage: _jumpToPageFromLink,
@@ -1182,17 +1190,13 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     // by up to 2pt) would otherwise map every pointer position through the
     // wrong scale, which offsets the caret by a growing amount down the page.
     final pageSize = renderer.displaySizeOf(pageIndex);
-    final painted = Size(
-      pageSize.width * _layoutScale,
-      pageSize.height * _layoutScale,
-    );
     return PdfSelectionController(
       renderer: renderer,
       pageIndex: pageIndex,
       box: renderer.pageAt(pageIndex).cropBox,
       rotation: renderer.pageAt(pageIndex).rotation,
-      paintSize: painted,
-      displayedSize: painted,
+      paintSize: rect.size,
+      displayedSize: rect.size,
       globalOrigin: rect.topLeft,
       pageSize: pageSize,
     );
@@ -1369,10 +1373,14 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     );
   }
 
-  /// Records a page's painted box, for caret mapping and handles.
-  void _recordPaintedRect(int pageIndex, Rect rect) {
-    if (_pageGlobalRects[pageIndex] == rect) return;
-    _pageGlobalRects[pageIndex] = rect;
+  void _registerPage(int pageIndex, GlobalKey key) {
+    _pageKeys[pageIndex] = key;
+  }
+
+  void _unregisterPage(int pageIndex, GlobalKey key) {
+    if (identical(_pageKeys[pageIndex], key)) {
+      _pageKeys.remove(pageIndex);
+    }
   }
 
   /// Whether [pageIndex] holds the start of the current selection.
@@ -1752,7 +1760,8 @@ final class _CanvasPage extends StatefulWidget {
     required this.onSelectionTap,
     required this.onSelectionHandleDrag,
     required this.onSelectionHandleDragEnd,
-    required this.onPaintedRect,
+    required this.onPageMounted,
+    required this.onPageUnmounted,
     required this.onAnnotationSelected,
     required this.onImageAreaSelected,
     required this.imageDragMode,
@@ -1833,8 +1842,8 @@ final class _CanvasPage extends StatefulWidget {
   /// A handle drag ended and the selection should be reported.
   final VoidCallback onSelectionHandleDragEnd;
 
-  /// Reports where this page painted itself, in global coordinates.
-  final void Function(int pageIndex, Rect rect) onPaintedRect;
+  final void Function(int pageIndex, GlobalKey key) onPageMounted;
+  final void Function(int pageIndex, GlobalKey key) onPageUnmounted;
   final ValueChanged<RendererAnnotationSelected> onAnnotationSelected;
 
   /// A box was drawn over an image with image-drag mode on.
@@ -1920,6 +1929,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
   @override
   void initState() {
     super.initState();
+    widget.onPageMounted(widget.pageIndex, _selectableKey);
     // The picture is recorded in page space (one unit per PDF point) and
     // replayed at whatever size the page is laid out at, so it never has to
     // be re-rendered for a zoom change. S1 therefore has no page cache to
@@ -1961,6 +1971,8 @@ final class _CanvasPageState extends State<_CanvasPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pageIndex != widget.pageIndex ||
         oldWidget.renderer != widget.renderer) {
+      oldWidget.onPageUnmounted(oldWidget.pageIndex, _selectableKey);
+      widget.onPageMounted(widget.pageIndex, _selectableKey);
       // A recycled list slot now shows another page: drop the request for the
       // page that left (its result would be thrown away anyway and only delay
       // the page arriving), release whatever it did produce, then start the
@@ -1990,6 +2002,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
 
   @override
   void dispose() {
+    widget.onPageUnmounted(widget.pageIndex, _selectableKey);
     // Tell the worker this page is no longer wanted: a queued record left
     // behind would make the isolate interpret a page nobody is looking at
     // while the page arriving under the viewport waits its turn.
@@ -2144,20 +2157,6 @@ final class _CanvasPageState extends State<_CanvasPage> {
                             child: CircularProgressIndicator(),
                           );
                         }
-                        // Report the painted box so the view can turn global
-                        // pointers into carets and draw selection handles
-                        // where the page actually is.
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          final box =
-                              _selectableKey.currentContext?.findRenderObject()
-                                  as RenderBox?;
-                          if (box == null || !box.hasSize) return;
-                          widget.onPaintedRect(
-                            widget.pageIndex,
-                            box.localToGlobal(Offset.zero) & box.size,
-                          );
-                        });
                         return _selectablePageFor(page);
                       },
                     ),
