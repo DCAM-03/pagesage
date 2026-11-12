@@ -84,6 +84,10 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
 
+      - name: Resolve PDF sample project dependencies
+        working-directory: poc_pdf_canvas
+        run: flutter pub get --enforce-lockfile
+
       - name: Check release scripts
         run: |
           shellcheck tool/build_linux_release.sh tool/package_linux.sh \
