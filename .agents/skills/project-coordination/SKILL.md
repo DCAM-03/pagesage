@@ -1,12 +1,11 @@
 ---
 name: project-coordination
-description: 协调 PageSage 多阶段功能、依赖顺序、任务边界及已授权的协作和交接。用于跨模块交付或发布准备；小型本地修复直接实施，不套用 IAM 多仓库会话流程。
+description: 协调 PageSage 多阶段功能、依赖顺序、任务边界及已授权的协作和交接。用于跨模块交付或发布准备；小型本地修复直接实施。
 ---
 
 # PageSage 交付协调
 
-本入口提取 IAM Java 工作流的任务连续性、契约闭环和证据复用方法，适配单仓库 Flutter 应用。
-执行时不依赖 IAM 目录、服务、脚本、hooks 或任务状态机。先读根 `AGENTS.md`。
+本入口面向单仓库 Flutter 应用，组织任务连续性、契约闭环和证据复用。先读根 `AGENTS.md`。
 
 ## 选择交付深度
 
@@ -25,7 +24,7 @@ description: 协调 PageSage 多阶段功能、依赖顺序、任务边界及已
 2. 在实际代码基础上写清预期行为、边界、硬依赖和关键反例。复用已有任务；必要时使用
    [任务模板](assets/task-template.md)，已有中文任务不必改格式。
 3. 产品代码使用 `pagesage-dart-engineering`；契约变更使用 `api-contract-sync`；实施前用
-   `validation-harness` 选定最小证明。不要要求先通过 IAM 的 `coordctl.py` 或自动提交文档。
+   `validation-harness` 选定最小证明，不另设任务状态机门禁或要求自动提交文档。
 4. 完成一个用户可观察的纵向切片，包括必要数据、应用逻辑、界面和验证。共享契约的硬依赖先解决。
 5. 检查实际差异和受影响入口。发生失败时保留证据，集中列出已能确认的缺陷，修复后仅补受影响验证。
 6. 应用变更按验证 skill 构建、安装并核对产物；指令/文档变更只验证相应结构与内容。
@@ -46,6 +45,5 @@ skill 本身不授权这些动作，也不要求每次重新征询已明确授�
 
 ## 参考边界
 
-仅使用本入口链接的 PageSage 模板和相应 skill。此目录遗留的 IAM references、assets、
-`workflow-policy.json`、`coordctl.py` 不作为 PageSage 门禁；不导入其自动模型路由、
-多仓库合并、生产部署或独立会话硬性要求。
+本入口只维护链接的 PageSage 任务模板；工程、契约和验证规范分别读取对应 skill，
+不复制另一套流程、脚本或策略配置。

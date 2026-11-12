@@ -1,46 +1,36 @@
-# Frontend Structural Validation
+# Flutter 界面结构验证
 
-Use this reference when a task adds, moves, removes, or conditionally shows a field, control, card, section, tab,
-menu, dialog, route entry, or repeated label.
+用于新增、移动、移除或按条件显示控件，以及桌面 / 移动布局调整。与
+[验证与安装](pagesage-validation.md) 配合使用，不把每项检查变成所有 UI 修改的必做门禁。
 
-## Freeze The Structure
+## 确认归属
 
-Before implementation, record:
+实施前从任务和实际 Widget 树确认：
 
-- exact route or page;
-- owning surface and production component;
-- target semantic container, card, section, tab, menu, or dialog;
-- relative order when order is part of the behavior;
-- responsive, permission, state, or feature-flag visibility conditions; and
-- sibling or alternative containers that must not contain the control.
+- 路由、页面和负责该行为的生产 Widget。
+- 控件所属的工具条、侧栏、标签页、菜单或对话框，以及有要求时的相对顺序。
+- 桌面 / 移动布局的断点、可见条件与状态；桌面面板与移动抽屉分别判断。
+- 不应出现该控件的相邻容器，防止复制控件冒充移动。
 
-Do not infer placement from the first component that can render the content. Preserve API, state, inheritance,
-validation, and mutation behavior unless the task explicitly changes them. A relocation must move the production
-component; test-only placement or duplication is not implementation.
+移动时保留原有 Provider 作用域、状态、校验、快捷键与持久化语义，除非任务明确要求改变。
+不能只把内容放到第一个能显示它的 Widget 中，也不能靠测试专用布局宣称生产结构已修改。
 
-## Prove Ownership
+## 证明结构与行为
 
-Use scoped accessible queries or equivalent semantic boundaries for the changed placement. Select applicable checks;
-do not add unrelated assertion categories to every UI change:
+按本次变化选择验证：
 
-1. a positive assertion inside the declared target container;
-2. a negative assertion that excluded sibling containers do not contain the control;
-3. an order assertion when relative position is contractual;
-4. preserved behavior and payload contract for any mutation path affected by the move; reuse applicable evidence; and
-5. one bounded browser scenario when the user-visible claim or existing harness requires runtime rendering evidence.
+1. 使用 `find.descendant(of: ...)` 等限定到目标容器的 Finder，证明控件实际属于该容器。
+2. 需要证明移动或互斥显示时，断言排除的相邻容器和另一布局中没有重复控件。
+3. 只有顺序属于要求时才断言相对位置；相关操作与保存行为用事件和状态断言验证。
+4. 涉及排版时使用代表尺寸与状态的离屏截图，检查截断、溢出、重叠和阅读区占用。
 
-Whole-page text presence, snapshot-only output, successful mutation responses, and global DOM scans do not prove
-structural ownership.
+全页 `find.text` 命中、只保存一张截图或仅确认无异常，不能单独证明控件归属与交互正确。
+离屏验证不能替代真实平台接线；可见窗口与桌面 `integration_test` 仍遵守根规范的授权范围。
 
-## Compare The Delivered Experience
+## 核对交付体验
 
-When the task promises design or interaction fidelity, identify the accepted reference and compare the actual rendered
-page with it: hierarchy, grouping, spacing, typography, labels, controls and the main interaction. Review the relevant
-role/scope and the states changed by the task, including success or failure feedback when applicable. Confirm that
-an apparent design mismatch is not an intentional accepted change before reporting it.
+按任务读取相关交互和设计约定，对照实际输出检查层级、分组、间距、文字、反馈与主操作。
+核对图标的语义标签、必要的 tooltip、键盘焦点、对比度及非颜色状态提示。
 
-Choose representative routes, states, languages and viewports by distinct behavior or layout; shared components do
-not require the full cross-product of every route, locale and size. An affected translation, breakpoint, permission or
-scope rule needs its own targeted check. Reuse applicable browser evidence; if no adequate evidence exists, run the
-smallest real scenario that resolves the gap. Record visual divergence from the accepted design as a requirement
-finding; personal taste beyond that reference is an optional improvement with benefit and cost.
+选择有不同布局或行为的代表页面、语言、状态与视口；不遍历无差异的组合。
+对发现项区分违反已接受要求的缺陷与个人偏好的可选改进，不借界面验证扩大产品范围。

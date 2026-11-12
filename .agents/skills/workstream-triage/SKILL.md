@@ -12,7 +12,7 @@ description: 核对 PageSage 当前任务、代码与验证证据，用于剩余
 3. 核对相关路径的 Git 差异、新文件、实现和测试。仓库常有未提交工作，不能只用 HEAD 判断是否实现。
 4. 只有判断合并、提交、安装或其他会话状态确有需要时，才检查对应 Git、产物或会话证据。
 
-不要求不存在的 `PROJECT_TASKS.md`、`PROJECT_PROFILE.md` 或 IAM 任务 schema。
+不要求不存在的 `PROJECT_TASKS.md`、`PROJECT_PROFILE.md` 或额外任务 schema。
 不为回答状态问题改写索引、重建任务表或重跑测试。
 
 ## 对齐状态

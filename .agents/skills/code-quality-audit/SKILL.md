@@ -29,6 +29,5 @@ description: 审查 PageSage Dart/Flutter 变更的错误处理、类型与空�
 
 ## 工具的边界
 
-主要证据为 `flutter analyze`、实际代码检查及命名行为测试。此目录遗留的
-`scripts/scan_code_quality.py` 不支持 Dart；不得以其零命中或 Java/Go profile 声称 Dart 审查通过。
+主要证据为 `flutter analyze`、实际代码检查及命名行为测试。
 搜索只用于定位候选，不能代替语义分析；本次不新增一套正则扫描门禁。

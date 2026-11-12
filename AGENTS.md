@@ -32,26 +32,26 @@ If implementation and docs disagree, pause and update the relevant doc or call o
 
 ## Project Skills
 
-当前仓库的工作流入口位于 `.agents/skills/`，按本次任务选择，不要求每次加载全部 skill：
+当前仓库的工作流正文统一维护在 `.agents/skills/`，按本次任务选择，不要求每次加载全部 skill。
+`.claude/skills/` 中的同名入口只链接共享正文，不维护第二套流程或资源副本。
 
 | 任务 | Skill |
 | --- | --- |
-| 剩余工作、下一步、继续既有任务 | `workstream-triage` |
-| Dart/Flutter 功能实现、修复、编码规范 | `pagesage-dart-engineering` |
-| 多阶段交付、任务拆分、已授权的协作和交接 | `project-coordination` |
-| 选择验证、证明修复、检查构建安装证据 | `validation-harness` |
-| 领域模型、Drift、定位、渲染事件或导出契约变更 | `api-contract-sync` |
-| Dart 变更质量审查、异步和资源泄漏检查 | `code-quality-audit` |
-| 目录、模块归属和依赖方向审查 | `review-code-organization` |
+| 剩余工作、下一步、继续既有任务 | [workstream-triage](.agents/skills/workstream-triage/SKILL.md) |
+| Dart/Flutter 功能实现、修复、编码规范 | [pagesage-dart-engineering](.agents/skills/pagesage-dart-engineering/SKILL.md) |
+| 多阶段交付、任务拆分、已授权的协作和交接 | [project-coordination](.agents/skills/project-coordination/SKILL.md) |
+| 选择验证、证明修复、检查构建安装证据 | [validation-harness](.agents/skills/validation-harness/SKILL.md) |
+| 领域模型、Drift、定位、渲染事件或导出契约变更 | [api-contract-sync](.agents/skills/api-contract-sync/SKILL.md) |
+| Dart 变更质量审查、异步和资源泄漏检查 | [code-quality-audit](.agents/skills/code-quality-audit/SKILL.md) |
+| 目录、模块归属和依赖方向审查 | [review-code-organization](.agents/skills/review-code-organization/SKILL.md) |
 
 先读取所选 skill 的 `SKILL.md`，再按其路由读取相关 reference。状态依据沿用
 `docs/implementation-status.md`、`docs/tasks/` 与相关设计文档；不要求创建
 `PROJECT_TASKS.md`、`PROJECT_PROFILE.md` 或迁移历史任务格式。
 
-现存 `iam-*` skill 及未被上述入口引用的 IAM 模板、脚本和 reference 保留作历史参考，
-不适用于 PageSage 的默认任务；不得据此套用 Java/Go、三角色会话、模型降档、
-自动提交或 IAM 专用机器门禁。本项目不因引入工作流而取得创建会话、委派、提交、
-推送、修改全局配置等额外授权。
+项目仅保留适用于 PageSage 的 skill、参考与任务模板，不放入其他项目的专属工作流。
+不强制三角色会话、模型降档或自动提交；本项目不因引入工作流而取得创建会话、
+委派、提交、推送、修改全局配置等额外授权。
 
 ## Architecture Rules
 

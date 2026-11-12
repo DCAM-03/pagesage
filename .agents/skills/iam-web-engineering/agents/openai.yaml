@@ -1,6 +1,0 @@
-interface:
-  display_name: "Axis IAM Web Engineering"
-  short_description: "Engineer secure Axis IAM React web changes"
-  default_prompt: "Use $iam-web-engineering to implement or review this Axis IAM change."
-policy:
-  allow_implicit_invocation: true

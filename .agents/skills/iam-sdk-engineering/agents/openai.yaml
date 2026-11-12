@@ -1,6 +1,0 @@
-interface:
-  display_name: "Axis IAM SDK Engineering"
-  short_description: "Engineer compatible Axis IAM SDK changes"
-  default_prompt: "Use $iam-sdk-engineering to implement or review this Axis IAM change."
-policy:
-  allow_implicit_invocation: true

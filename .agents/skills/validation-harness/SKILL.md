@@ -6,7 +6,8 @@ description: 为 PageSage Dart/Flutter 变更选择并执行可复现的最小�
 # PageSage 验证闭环
 
 先读当前任务、根 `AGENTS.md`；执行命令或选择验证层次时读
-[验证与安装](references/pagesage-validation.md)。不使用 Java/Go 测试命令、IAM hooks 或 `coordctl.py`。
+[验证与安装](references/pagesage-validation.md)。
+涉及控件归属、移动或响应式布局时再读 [界面结构验证](references/frontend-structure.md)。
 
 ## 修改前声明
 
