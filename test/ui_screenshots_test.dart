@@ -6,7 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pagesage/app/pagesage_app.dart';
+import 'package:pagesage/app/router.dart';
 import 'package:pagesage/app/theme/app_theme.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/core/platform/platform_providers.dart';
@@ -36,8 +36,24 @@ import 'package:pagesage/renderers/common/renderer_event.dart';
 
 const _updateScreenshots = bool.fromEnvironment('UPDATE_PAGESAGE_SCREENSHOTS');
 const _screenshotFilter = String.fromEnvironment('PAGESAGE_SCREENSHOT_FILTER');
+const _readmeScreenshots = bool.fromEnvironment('PAGESAGE_README_SCREENSHOTS');
 
 void main() {
+  test('screenshot themes provide CJK fonts for chip labels', () {
+    for (final theme in [
+      AppTheme.light(),
+      AppTheme.dark(),
+      AppTheme.highContrast(),
+    ]) {
+      final screenshotTheme = _withScreenshotFont(theme);
+      expect(screenshotTheme.chipTheme.labelStyle?.fontFamily, 'NotoSansCJK');
+      expect(
+        screenshotTheme.chipTheme.secondaryLabelStyle?.fontFamily,
+        'NotoSansCJK',
+      );
+    }
+  });
+
   testWidgets('captures controlled UI screenshots when explicitly requested', (
     tester,
   ) async {
@@ -159,8 +175,6 @@ void main() {
         settings: const ReaderSettings(appThemeMode: ThemeMode.dark),
       ),
     );
-    // The shell scenes mount the real `PageSageApp`, because the sidebar only
-    // exists inside `MainShell` — a bare page has no navigation to show.
     await _captureIfSelected(
       tester,
       fileName: 'shell-command-bar-theme.png',
@@ -429,10 +443,9 @@ Future<void> _loadScreenshotFonts() async {
   const cjk =
       '/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc';
   await load('NotoSansCJK', cjk);
-  // Whole-app scenes build their own `MaterialApp`, so they cannot go through
-  // `_withScreenshotFont`; registering the CJK family under the default name
-  // keeps their text from rendering as blank boxes.
   await load('Roboto', cjk);
+  await load('Segoe UI', cjk);
+  await load('Microsoft YaHei UI', cjk);
   // The runner is `<sdk>/bin/cache/artifacts/engine/<os>/flutter_tester`, so
   // the artifacts directory sits three levels up — no hard-coded SDK path.
   final artifacts = Directory(Platform.resolvedExecutable).parent.parent.parent;
@@ -447,6 +460,15 @@ ThemeData _withScreenshotFont(ThemeData theme) {
   return theme.copyWith(
     textTheme: theme.textTheme.apply(fontFamily: 'NotoSansCJK'),
     primaryTextTheme: theme.primaryTextTheme.apply(fontFamily: 'NotoSansCJK'),
+    chipTheme: theme.chipTheme.copyWith(
+      labelStyle: (theme.chipTheme.labelStyle ?? const TextStyle()).copyWith(
+        fontFamily: 'NotoSansCJK',
+      ),
+      secondaryLabelStyle:
+          (theme.chipTheme.secondaryLabelStyle ?? const TextStyle()).copyWith(
+            fontFamily: 'NotoSansCJK',
+          ),
+    ),
   );
 }
 
@@ -514,7 +536,22 @@ Future<void> _captureAppPage(
         child: RepaintBoundary(
           key: key,
           child: wholeApp
-              ? const PageSageApp()
+              ? Consumer(
+                  builder: (context, ref, child) => MaterialApp.router(
+                    title: 'PageSage',
+                    debugShowCheckedModeBanner: false,
+                    routerConfig: ref.watch(appRouterProvider),
+                    theme: _withScreenshotFont(AppTheme.light()),
+                    darkTheme: _withScreenshotFont(AppTheme.dark()),
+                    highContrastTheme: _withScreenshotFont(
+                      AppTheme.highContrast(),
+                    ),
+                    highContrastDarkTheme: _withScreenshotFont(
+                      AppTheme.highContrast(),
+                    ),
+                    themeMode: data.settings.appThemeMode,
+                  ),
+                )
               : MaterialApp(
                   title: 'PageSage',
                   debugShowCheckedModeBanner: false,
@@ -853,7 +890,9 @@ List<LibraryBook> _sampleBooks({
   return [
     _libraryBook(
       id: 'book-epub',
-      title: 'PageSage Standard EPUB With A Calm Modern Reading Workflow',
+      title: _readmeScreenshots
+          ? '本地优先：阅读与知识整理'
+          : 'PageSage Standard EPUB With A Calm Modern Reading Workflow',
       author: 'PageSage Local Samples',
       path: epubPath,
       format: BookFormat.epub,
@@ -863,22 +902,28 @@ List<LibraryBook> _sampleBooks({
     ),
     _libraryBook(
       id: 'book-pdf',
-      title: 'PDF Reader Layout Validation Sample With Long Title',
+      title: _readmeScreenshots
+          ? 'PDF 阅读与学习手册'
+          : 'PDF Reader Layout Validation Sample With Long Title',
       author: 'PageSage QA',
       path: pdfPath,
       format: BookFormat.pdf,
       progress: 0.72,
-      indexingStatus: 'running',
+      indexingStatus: _readmeScreenshots ? 'done' : 'running',
       categoryId: 'cat-research',
     ),
     _libraryBook(
       id: 'book-failed',
-      title: '一本标题非常非常长用于验证书库卡片列表和详情面板不会重叠的 EPUB 样本',
-      author: 'PageSage UX Team With A Very Long Author Name',
+      title: _readmeScreenshots
+          ? '高效阅读与笔记方法'
+          : '一本标题非常非常长用于验证书库卡片列表和详情面板不会重叠的 EPUB 样本',
+      author: _readmeScreenshots
+          ? 'PageSage 演示资料'
+          : 'PageSage UX Team With A Very Long Author Name',
       path: epubPath,
       format: BookFormat.epub,
       progress: 0.08,
-      indexingStatus: 'failed',
+      indexingStatus: _readmeScreenshots ? 'done' : 'failed',
     ),
   ];
 }
@@ -934,8 +979,12 @@ List<Note> _sampleNotes() {
       id: 'note-1',
       bookId: 'book-epub',
       title: '摘录：本地优先的阅读循环',
-      content: '这条笔记用于检查 Notebook 卡片、详情预览、标签和跳转原文入口。',
-      sourceText: 'PageSage 的本地验收样本用于检查导入、打开、目录跳转、书签、笔记和保存进度。',
+      content: _readmeScreenshots
+          ? '先留下触动自己的句子，再用自己的话解释，最后回到原文确认。'
+          : '这条笔记用于检查 Notebook 卡片、详情预览、标签和跳转原文入口。',
+      sourceText: _readmeScreenshots
+          ? 'PageSage 将阅读、批注与笔记连接起来，让每一次回顾都能找回上下文。'
+          : 'PageSage 的本地验收样本用于检查导入、打开、目录跳转、书签、笔记和保存进度。',
       locator: ReadingLocator.epub(
         href: 'OEBPS/chapter1.xhtml',
         chapterIndex: 0,
@@ -948,8 +997,10 @@ List<Note> _sampleNotes() {
     Note(
       id: 'note-2',
       bookId: 'book-pdf',
-      title: 'PDF 缩放和页码检查',
-      content: '验证页码跳转、缩放、适宽、搜索和保存进度。',
+      title: _readmeScreenshots ? '带着问题阅读' : 'PDF 缩放和页码检查',
+      content: _readmeScreenshots
+          ? '开始一章之前，写下最想解决的问题。\n\n读完后整理关键概念，保留页码与来源，方便下次继续。'
+          : '验证页码跳转、缩放、适宽、搜索和保存进度。',
       locator: ReadingLocator.pdf(page: 2, progress: 0.5),
       noteType: NoteType.text,
       createdAt: 3,
@@ -1513,8 +1564,12 @@ final class _FakeSearchRepository implements SearchRepository {
       SearchResult(
         id: 'search-content',
         type: SearchResultType.content,
-        title: 'PageSage Standard EPUB With A Calm Modern Reading Workflow',
-        snippet: '<mark>PageSage</mark> 的本地验收样本用于检查导入、打开、目录跳转、书签、笔记和保存进度。',
+        title: _readmeScreenshots
+            ? '本地优先：阅读与知识整理'
+            : 'PageSage Standard EPUB With A Calm Modern Reading Workflow',
+        snippet: _readmeScreenshots
+            ? '<mark>PageSage</mark> 将阅读、批注与笔记连接起来，让每一次回顾都能找回上下文。'
+            : '<mark>PageSage</mark> 的本地验收样本用于检查导入、打开、目录跳转、书签、笔记和保存进度。',
         bookId: 'book-epub',
         sourceId: 'book-epub:epub:0:0',
         locator: ReadingLocator.epub(

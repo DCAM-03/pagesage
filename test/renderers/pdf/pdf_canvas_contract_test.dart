@@ -329,7 +329,7 @@ void main() {
     test('a tap on a line selects a word from that line', () {
       // The defect this guards: `positionNear` scored by distance to a run's
       // bounding box, so a tap on the second line could resolve into the
-      // first. 匿名样本 01, 匿名样本 03 and 匿名样本 02 each lost 60-72%
+      // first. Three anonymous PDF samples each lost 60-72%
       // of a grid of points this way, by up to 412pt.
       final first = controller().selectionAtWord(const Offset(80, line1));
       final second = controller().selectionAtWord(const Offset(80, line2));

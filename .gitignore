@@ -60,9 +60,27 @@ migrate_working_dir/
 *.jks
 *.keystore
 secrets/
+.local-data/
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
+*.p12
+*.pfx
+id_rsa
+id_ed25519
 **/google-services.json
 **/GoogleService-Info.plist
 **/key.properties
+
+# Private evaluation inputs and unredacted reports
+tool/retrieval_eval/real_books*.json
+tool/retrieval_eval/epub_holdout*.json
 
 # Claude Code local overrides
 CLAUDE.local.md

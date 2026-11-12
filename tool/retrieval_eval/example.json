@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "description": "自编示例，仅说明评测输入格式，不对应历史真实书库或评测结果。",
+  "books": {
+    "example": {
+      "bookId": "example-book",
+      "title": "示例仓库说明"
+    }
+  },
+  "questions": [
+    {
+      "id": "example.shelves",
+      "book": "example",
+      "category": "single-evidence",
+      "query": "示例仓库有几个独立货架？",
+      "evidenceSets": [
+        ["示例仓库设有三个独立货架"]
+      ],
+      "notes": "将此句写入自己有权使用的测试文档，并将 bookId 替换为测试数据库中的 ID。"
+    },
+    {
+      "id": "example.no-answer",
+      "book": "example",
+      "category": "no-answer",
+      "query": "示例仓库的月球基地在哪？",
+      "evidenceSets": [],
+      "expectEmpty": true,
+      "notes": "示例正文不应包含该问题的答案。"
+    }
+  ]
+}

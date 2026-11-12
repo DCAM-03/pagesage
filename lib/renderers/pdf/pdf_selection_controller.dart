@@ -242,8 +242,8 @@ final class PdfSelectionController implements PdfTextSelectionSource {
   /// distance 0, so it wins over the run actually on that line, and a point
   /// just outside it can still snap to a line hundreds of points away — the
   /// measured cause of a selection that jumps between lines and of taps that
-  /// select a word from elsewhere on the page. On a uniform grid over 匿名样本 01,
-  /// 匿名样本 03, 匿名样本 02 and 线性代数, 3–27% of points resolved
+  /// select a word from elsewhere on the page. On a uniform grid over four
+  /// anonymous PDF samples, 3–27% of points resolved
   /// to a line other than the one under the pointer, by up to 729pt.
   ///
   /// The rule here follows `dart_pdf_editor`'s own viewer
@@ -333,8 +333,8 @@ final class PdfSelectionController implements PdfTextSelectionSource {
     // the pointer, but every run on that line ties at zero, so the first one
     // encountered wins: on a table-of-contents page, whose leader dots and
     // right-aligned page numbers are runs far apart on one line, that selects
-    // a word from the other end of the row. Measured over 匿名样本 02,
-    // 匿名样本 01 and 匿名样本 03, this tie was 22–91% of points. Near-ties
+    // a word from the other end of the row. Measured over three anonymous
+    // PDF samples, this tie was 22–91% of points. Near-ties
     // across the band are treated as the same line, so differing font sizes on
     // one line cannot reorder the choice.
     const tie = 1.0;

@@ -105,7 +105,7 @@ AI 侧栏打开后页面缩小并居中，手柄先加居中偏移再按页面�
 
 ```bash
 mkdir -p .codex-run/ocr-window
-pdfseparate -f 20 -l 22 '<HOME>/下载/匿名数学扫描样本.pdf' .codex-run/ocr-window/page-%d.pdf
+pdfseparate -f 20 -l 22 "${PAGESAGE_TEST_PDF:?请提供已授权的扫描样本路径}" .codex-run/ocr-window/page-%d.pdf
 pdfunite .codex-run/ocr-window/page-20.pdf .codex-run/ocr-window/page-21.pdf .codex-run/ocr-window/page-22.pdf .codex-run/ocr-window/scanned-three-pages.pdf
 flutter test integration_test/linux_reader_acceptance_test.dart -d linux --no-pub --reporter expanded
 ```

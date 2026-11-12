@@ -864,13 +864,10 @@ final class _Options {
     return _Options(
       datasetPath: value(
         '--dataset',
-        '.local-data/retrieval-eval/real_books_2026-11-08.json',
+        '.local-data/retrieval-eval/dataset.json',
       ),
       databasePath: value('--database', defaultDatabase),
-      outputPath: value(
-        '--output',
-        'docs/eval/retrieval-effect-2026-11-08-v1-audit.json',
-      ),
+      outputPath: value('--output', '.local-data/retrieval-eval/report.json'),
       limit: positiveInt('--limit', ContextRetriever.defaultLimit),
       iterations: positiveInt('--iterations', 5),
     );

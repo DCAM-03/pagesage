@@ -1177,7 +1177,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       );
     }
     // This page's own size, not the document's first page. A book whose
-    // front matter is a different size from its body (匿名样本 01's pages 1-65 are
+    // front matter is a different size from its body (CSAPP's pages 1-65 are
     // 489pt wide against 483pt for the rest; the samples' cover pages differ
     // by up to 2pt) would otherwise map every pointer position through the
     // wrong scale, which offsets the caret by a growing amount down the page.

@@ -321,7 +321,7 @@ void main() {
       );
 
       expect(references.single.text, startsWith(earlyFact));
-      expect(references.single.text, contains('示例仓库使用'));
+      expect(references.single.text, contains('示例仓库使用独立货架'));
     });
 
     test('uses a bounded parent window when the parent exceeds the budget', () {

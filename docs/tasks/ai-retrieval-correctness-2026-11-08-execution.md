@@ -1,5 +1,9 @@
 # AI 检索正确性修复执行记录
 
+> 隐私维护（2026-11-12）：本文保留历史实验结论，样本身份、原始题集和指纹已移除。
+> “恢复”“重放”“哈希匹配”均描述当时的验证，不能作为当前脱敏文件可独立复现的证明。
+> 下方命令为脱敏参考，需要另备本地私有输入；完整新报告只保存到 `.local-data/`。
+
 日期：2026-11-08
 
 状态：`IMPLEMENTED`
@@ -140,8 +144,8 @@ PDF 没有可重建窗口起点的字符偏移。仅在子文本于父文中唯�
 ```bash
 dart run tool/evaluate_chunking_effect.dart \
   --dataset .local-data/retrieval-eval/real_books_2026-11-08-v2-corrected.json \
-  --database <HOME>/.local/share/dev.pagesage.pagesage/PageSageData/database/pagesage.sqlite \
-  --output docs/eval/retrieval-effect-2026-11-08-v2-supervised.json
+  --database "${PAGESAGE_EVAL_DATABASE:?请提供私有测试数据库路径}" \
+  --output .local-data/retrieval-eval/retrieval-effect-2026-11-08-v2-supervised.json
 ```
 
 | 指标 | 旧基线 | 父子块候选 |
@@ -179,7 +183,7 @@ dart run tool/evaluate_chunking_effect.dart \
 dart run tool/evaluate_chunking_effect.dart \
   --dataset .local-data/retrieval-eval/epub_holdout_2026-11-08.json \
   --database /tmp/pagesage_epub_holdout_20261108.sqlite \
-  --output docs/eval/retrieval-epub-holdout-2026-11-08-supervised-audit.json
+  --output .local-data/retrieval-eval/retrieval-epub-holdout-2026-11-08-supervised-audit.json
 ```
 
 临时 SQLite 仅供评测器读取真实 EPUB 的书籍元数据行；其中的 UUID 是评测本地 ID，不是 PageSage 用户数据库或产品数据。
@@ -206,8 +210,8 @@ dart run tool/evaluate_chunking_effect.dart \
 ```bash
 dart run tool/evaluate_chunking_effect.dart \
   --dataset .local-data/retrieval-eval/real_books_2026-11-08.json \
-  --database <HOME>/.local/share/dev.pagesage.pagesage/PageSageData/database/pagesage.sqlite \
-  --output docs/eval/retrieval-effect-2026-11-08-v1-supervised-audit.json
+  --database "${PAGESAGE_EVAL_DATABASE:?请提供私有测试数据库路径}" \
+  --output .local-data/retrieval-eval/retrieval-effect-2026-11-08-v1-supervised-audit.json
 ```
 
 结果：完整覆盖 13/33 → 17/33，可答题 13/30 → 17/30，召回 54.7% → 60.8%，4 胜/0 负/29 平，平均 payload 2,011 → 2,255，可测源跨度引用 0/70（未测量）→ 66/66（100%），候选重复率 0.0%。该结果只用于审计恢复后的历史数据集，不是新留出或调参依据。

@@ -15,21 +15,27 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-final _cjkCandidates = [
-  '${Platform.environment['HOME'] ?? ''}/.local/share/fonts/SarasaMonoSC/SarasaMonoSC-Regular.ttf',
-  '${Platform.environment['HOME'] ?? ''}/.local/share/fonts/MapleMono-CN/MapleMono-CN-Regular.ttf',
-  File.fromUri(Platform.script.resolve('../../assets/fonts/LXGWWenKaiLite-Regular.ttf')).path,
-  '/usr/share/fonts/google-noto-cjk-vf-fonts/NotoSansCJK-VF.ttc',
-];
-
 Future<void> main() async {
-  final fontPath = _cjkCandidates.firstWhere(
-    (p) => File(p).existsSync(),
+  final home = Platform.environment['HOME'];
+  final configuredFont = Platform.environment['PAGESAGE_CJK_FONT'];
+  final cjkCandidates = [
+    if (configuredFont != null && configuredFont.isNotEmpty) configuredFont,
+    File.fromUri(
+      Platform.script.resolve('../../assets/fonts/LXGWWenKaiLite-Regular.ttf'),
+    ).path,
+    if (home != null && home.isNotEmpty) ...[
+      '$home/.local/share/fonts/SarasaMonoSC/SarasaMonoSC-Regular.ttf',
+      '$home/.local/share/fonts/MapleMono-CN/MapleMono-CN-Regular.ttf',
+    ],
+    '/usr/share/fonts/google-noto-cjk-vf-fonts/NotoSansCJK-VF.ttc',
+  ];
+  final fontPath = cjkCandidates.firstWhere(
+    (candidate) => File(candidate).existsSync(),
     orElse: () => '',
   );
   if (fontPath.isEmpty) {
     stderr.writeln(
-      'no CJK font found; tried:\n  ${_cjkCandidates.join('\n  ')}',
+      'no CJK font found; tried:\n  ${cjkCandidates.join('\n  ')}',
     );
     exit(1);
   }

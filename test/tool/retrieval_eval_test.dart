@@ -1,9 +1,26 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/domain/ai/ai_context_reference.dart';
 
 import '../../tool/retrieval_eval/evaluation_core.dart';
 
 void main() {
+  test('public example uses the evaluation input contract', () {
+    final dataset = RetrievalEvalDataset.fromJsonString(
+      File('tool/retrieval_eval/example.json').readAsStringSync(),
+    );
+
+    expect(dataset.books.keys, ['example']);
+    expect(dataset.books['example']!.bookId, 'example-book');
+    expect(dataset.questions, hasLength(2));
+    expect(dataset.questions.first.evidenceSets, [
+      ['示例仓库设有三个独立货架'],
+    ]);
+    expect(dataset.questions.last.expectEmpty, isTrue);
+    expect(dataset.questions.last.evidenceSets, isEmpty);
+  });
+
   group('evidence scoring', () {
     test('requires every snippet in one evidence set', () {
       final question = _question(

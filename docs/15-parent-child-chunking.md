@@ -1,5 +1,11 @@
 # 结构感知的父子分块与上下文扩展算法
 
+> 隐私维护（2026-11-12）：下文真实样本已匿名化，三份原始题集已移出源码；
+> 历史报告只保留数值与匿名逐题指标。原始题目、来源标题及文件指纹不再公开，
+> 因此这些统计无法仅凭当前仓库重放。命令中的私有输入需要自行准备，
+> 新运行的完整报告应保存到被 Git 忽略的 `.local-data/`，参见
+> [评测输入说明](../tool/retrieval_eval/README.md)。
+
 > 日期：2026-11-08
 > 状态：第一版已实现；正确性修复、监督复核补修、34 题 v2 离线诊断和 10 题 EPUB 审计重放已完成
 > Implementation State：`IMPLEMENTED`
@@ -262,7 +268,7 @@ Markdown 文件夹用相对路径与内容指纹识别资源，不用 `fileIndex
 ```bash
 dart run tool/evaluate_chunking_effect.dart \
   --dataset .local-data/retrieval-eval/real_books_2026-11-08.json \
-  --output docs/eval/retrieval-effect-2026-11-08-v1-supervised-audit.json
+  --output .local-data/retrieval-eval/retrieval-effect-2026-11-08-v1-supervised-audit.json
 ```
 
 评测器先 warm-up，再执行 5 次取中位数延迟。
@@ -287,7 +293,7 @@ dart run tool/evaluate_chunking_effect.dart \
 ```bash
 dart run tool/evaluate_chunking_effect.dart \
   --dataset .local-data/retrieval-eval/real_books_2026-11-08-v2-corrected.json \
-  --output docs/eval/retrieval-effect-2026-11-08-v2-supervised.json
+  --output .local-data/retrieval-eval/retrieval-effect-2026-11-08-v2-supervised.json
 ```
 
 | 指标（34 题） | 旧基线 | 父子块候选 |
