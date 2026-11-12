@@ -139,28 +139,26 @@ jobs:
           set -euo pipefail
           flutter analyze --no-pub
           python3 -m unittest discover -s test/tool -p '*_test.py' -v
-          shellcheck tool/publish_draft_release.sh
+          shellcheck tool/publish_draft_release.sh tool/wait_android_boot.sh
       - name: Run Android integration tests without a window
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb="$ANDROID_HOME/platform-tools/adb"
+          "$adb" version
+          "$adb" start-server
           "$ANDROID_HOME/emulator/emulator" -avd pagesage-ci -port 5554 \
             -no-window -no-audio -no-snapshot -gpu swiftshader -no-boot-anim \
             -no-metrics -camera-back none -camera-front none \
             > "$RUNNER_TEMP/pagesage-emulator.log" 2>&1 &
           emulator_pid=$!
-          trap 'adb -s emulator-5554 emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
-          booted=false
-          for _attempt in {1..120}; do
-            if [[ "$(adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; then
-              booted=true
-              break
-            fi
-            if ! kill -0 "$emulator_pid" 2>/dev/null; then break; fi
-            sleep 2
-          done
-          if [[ "$booted" != true ]]; then tail -80 "$RUNNER_TEMP/pagesage-emulator.log"; exit 1; fi
-          adb -s emulator-5554 shell input keyevent 82
+          trap 'timeout 10 "$adb" -s emulator-5554 emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
+          if ! bash tool/wait_android_boot.sh emulator-5554 600; then
+            tail -80 "$RUNNER_TEMP/pagesage-emulator.log"
+            exit 1
+          fi
+          "$adb" -s emulator-5554 shell input keyevent 82
           flutter test integration_test/android_platform_test.dart -d emulator-5554 --reporter expanded
       - name: Prepare signing for trusted builds
         id: signing
@@ -234,7 +232,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: android-emulator-diagnostics-${{ github.sha }}
-          path: ${{ runner.temp }}/pagesage-emulator.log
+          path: |
+            ${{ runner.temp }}/pagesage-emulator.log
+            ${{ runner.temp }}/pagesage-adb.log
           if-no-files-found: ignore
           retention-days: 7
 

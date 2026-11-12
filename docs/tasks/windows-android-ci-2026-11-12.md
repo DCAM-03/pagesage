@@ -130,3 +130,29 @@ Python 脚本仅使用标准库。Windows 替身发布测试使用 Git for Windo
   日志 `android-ci-disk-capacity.log`。未在本机执行 runner 专用工具清理。
   修复推送后需核对新的 Android job；当前主机无法读取该私有仓库的 Actions API，
   原始云端失败结论来自用户截图及复制的失败日志。应用源码未变，不重复完整 Flutter 回归。
+
+## 第二次云端失败：模拟器就绪检查
+
+- 用户提供 `ef93d86` 之后失败步骤的完整输出：最后 80 行模拟器日志中已有
+  `Boot completed in 82196 ms`，随后退出码 1，没有开始 Flutter 测试。
+  对照实际工作流，确认失败在 `booted != true` 的启动等待分支；
+  前一轮磁盘阻断已越过，不是应用编译或正式签名失败。
+- 旧脚本使用 PATH 中的 adb、丢弃 adb stderr，最多等待约 240 秒，并根据 emulator
+  launcher PID 提前结束等待。现有日志无法进一步区分 adb 连接失败、启动属性未读到、
+  等待超时或 launcher PID 误判，不能把某个可能因素写成已经证实的根因。
+- 修复统一 SDK 的 adb 并在启动前明确启动 server，打印版本；
+  `tool/wait_android_boot.sh` 独立核对设备连接、`sys.boot_completed=1` 和包管理器可用，
+  不把启动器 PID 消失当作设备失败。就绪总等待放宽至 600 秒，单次 adb 调用限制 10 秒，
+  每 30 秒输出当前状态，失败时输出设备清单、版本、启动属性及保留的 adb 错误。
+  artifact 同时上传模拟器与 adb 日志，仍不打开窗口、不跳过 Android 测试。
+- 验证选择：新增 Bash 行为测试覆盖离线设备即使有 boot-complete 日志也不能通过、
+  短暂连接失败重试、CRLF 启动属性、系统服务未就绪、未完成启动；
+  使用独立本地 API 36 无窗口 AVD 运行真实等待工具，并执行 Actions / ShellCheck。
+  这些证据不替代云端完整 Android 构建结果。
+- 真实等待工具实测成功，日志 `android-ci-readiness-real-device.log`：
+  初始设备未连接，随后在 36 秒确认 `sys.boot_completed=1` 且 package manager 可用；
+  模拟器自身启动日志记录约 20 秒，证明两种就绪信号的时间并不相同。
+  测试后已关闭独立模拟器。Actions / ShellCheck 通过，日志 `android-ci-readiness-actionlint.log`。
+- 脚本行为与原打包/发布工具合计 **18 PASS / 0 FAIL**，退出码 0，日志
+  `android-ci-readiness-tests.log`；其中 5 项新增用例直接执行实际 Bash 等待工具，
+  不访问真实 GitHub API、不读取用户书库或密钥。本轮不创建标签或 Release。
