@@ -106,3 +106,27 @@ Python 脚本仅使用标准库。Windows 替身发布测试使用 Git for Windo
   GitHub 托管 Windows Server 和 Ubuntu Android 模拟器的执行结果需另行核对，本机通过不替代云端结果。
   Android 5 项原生集成和 Windows 4 项原生通道的前次本机证据见
   [平台对接记录](android-windows-alignment-2026-11-12.md)；本轮未修改识别/阅读行为，不重复计数。
+
+## 首次云端执行与 Android 磁盘修复
+
+- `47fee17` 的 Windows job 成功并上传 ZIP；用户提供的运行截图与 Android 日志显示，
+  Android 在模拟器启动时失败，还没有运行集成测试或正式签名步骤。
+- Emulator 37.2.13 为 API 36 AVD 创建默认 userdata 分区，要求 7372.80 MB，
+  `/home/runner/.android/avd/pagesage-ci.avd` 所在磁盘仅剩 4635.20 MB，
+  直接报 `FATAL | Not enough space to create userdata partition`。
+  setup-java 的 Node / v4 弃用提示不是这次退出码 1 的原因，现有 Secrets 尚未得到云端签名验证。
+- 修复仅涉及 CI：安装前释放 Ubuntu runner 的预装 .NET 和非目标版本 Android NDK；
+  SDK 安装后要求至少 12 GiB 可用空间，同时容纳约 7.4 GB 的 userdata 启动检查和
+  后续 Gradle / 产物余量，日志打印磁盘容量。
+  加 `-no-metrics` 避免模拟器未来出现交互式遥测确认；不更改用户本机工具或数据目录。
+- 实测验证了不能单纯依赖缩小分区：本机 Emulator 36.1.9 的 `-partition-size` 上限为
+  2047 MB；独立 API 36 Google Play AVD 以该参数无窗口启动成功，但 `hardware-qemu.ini`
+  仍记录 6 GB data 分区，设备 `/data` 为 5.8 GB。因此最终修复采用释放空间和容量门禁，
+  不保留无效的分区缩小参数。探针只复制 AVD 配置，不复制用户数据；测试后已关闭，
+  日志位于 `.codex-run/android-disk-probe/`。本机镜像不同于云端 google_apis，
+  不将此项当作云端镜像、磁盘或完整构建通过。
+- Actions / ShellCheck 检查通过，日志 `android-ci-disk-actionlint.log`；直接执行工作流中
+  实际容量门禁，原始失败容量及 12 GiB 以下容量被拒绝，12 GiB 和 16 GiB 被接受，
+  日志 `android-ci-disk-capacity.log`。未在本机执行 runner 专用工具清理。
+  修复推送后需核对新的 Android job；当前主机无法读取该私有仓库的 Actions API，
+  原始云端失败结论来自用户截图及复制的失败日志。应用源码未变，不重复完整 Flutter 回归。

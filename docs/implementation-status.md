@@ -39,6 +39,9 @@ OCR 可见页编排从阅读页拆到独立协调器，阅读页只保留状态�
 - Windows 全量回归修正两处平台断言后 1101 PASS / 23 SKIP；打包/发布工具 13 PASS，
   Actions / ShellCheck、静态分析与实际归档检查通过。用户已报告配置签名 Secrets，
   随后授权提交推送到 `main`，本轮不创建标签或 Release；云端构建及正式签名结果待确认。
+- `47fee17` 首次云端 Windows job 成功；Android 启动模拟器时要求约 7.4 GB，
+  runner 仅余约 4.6 GB，尚未执行设备测试或签名。CI 已补预装工具空间回收及启动前
+  12 GiB 容量检查，修复后的 Android 云端结果待核对。
 - 入口、签名要求、发布范围及验证证据见
   [Windows / Android 自动构建记录](tasks/windows-android-ci-2026-11-12.md)。
 
