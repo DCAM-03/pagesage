@@ -29,18 +29,24 @@ OCR 可见页编排从阅读页拆到独立协调器，阅读页只保留状态�
 ## 2026-11-12 增量：Linux 自动构建与私有分发仓库
 
 - 已创建私有仓库 `DCAM-03/pagesage`，配置本地 SSH remote 并完成首次提交推送；
-  首次 Actions 在依赖解析阶段失败，原因是浅拉 SDK 缺少版本标签，
-  Flutter 被识别为 `0.0.0-unknown`；现补齐标签及 SDK 版本校验，云端重验待完成。
+  首次 Actions 的 SDK 标签缺失及后续 PDF 样例子项目依赖初始化问题均已修复。
+  最终 `ae16250` 对应 run `43164218384` 完整成功，云端默认全仓
+  1115 PASS / 9 SKIP / 0 FAIL，分析、构建、运行库门禁、校验及上传均通过。
 - 增加固定 Flutter 提交的 Ubuntu 22.04 工作流：锁文件、分析和全仓回归后构建
   Linux x86_64 分发包，上传压缩包/校验和，版本标签生成草稿 Release。
 - SQLite 改用锁定依赖的随包 native asset，去除 Fedora 系统库绝对路径；
   增加完整 bundle 打包、独立启动器、用户级安装器及失败回滚。
   CMake 安装排除测试留下的主机路径清单，保留实际原生库。
-- 当前配置最终默认全仓回归 1117 PASS / 7 SKIP / 0 FAIL，包含 16 项分发测试；
+  Linux 禁用未使用的可选 JNI 查找，防止随包引用构建机 Java；
+  运行库门禁使用包内库路径，拒绝缺失依赖及 `libjvm.so` 链接。
+- 本机随包 SQLite 配置全仓回归 1117 PASS / 7 SKIP / 0 FAIL，包含 16 项分发测试；
   静态分析、格式、ShellCheck、actionlint 和差异检查通过。
   真实包校验、临时中文/空格 HOME 安装、SQLite FTS5 和本机动态依赖检查通过。
-- Linux release 已静默重建安装，完整 bundle 比对一致，已有进程保持运行。
-  Fedora 构建不代表 Ubuntu 云端或其他平台验收；
+- JNI 清理后 Linux release 已静默重建安装，16 项分发测试和运行库门禁通过，
+  完整 bundle 比对一致，已有进程保持运行；本机压缩包也已更新。
+  最终 Ubuntu 云端包下载后再次通过 SHA-256、临时安装、
+  全部 ELF 动态依赖及 SQLite FTS5 实际读写检查。
+  构建、库加载与安装证据不替代真实阅读窗口或其他平台验收；
   产物、日志与远程状态见 [Linux 自动构建与分发记录](tasks/linux-distribution-2026-11-12.md)。
 
 ## 2026-11-12 增量：Linux beta 候选全仓回归

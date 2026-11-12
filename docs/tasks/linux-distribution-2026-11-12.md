@@ -102,7 +102,8 @@
   在进入依赖解析之前拒绝未知或错误 SDK。不升级 Flutter，也不放宽依赖锁文件。
 - 验证：先用临时 Git checkout 对照缺失标签与补齐标签的行为，再执行
   actionlint、脚本检查与工作流差异审查；推送修复后跟进云端完整构建与 artifact 校验。
-  本轮仅调整 CI 与文档，不修改应用产物，不重复本地安装。
+  SDK 版本修复仅调整 CI 与文档，不修改应用产物；
+  后续 JNI 清理涉及 Linux 构建配置，另按下述记录重建安装。
 - `34fad0d` 触发 run `43161767561`，SDK 版本校验、主项目锁文件解析与脚本检查
   均通过，确认首个问题已修复。该次运行在分析阶段发现第二个干净环境问题：
   根分析命令会覆盖独立的 `poc_pdf_canvas` 子项目，工作流却未初始化它的依赖，
@@ -128,3 +129,33 @@
   构建机依赖带入分发包。工作流增加可执行文件及全部包内 `.so` 的动态依赖检查，
   并明确拒绝 `libjvm.so` 链接；Windows/Android 不改。
   该额外修复会静默重建本地 Linux 安装，并重新执行云端发布流程。
+
+## 最终闭环
+
+- `08b4b91` 清理 Linux 可选 JNI；`ae16250` 将运行库门禁的查找路径
+  与包内启动器保持一致。门禁已验证：新本机 bundle 通过，旧真实云端 JNI 包被拒绝，
+  删除必要插件的隔离副本也被拒绝。日志
+  `/tmp/pagesage-ci-runtime-gate-verification.log`、
+  `/tmp/pagesage-ci-runtime-missing-library.log`。
+- 本机分发测试 16 项通过，actionlint 与差异检查通过；已静默执行安装脚本，
+  完整 bundle 与本地安装一致，均不含 `libdartjni.so`。
+  本机分发压缩包已重新生成并校验，24,190,143 bytes；
+  日志 `/tmp/pagesage-ci-jni-packaging-tests.log`、
+  `/tmp/pagesage-ci-jni-install.log`、`/tmp/pagesage-ci-local-package-final.log`。
+  未启动或停止应用进程。
+- 最终 Actions run `43164218384` 对应源码
+  `ae16250fa6a7bd54ab6d3072d68c2b360cb73bde`，整体 `success`：
+  静态分析无问题，默认全仓 **1115 PASS / 9 SKIP / 0 FAIL**，
+  Linux release 构建、全部包内库的运行依赖检查、SHA-256 与 artifact 上传全部通过。
+  日志 `/tmp/pagesage-github-runtime-final-success.log`；
+  状态 `/tmp/pagesage-github-runtime-final-status.json`。
+- Artifact ID `13919198966`，名称
+  `pagesage-linux-x86_64-ae16250fa6a7bd54ab6d3072d68c2b360cb73bde`，
+  保留 14 天；下载位于 `dist/github-43164218384/`。
+  `BUILD_INFO.txt` 记录该源码提交、`source_dirty=false` 和 glibc 2.35。
+  下载后再次校验 SHA-256，确认无 JNI 库及测试主机路径清单；
+  临时中文/空格用户目录安装及 desktop entry 校验通过，
+  全部 ELF 依赖在 Fedora 可解析，SQLite FTS5 建表、写入和查询均通过。
+  日志 `/tmp/pagesage-github-runtime-artifact-verification.log`。
+- `main` 推送生成 Actions artifact，草稿 Release job 跳过符合标签条件；
+  本轮未创建发布标签或公开 Release，未启动真实应用窗口。
