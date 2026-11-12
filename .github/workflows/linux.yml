@@ -103,6 +103,30 @@ jobs:
       - name: Build and package
         run: bash tool/build_linux_release.sh
 
+      - name: Check Linux runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="build/linux/x64/release/bundle"
+          ldd "$bundle/pagesage" > "$RUNNER_TEMP/pagesage-ldd.txt"
+          if grep -Fq 'not found' "$RUNNER_TEMP/pagesage-ldd.txt"; then
+            cat "$RUNNER_TEMP/pagesage-ldd.txt"
+            exit 1
+          fi
+          while IFS= read -r -d '' library; do
+            readelf -d "$library" > "$RUNNER_TEMP/pagesage-library-elf.txt"
+            if grep -Fq 'Shared library: [libjvm.so]' "$RUNNER_TEMP/pagesage-library-elf.txt"; then
+              printf 'Unexpected Java runtime dependency: %s\n' "$library" >&2
+              exit 1
+            fi
+            ldd "$library" > "$RUNNER_TEMP/pagesage-library-ldd.txt"
+            if grep -Fq 'not found' "$RUNNER_TEMP/pagesage-library-ldd.txt"; then
+              printf 'Missing runtime dependencies: %s\n' "$library" >&2
+              cat "$RUNNER_TEMP/pagesage-library-ldd.txt"
+              exit 1
+            fi
+          done < <(find "$bundle/lib" -maxdepth 1 -type f -name '*.so' -print0)
+
       - name: Verify package checksums
         working-directory: dist
         run: sha256sum --check ./*.sha256

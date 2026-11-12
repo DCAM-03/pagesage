@@ -111,3 +111,20 @@
 - 补齐子项目自己的 `flutter pub get --enforce-lockfile`，不将其开发依赖加入主应用，
   不排除样例代码的静态分析。另用无 `.dart_tool` 的临时源码副本验证两个项目
   解析锁文件后能完整分析，再推送跟进云端构建。
+- 临时 Git 对照验证通过，日志 `/tmp/pagesage-flutter-sdk-tag-probe-final.log`；
+  工作流内版本 guard 验证正确版本通过、未知版本和错误提交拒绝；
+  干净源码副本双项目锁文件解析和静态分析通过，日志
+  `/tmp/pagesage-ci-clean-source-analysis.log`。
+- `a1eb6e7` 对应 run `43162292135` 完整成功：云端默认全仓
+  **1115 PASS / 9 SKIP / 0 FAIL**、静态分析、构建、校验和及 artifact 上传均通过。
+  跳过数量与本机已有旧平台产物不同，不把平台资源检查当作原生平台验收。
+  日志 `/tmp/pagesage-github-linux-success.log`；artifact ID `13919126413`。
+  下载的包再次通过 SHA-256、临时用户安装及 SQLite FTS5 建表/写入/查询检查，
+  `BUILD_INFO.txt` 为源码 `a1eb6e75f141f65bb1f9f53cf6c818892b983038`、
+  `source_dirty=false`、glibc 2.35。
+- 下载后动态依赖检查额外发现：Android `path_provider` 的传递依赖 `jni`
+  在 Linux 检测到构建机 JDK 时自动生成 `libdartjni.so`，引用 runner 的 Java 路径。
+  Linux 入口不调用 JNI；现仅在 Linux CMake 禁用可选 JNI 查找，避免把这项
+  构建机依赖带入分发包。工作流增加可执行文件及全部包内 `.so` 的动态依赖检查，
+  并明确拒绝 `libjvm.so` 链接；Windows/Android 不改。
+  该额外修复会静默重建本地 Linux 安装，并重新执行云端发布流程。
