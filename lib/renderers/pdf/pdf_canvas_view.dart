@@ -447,7 +447,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     if (native == null) return;
     final hasOcr = _ocrLayoutsByPage.isNotEmpty;
     final canSelect = native || hasOcr;
-    final reason = canSelect ? null : '此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别可见页」提取文字。';
+    final reason = canSelect ? null : '此 PDF 没有原生文本层，可使用「识别文字」提取文字后划词，并加入搜索。';
     widget.onEvent(
       RendererCapabilityChanged(
         // OCR search uses the stored-text index outside this native viewer.

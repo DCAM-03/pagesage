@@ -520,7 +520,7 @@ final class _ReaderPageState extends ConsumerState<_ReaderContent>
               book: book,
               settings: settings,
               bookmarked: currentBookmark != null,
-              searchAvailable: _rendererSearchAvailable != false,
+              searchAvailable: true,
               textLayerAvailable: _rendererTextSelectionAvailable != false,
               capabilityReason: _rendererSearchUnavailableReason,
               onPageJump: isPdf
@@ -957,9 +957,6 @@ final class _ReaderPageState extends ConsumerState<_ReaderContent>
                                                               ?.totalPages,
                                                           settings:
                                                               readerSettings,
-                                                          searchAvailable:
-                                                              _rendererSearchAvailable !=
-                                                              false,
                                                           textLayerAvailable:
                                                               // After OCR, selection works, but "native" may still be false.
                                                               // Treat either native or OCR overlay as selection-capable UI.
@@ -1338,9 +1335,6 @@ final class _ReaderPageState extends ConsumerState<_ReaderContent>
                                                         location?.totalPages,
                                                     bookmarked:
                                                         currentBookmark != null,
-                                                    searchAvailable:
-                                                        _rendererSearchAvailable !=
-                                                        false,
                                                     onToc: () => unawaited(
                                                       _showTableOfContents(
                                                         context,
@@ -2784,12 +2778,6 @@ final class _ReaderPageState extends ConsumerState<_ReaderContent>
   }
 
   Future<void> _showInBookSearch(BuildContext context) async {
-    if (_rendererSearchAvailable == false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_rendererSearchUnavailableReason ?? '当前书籍不可搜索')),
-      );
-      return;
-    }
     if (context.supportsSidePanel) {
       _openDesktopContext(ReaderContextTab.search);
       return;
