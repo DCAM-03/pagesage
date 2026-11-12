@@ -7,8 +7,8 @@ PageSage 处于早期测试阶段。目前安全修复以默认分支的最新�
 
 请通过 GitHub 的
 [私密漏洞报告入口](https://github.com/DCAM-03/pagesage/security/advisories/new)
-提交。仓库维护者需在设置中启用 Private vulnerability reporting；
-如果入口不可用，请先提交一个只要求开通私密渠道的 Issue，不公开漏洞细节。
+提交。仓库已启用 Private vulnerability reporting。
+如果入口不可用，请先提交一个只要求恢复私密渠道的 Issue，不公开漏洞细节。
 本项目未设专用安全邮箱，不承诺固定响应时限。
 
 可附：
