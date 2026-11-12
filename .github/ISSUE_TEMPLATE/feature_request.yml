@@ -1,0 +1,24 @@
+name: 功能建议
+description: 描述实际阅读场景与希望改善的体验
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到了什么困难？
+      description: 说明使用场景、平台和当前操作。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望如何改善？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 尝试过的替代方式
+  - type: markdown
+    attributes:
+      value: 建议不代表已进入路线图；请勿附上私人书籍、凭证或个人数据库。

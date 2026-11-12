@@ -32,7 +32,8 @@ class DistributionTest(unittest.TestCase):
     def apk(self, omit=None):
         names = [f"lib/{abi}/{lib}.so" for abi in ("arm64-v8a", "armeabi-v7a", "x86_64")
                  for lib in ("libapp", "libflutter", "libsqlite3")]
-        names += ["assets/flutter_assets/assets/fonts/LXGWWenKaiLite-Regular.ttf",
+        names += ["assets/flutter_assets/NOTICES.Z",
+                  "assets/flutter_assets/assets/fonts/LXGWWenKaiLite-Regular.ttf",
                   "assets/flutter_assets/assets/images/brand/app-icon-source.svg",
                   "assets/mlkit-google-ocr-models/model.bin"]
         apk = self.root / "source.apk"
@@ -54,7 +55,23 @@ class DistributionTest(unittest.TestCase):
             self.assertNotIn("pagesage/pagesage.pdb", archive.namelist())
             for required in PACKAGE.WINDOWS_REQUIRED:
                 self.assertIn(f"pagesage/{required}", archive.namelist())
+            for target, source in PACKAGE.RELEASE_DOCUMENTS.items():
+                self.assertEqual(archive.read(f"pagesage/{target}"), (REPO / source).read_bytes())
         PACKAGE.verify(self.output)
+
+    def test_windows_cannot_replace_release_license_with_stale_bundle_copy(self):
+        (self.bundle / "LICENSE").write_text("old license", encoding="utf-8")
+        destination = PACKAGE.windows(self.bundle, self.output, "0.1.0+1")
+        with zipfile.ZipFile(destination) as archive:
+            self.assertEqual(archive.namelist().count("pagesage/LICENSE"), 1)
+            self.assertEqual(archive.read("pagesage/LICENSE"), (REPO / "LICENSE").read_bytes())
+
+    def test_windows_rejects_missing_release_license(self):
+        with patch.object(PACKAGE, "REPO", self.root), self.assertRaisesRegex(
+            ValueError, "Missing release document: LICENSE"
+        ):
+            PACKAGE.windows(self.bundle, self.output, "0.1.0+1")
+        self.assertEqual(list(self.output.iterdir()), [])
 
     def test_windows_rejects_missing_plugin_before_writing(self):
         (self.bundle / "flutter_secure_storage_windows_plugin.dll").unlink()
@@ -87,17 +104,27 @@ class DistributionTest(unittest.TestCase):
         aab = self.root / "source.aab"
         with zipfile.ZipFile(aab, "w") as archive:
             archive.writestr("base/manifest/AndroidManifest.xml", b"manifest")
+            archive.writestr("base/assets/flutter_assets/NOTICES.Z", b"notices")
         PACKAGE.android(apk, aab, self.output, "0.1.0+1", True)
         self.assertTrue((self.output / "pagesage-0.1.0+1-android.apk").exists())
         self.assertTrue((self.output / "pagesage-0.1.0+1-android.aab").exists())
         PACKAGE.verify(self.output)
 
     def test_android_rejects_missing_abi_model_and_aab(self):
-        for missing in ("lib/arm64-v8a/libsqlite3.so", "assets/mlkit-google-ocr-models/model.bin"):
+        for missing in ("lib/arm64-v8a/libsqlite3.so", "assets/mlkit-google-ocr-models/model.bin",
+                        "assets/flutter_assets/NOTICES.Z"):
             with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, "APK missing"):
                 PACKAGE.android(self.apk(missing), None, self.output, "0.1.0+1", False)
         with self.assertRaisesRegex(ValueError, "requires an AAB"):
             PACKAGE.android(self.apk(), None, self.output, "0.1.0+1", True)
+        self.assertEqual(list(self.output.iterdir()), [])
+
+    def test_android_rejects_aab_without_license_notices_before_copying(self):
+        aab = self.root / "missing-notices.aab"
+        with zipfile.ZipFile(aab, "w") as archive:
+            archive.writestr("base/manifest/AndroidManifest.xml", b"manifest")
+        with self.assertRaisesRegex(ValueError, "Invalid Android App Bundle.*NOTICES.Z"):
+            PACKAGE.android(self.apk(), aab, self.output, "0.1.0+1", True)
         self.assertEqual(list(self.output.iterdir()), [])
 
     def test_invalid_version_cannot_escape_output(self):

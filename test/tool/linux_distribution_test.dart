@@ -219,11 +219,31 @@ printf '%s\n' "$LD_LIBRARY_PATH" "$@" > "$PAGESAGE_LAUNCH_CAPTURE"
         'README.md',
         'PRIVACY.md',
         'THIRD_PARTY_LICENSES.md',
+        'LICENSE',
+        'NOTICE',
+        'LICENSES/LXGWWenKaiLite-OFL.txt',
+        'LICENSES/AtkinsonHyperlegible-OFL.txt',
+        'LICENSES/archive-LICENSE-other.txt',
       ]) {
         expect(
           await File('${source.path}/$relative').exists(),
           isTrue,
           reason: relative,
+        );
+      }
+      for (final entry in {
+        'LICENSE': 'LICENSE',
+        'NOTICE': 'NOTICE',
+        'LICENSES/LXGWWenKaiLite-OFL.txt':
+            'assets/fonts/licenses/LXGWWenKaiLite-OFL.txt',
+        'LICENSES/AtkinsonHyperlegible-OFL.txt':
+            'assets/fonts/licenses/AtkinsonHyperlegible-OFL.txt',
+        'LICENSES/archive-LICENSE-other.txt':
+            'assets/licenses/archive-LICENSE-other.txt',
+      }.entries) {
+        expect(
+          await File('${source.path}/${entry.key}').readAsString(),
+          await File('${repository.path}/${entry.value}').readAsString(),
         );
       }
       expect(

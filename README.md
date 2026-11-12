@@ -8,7 +8,7 @@
 
 一款本地优先的 EPUB · PDF · Markdown 阅读器，使用 Flutter 构建。
 
-[Linux CI](https://github.com/DCAM-03/pagesage/actions/workflows/linux.yml) · [Windows / Android CI](https://github.com/DCAM-03/pagesage/actions/workflows/windows-android.yml)
+[Linux CI](https://github.com/DCAM-03/pagesage/actions/workflows/linux.yml) · [Windows / Android CI](https://github.com/DCAM-03/pagesage/actions/workflows/windows-android.yml) · [Apache-2.0](LICENSE)
 
 [功能亮点](#功能亮点) · [界面预览](#界面预览) · [下载与安装](#下载与安装) · [开发指南](#开发指南) · [项目文档](#项目文档)
 
@@ -72,9 +72,9 @@ PageSage 把电子书、论文和 Markdown 文档放进统一书库。读到重�
 
 ### 获取测试包
 
-打开 [GitHub Actions](https://github.com/DCAM-03/pagesage/actions)，选择对应平台**成功完成**的构建，在页面底部下载 Artifacts；如果维护者已发布版本，也可以从 [Releases](https://github.com/DCAM-03/pagesage/releases) 获取。
+优先从 [Releases](https://github.com/DCAM-03/pagesage/releases) 获取维护者发布的测试版。如果尚无 Release，可打开 [GitHub Actions](https://github.com/DCAM-03/pagesage/actions)，选择对应平台**成功完成**的构建，在页面底部下载 Artifacts。
 
-仓库当前为私有仓库，下载需要登录有访问权限的 GitHub 账号。Actions 构建附件保留 14 天，草稿 Release 在发布前不会成为公开下载。
+Actions 附件下载需要登录 GitHub，通常保留 14 天；它们是开发构建，不等同于已验收的 Release。草稿 Release 在正式发布前不可供公众下载。公开测试的已知限制与反馈方式见[测试版说明](docs/beta.md)。
 
 | 平台 | 分发形式 | 安装与运行 |
 | --- | --- | --- |
@@ -137,7 +137,7 @@ CI 固定使用 **Flutter 3.44.2**，Dart 版本约束以 `pubspec.yaml` 为准�
 ### 获取源码与运行
 
 ```bash
-git clone git@github.com:DCAM-03/pagesage.git
+git clone https://github.com/DCAM-03/pagesage.git
 cd pagesage
 flutter pub get --enforce-lockfile
 
@@ -193,6 +193,7 @@ docs/             设计、规格、任务与验证记录
 
 | 我想了解 | 从这里开始 |
 | --- | --- |
+| 使用测试版与浏览文档 | [测试版说明](docs/beta.md) · [文档导航](docs/README.md) |
 | 项目定位与当前完成情况 | [项目概览](docs/00-overview.md) · [实现与验证记录](docs/implementation-status.md) |
 | 功能与交互 | [功能规格](docs/02-feature-spec.md) · [交互规范](docs/03-interaction-spec.md) |
 | 设计与视觉 | [UI 设计系统](docs/04-ui-design-system.md) · [图片资源规划](docs/assets-plan.md) |
@@ -205,6 +206,6 @@ docs/             设计、规格、任务与验证记录
 
 ## 反馈与许可
 
-提交 [Issue](https://github.com/DCAM-03/pagesage/issues) 时，请附上应用版本、操作系统、复现步骤和脱敏截图；Linux 分发包也可以提供 `BUILD_INFO.txt` 中的构建信息。
+欢迎按照[贡献指南](CONTRIBUTING.md)反馈问题或提交 Pull Request。提交 [Issue](https://github.com/DCAM-03/pagesage/issues) 时，请附上应用版本、操作系统、复现步骤和脱敏截图；Linux 分发包也可以提供 `BUILD_INFO.txt` 中的构建信息。安全漏洞请按[安全反馈说明](SECURITY.md)私下报告。
 
-仓库尚未声明项目开源许可证，请勿把可访问源码视为已获再分发授权。第三方依赖的许可说明见 [docs/licenses.md](docs/licenses.md)，应用内也提供许可证入口。
+PageSage 自有代码与文档采用 [Apache License 2.0](LICENSE)，允许按许可条款使用、修改与商业分发；再分发时请保留许可证、相关声明，并注明修改。项目声明见 [NOTICE](NOTICE)。第三方组件与字体遵循各自许可，用户导入的书籍不在项目授权范围内；详见[许可说明](docs/licenses.md)，应用内也提供许可证入口。

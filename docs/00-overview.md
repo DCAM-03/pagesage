@@ -8,8 +8,9 @@
 
 PageSage 是一个本地优先的跨平台智能阅读器，当前首版面向 EPUB、PDF 与 Markdown 的书籍管理与深度阅读。它不仅提供基础阅读体验，还提供全文搜索、分类、书签、划线、笔记，以及对选中文本进行 AI 问答、解释、总结和翻译的能力。
 
-首发目标平台：
+当前测试分发目标：
 
+- Linux x86_64（已有 beta 候选包）
 - Android
 - Windows
 
@@ -17,7 +18,8 @@ PageSage 是一个本地优先的跨平台智能阅读器，当前首版面向 E
 
 - iOS
 - macOS
-- Linux
+
+平台的实际验收范围见[测试版说明](beta.md)和[实现记录](implementation-status.md)。
 
 ## 2. 产品一句话
 

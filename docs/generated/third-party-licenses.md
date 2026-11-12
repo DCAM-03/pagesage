@@ -13,7 +13,7 @@
 | `_fe_analyzer_shared` | `100.0.0` | `transitive` | `hosted` | `LICENSE` |
 | `analyzer` | `13.0.0` | `transitive` | `hosted` | `LICENSE` |
 | `android_file_picker` | `1.1.1` | `transitive` | `hosted` | `LICENSE` |
-| `archive` | `4.3.0` | `direct main` | `hosted` | `LICENSE` |
+| `archive` | `4.3.0` | `direct main` | `hosted` | `LICENSE`, `LICENSE-other.md` |
 | `args` | `2.7.0` | `transitive` | `hosted` | `LICENSE` |
 | `async` | `2.13.1` | `transitive` | `hosted` | `LICENSE` |
 | `bidi` | `2.0.13` | `transitive` | `hosted` | `LICENSE` |
@@ -75,7 +75,7 @@
 | `http` | `1.6.0` | `transitive` | `hosted` | `LICENSE` |
 | `http_multi_server` | `3.2.2` | `transitive` | `hosted` | `LICENSE` |
 | `http_parser` | `4.1.2` | `transitive` | `hosted` | `LICENSE` |
-| `image` | `4.10.1` | `transitive` | `hosted` | `LICENSE` |
+| `image` | `4.10.1` | `transitive` | `hosted` | `LICENSE`, `LICENSE-other.md` |
 | `intl` | `0.20.2` | `transitive` | `hosted` | `LICENSE` |
 | `io` | `1.1.0` | `transitive` | `hosted` | `LICENSE` |
 | `jni` | `1.0.3` | `transitive` | `hosted` | `LICENSE` |

@@ -8,12 +8,12 @@
 
 PageSage 的技术架构需要满足：
 
-- Android 和 Windows 首发。
+- Linux、Android 和 Windows 测试分发；平台验收边界见[测试版说明](beta.md)。
 - 数据本地优先。
 - EPUB/PDF/Markdown 渲染可替换。
 - MOBI/AZW 与外部转换工具暂缓。
 - 搜索、笔记、AI 与阅读器位置稳定关联。
-- 后续可以扩展 iOS、macOS、Linux。
+- 后续可以扩展 iOS、macOS。
 
 ## 2. 技术栈
 

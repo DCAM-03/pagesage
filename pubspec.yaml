@@ -50,6 +50,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  licenses:
+    - NOTICE
+    - assets/fonts/licenses/LXGWWenKaiLite-OFL.txt
+    - assets/fonts/licenses/AtkinsonHyperlegible-OFL.txt
+    - assets/licenses/archive-LICENSE-other.txt
   assets:
     - assets/images/brand/
     - assets/images/empty-states/

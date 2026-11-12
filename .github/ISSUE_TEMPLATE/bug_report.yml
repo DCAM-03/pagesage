@@ -1,0 +1,40 @@
+name: 问题反馈
+description: 报告可以复现的阅读、设置或平台问题
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        安全漏洞请按 SECURITY.md 私下报告。不要上传 API key、个人数据库、私人书籍或未脱敏日志。
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本与来源
+      description: 如版本号、提交号、Release 或 Actions 构建编号
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: 操作系统与设备
+      placeholder: 如 Fedora 版本、Windows 版本或 Android 版本与机型
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请尽量使用自编的最小样本；涉及书籍时注明格式和是否有文本层。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏截图或日志
+      description: 分享前检查文件名、路径、服务地址和正文是否包含私人信息。

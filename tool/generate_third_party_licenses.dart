@@ -147,9 +147,11 @@ List<String> findLicenseFiles(Directory? root) {
             return upper == 'LICENSE' ||
                 upper == 'LICENSE.txt'.toUpperCase() ||
                 upper.startsWith('LICENSE.') ||
+                upper.startsWith('LICENSE-') ||
                 upper == 'NOTICE' ||
                 upper == 'NOTICE.txt'.toUpperCase() ||
-                upper.startsWith('NOTICE.');
+                upper.startsWith('NOTICE.') ||
+                upper.startsWith('NOTICE-');
           })
           .toList()
         ..sort();

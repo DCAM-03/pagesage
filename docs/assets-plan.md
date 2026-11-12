@@ -2,7 +2,7 @@
 
 版本：0.1  
 日期：2026-06-13  
-状态：资源规划  
+状态：资源规划（含历史设计；当前分发状态见 [测试版说明](beta.md)）
 
 ## 1. 原则
 
@@ -69,8 +69,8 @@ assets/
 
 ### 2.1 Linux 桌面集成
 
-Linux 不在发布目标里（`docs/07-roadmap.md` 仍是 Android + Windows），但本机
-开发与手动验证都在 Linux 上跑，所以任务栏必须正确：
+Linux 已有 x86_64 测试分发包，安装方式见 [Linux 分发](linux-distribution.md)。
+本机开发、手动验证和分发包都需要正确的任务栏图标：
 
 - **Wayland 下没有 `_NET_WM_ICON` 可读**，二进制路径也不是图标名。runner 不显式
   设置图标名时，合成器只能退回图标主题里的通用兜底——也就是本机看到的橙色 W
@@ -79,7 +79,7 @@ Linux 不在发布目标里（`docs/07-roadmap.md` 仍是 Android + Windows）�
   `gtk_window_set_default_icon_name()`，二者都指向 `dev.pagesage.pagesage`。
 - 还要有 `.desktop` 文件与 hicolor 图标，否则名字解析不到东西：
   `linux/dev.pagesage.pagesage.desktop` + `tool/install_desktop_entry.sh`。
-- 这套只在开发机上安装，不构成新的发布平台承诺。
+- 图标随 Linux 包提供，安装器创建桌面入口；其他发行版仍需单独验收。
 
 ## 3. App 图标
 
@@ -127,9 +127,8 @@ Web 图标。4 倍超采样后 Lanczos 缩放，斜边在 16 px 仍然干净。
 
 ### 3.1 旧图标
 
-v2（蓝色底 + 米黄写实翻页书）已归档到
-`docs/generated/brand-archive-v2/`。不再使用：写实插画风格与低饱和暗绿
-在任务栏里看起来像十年前的图标。
+v2（蓝色底 + 米黄写实翻页书）及旧品牌实验已从当前源码树移出，
+不随应用或公开文档分发。正式图标以 `assets/images/brand/` 和生成脚本为准。
 
 ## 4. 空书库插画
 

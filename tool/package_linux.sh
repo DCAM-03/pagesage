@@ -79,6 +79,10 @@ cp -- "$repo_root/tool/linux_bundle_install.sh" "$package_dir/install.sh"
 cp -- "$repo_root/docs/linux-distribution.md" "$package_dir/README.md"
 cp -- "$repo_root/docs/privacy.md" "$package_dir/PRIVACY.md"
 cp -- "$repo_root/docs/generated/third-party-licenses.md" "$package_dir/THIRD_PARTY_LICENSES.md"
+cp -- "$repo_root/LICENSE" "$repo_root/NOTICE" "$package_dir/"
+mkdir -p -- "$package_dir/LICENSES"
+cp -- "$repo_root/assets/fonts/licenses/"*.txt "$package_dir/LICENSES/"
+cp -- "$repo_root/assets/licenses/archive-LICENSE-other.txt" "$package_dir/LICENSES/"
 chmod +x "$package_dir/run-pagesage" "$package_dir/install.sh"
 printf 'version=%s\narchitecture=x86_64\nsource_revision=%s\nsource_dirty=%s\nbuild_libc=%s\n' \
   "$version" "$source_revision" "$source_dirty" "$(getconf GNU_LIBC_VERSION)" \

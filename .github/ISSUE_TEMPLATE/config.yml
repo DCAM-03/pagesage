@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私密安全问题
+    url: https://github.com/DCAM-03/pagesage/security/advisories/new
+    about: 安全漏洞不要在公开 Issue 披露，请先阅读 SECURITY.md。

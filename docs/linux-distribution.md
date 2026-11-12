@@ -66,7 +66,9 @@ sudo apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
 
 ## 许可与反馈
 
-第三方包清单见 `THIRD_PARTY_LICENSES.md`，完整 Flutter 许可位于
+PageSage 自有代码采用 Apache-2.0，项目许可与声明见包内 `LICENSE`、`NOTICE`。
+第三方包清单见 `THIRD_PARTY_LICENSES.md`，字体及补充许可副本位于 `LICENSES/`，
+完整 Flutter 许可位于
 `data/flutter_assets/NOTICES.Z`，应用内也可打开许可证页面。
 随包 SQLite 的原生实现属于 public domain，见其官方版权说明：
 https://www.sqlite.org/copyright.html 。

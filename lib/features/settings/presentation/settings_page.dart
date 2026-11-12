@@ -1270,7 +1270,7 @@ final class _AboutPageSageCard extends StatelessWidget {
           const ListTile(
             leading: Icon(Icons.menu_book_outlined),
             title: Text('PageSage'),
-            subtitle: Text('版本 0.1.0+1，本地优先 EPUB/PDF 智能阅读器'),
+            subtitle: Text('版本 0.1.0+1，本地优先 EPUB/PDF/Markdown 阅读器'),
           ),
           _SettingsActionTile(
             icon: Icons.privacy_tip_outlined,
@@ -1281,7 +1281,7 @@ final class _AboutPageSageCard extends StatelessWidget {
           _SettingsActionTile(
             icon: Icons.article_outlined,
             title: '开源许可说明',
-            subtitle: '查看主要第三方依赖许可与发布要求',
+            subtitle: 'Apache-2.0 与第三方组件许可',
             onTap: () => _showLicenseNotice(context),
           ),
           _SettingsActionTile(
@@ -1292,7 +1292,8 @@ final class _AboutPageSageCard extends StatelessWidget {
               context: context,
               applicationName: 'PageSage',
               applicationVersion: '0.1.0+1',
-              applicationLegalese: '本应用默认本地优先，AI 请求会展示上下文范围。',
+              applicationLegalese:
+                  'Copyright 2026 PageSage contributors\nApache License 2.0',
             ),
           ),
         ],
@@ -1308,7 +1309,7 @@ final class _AboutPageSageCard extends StatelessWidget {
         content: const SingleChildScrollView(
           child: Text(
             'PageSage 默认把书籍副本、阅读进度、书签、标注、笔记、全文索引、AI 对话记录和应用设置保存在本机。\n\n'
-            '导入 EPUB/PDF/Markdown 时会复制到应用书库目录；从 PageSage 删除书籍不会删除用户原始路径文件。\n\n'
+            '普通 EPUB/PDF/Markdown 文件导入时复制到应用书库目录；Markdown 文件夹按原路径只读访问，不复制也不写入源目录。移除书籍不会删除原文件或原目录。\n\n'
             'AI 请求会明确展示将发送的选中文本或上下文范围，默认不会自动上传整本书。API Key 存在系统安全存储中，不写入 SQLite，也不进入普通日志。\n\n'
             '默认日志不记录 API key、AI 请求正文、选中文本、完整上下文或大段书籍正文。备份和恢复仅处理本地文件，恢复前会创建回滚副本。',
           ),
@@ -1330,9 +1331,10 @@ final class _AboutPageSageCard extends StatelessWidget {
         title: const Text('PageSage 开源许可说明'),
         content: const SingleChildScrollView(
           child: Text(
-            '发布前应以 pubspec.lock 为准重新生成完整第三方许可清单。\n\n'
-            '主要依赖许可包括：Flutter SDK 使用 BSD-3-Clause；Riverpod、Drift、file_picker 使用 MIT；go_router、flutter_secure_storage 和 url_launcher 使用 BSD-3-Clause；archive、dart_pdf_editor、pdf_document、pdf_graphics、pdf_cos 使用 Apache-2.0。\n\n'
-            'Windows 与 Android 包内需要包含第三方许可文本。许可或诊断文件不得包含 API key、用户书籍正文、AI 请求正文或本地数据库内容。',
+            'PageSage 自有代码与文档采用 Apache License 2.0；第三方组件和字体保留各自许可，用户导入的书籍不在项目授权范围内。\n\n'
+            '主要依赖许可：Flutter SDK、go_router、flutter_secure_storage、url_launcher 使用 BSD-3-Clause；Riverpod、Drift、file_picker、archive 与 sqlite3 Dart 包使用 MIT；dart_pdf_editor、pdf_document、pdf_graphics、pdf_cos 使用 Apache-2.0。\n\n'
+            '内置 LXGW WenKai Lite 和 Atkinson Hyperlegible 字体使用 SIL Open Font License 1.1。Android Google ML Kit OCR SDK 另受其上游条款约束。\n\n'
+            '完整许可文本可在“Flutter 许可证”中查看；再分发时请保留项目及第三方的授权与声明。',
           ),
         ),
         actions: [

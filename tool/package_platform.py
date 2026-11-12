@@ -16,6 +16,14 @@ WINDOWS_REQUIRED = (
     "data/flutter_assets/assets/fonts/LXGWWenKaiLite-Regular.ttf",
     "data/flutter_assets/assets/images/brand/app-icon-source.svg",
 )
+RELEASE_DOCUMENTS = {
+    "LICENSE": "LICENSE",
+    "NOTICE": "NOTICE",
+    "THIRD_PARTY_LICENSES.md": "docs/generated/third-party-licenses.md",
+    "LICENSES/LXGWWenKaiLite-OFL.txt": "assets/fonts/licenses/LXGWWenKaiLite-OFL.txt",
+    "LICENSES/AtkinsonHyperlegible-OFL.txt": "assets/fonts/licenses/AtkinsonHyperlegible-OFL.txt",
+    "LICENSES/archive-LICENSE-other.txt": "assets/licenses/archive-LICENSE-other.txt",
+}
 
 
 def app_version():
@@ -50,11 +58,17 @@ def windows(bundle, output, version):
     # A test-generated native asset manifest contains build-host paths.
     if any(file.name == "native_assets.json" for file in files):
         raise ValueError("Windows bundle contains a test native_assets.json; clean and rebuild")
+    for source in RELEASE_DOCUMENTS.values():
+        if not (REPO / source).is_file():
+            raise ValueError(f"Missing release document: {source}")
     destination = output / f"pagesage-{version}-windows-x86_64.zip"
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
         for file in sorted(files):
-            if file.suffix.lower() != ".pdb":
-                archive.write(file, f"pagesage/{file.relative_to(bundle).as_posix()}")
+            relative = file.relative_to(bundle).as_posix()
+            if file.suffix.lower() != ".pdb" and relative not in RELEASE_DOCUMENTS:
+                archive.write(file, f"pagesage/{relative}")
+        for destination_name, source in RELEASE_DOCUMENTS.items():
+            archive.write(REPO / source, f"pagesage/{destination_name}")
     checksum(destination)
     return destination
 
@@ -67,6 +81,7 @@ def android(apk, aab, output, version, signed):
                 if f"lib/{abi}/{library}" not in names:
                     raise ValueError(f"APK missing {abi}/{library}")
         for name in (
+            "assets/flutter_assets/NOTICES.Z",
             "assets/flutter_assets/assets/fonts/LXGWWenKaiLite-Regular.ttf",
             "assets/flutter_assets/assets/images/brand/app-icon-source.svg",
         ):
@@ -78,8 +93,10 @@ def android(apk, aab, output, version, signed):
         if aab is None:
             raise ValueError("Signed distribution requires an AAB")
         with zipfile.ZipFile(aab) as archive:
-            if "base/manifest/AndroidManifest.xml" not in archive.namelist():
-                raise ValueError("Invalid Android App Bundle")
+            names = set(archive.namelist())
+            for name in ("base/manifest/AndroidManifest.xml", "base/assets/flutter_assets/NOTICES.Z"):
+                if name not in names:
+                    raise ValueError(f"Invalid Android App Bundle: missing {name}")
     suffix = "android" if signed else "android-test"
     for source, extension in [(apk, "apk"), *([(aab, "aab")] if signed else [])]:
         destination = output / f"pagesage-{version}-{suffix}.{extension}"
