@@ -47,8 +47,8 @@
   锁文件解析、脚本检查、静态分析和全仓测试先于 release 构建；
   上传压缩包与校验和，匹配版本的 `v*` 标签另生成草稿 Release。
   发布权限仅授予草稿发布 job。
-- 本轮没有提交或推送工作树，远程仍为空仓库，尚无 GitHub Actions 云端运行证据。
-  后续上传源码后，须验收 Ubuntu runner 构建和下载后的干净机器运行；
+- 随后按用户要求完成提交推送，首次 GitHub Actions 运行的故障及修复见末节。
+  Ubuntu runner 完整构建和下载后的干净机器运行分别验收；
   当前 Fedora 构建不能替代跨发行版兼容验收。
 
 ### 自动验证与真实分发包
@@ -87,3 +87,19 @@
 - 未启动应用或终端窗口，未停止或重启已有 PageSage 进程。
   本轮证明构建、测试、分发安装与本机库加载，不新增真实阅读窗口或
   Windows/Android 验收结论。
+
+## 首次云端构建故障与修复
+
+- 后续按用户要求将当前工作树提交为 `e82a3a0` 并推送到 `main`，
+  触发 Actions run `43160751128`。该次运行失败于依赖解析；
+  分析、全仓测试、构建及上传均未执行，未生成 artifact。
+- 原因：工作流只浅拉 Flutter 提交，没有取得 `3.44.2` 版本标签。
+  Flutter 在干净 runner 上报告 `0.0.0-unknown`，
+  不能满足 `path_provider_platform_interface` 要求的 Flutter `>=3.38.0`。
+  失败日志 `/tmp/pagesage-github-linux-first-failure.log`。
+- 修复：显式浅拉官方 `3.44.2` 标签，继续校验其提交与固定 SHA 一致；
+  安装步骤额外检查 Git 标签及 `flutter --version --machine` 返回的版本和提交，
+  在进入依赖解析之前拒绝未知或错误 SDK。不升级 Flutter，也不放宽依赖锁文件。
+- 验证：先用临时 Git checkout 对照缺失标签与补齐标签的行为，再执行
+  actionlint、脚本检查与工作流差异审查；推送修复后跟进云端完整构建与 artifact 校验。
+  本轮仅调整 CI 与文档，不修改应用产物，不重复本地安装。

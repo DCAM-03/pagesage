@@ -28,8 +28,9 @@ OCR 可见页编排从阅读页拆到独立协调器，阅读页只保留状态�
 
 ## 2026-11-12 增量：Linux 自动构建与私有分发仓库
 
-- 已创建私有仓库 `DCAM-03/pagesage`，配置本地 SSH remote 并验证访问；
-  工作树尚未提交或推送，GitHub Actions 尚未在云端执行。
+- 已创建私有仓库 `DCAM-03/pagesage`，配置本地 SSH remote 并完成首次提交推送；
+  首次 Actions 在依赖解析阶段失败，原因是浅拉 SDK 缺少版本标签，
+  Flutter 被识别为 `0.0.0-unknown`；现补齐标签及 SDK 版本校验，云端重验待完成。
 - 增加固定 Flutter 提交的 Ubuntu 22.04 工作流：锁文件、分析和全仓回归后构建
   Linux x86_64 分发包，上传压缩包/校验和，版本标签生成草稿 Release。
 - SQLite 改用锁定依赖的随包 native asset，去除 Fedora 系统库绝对路径；
