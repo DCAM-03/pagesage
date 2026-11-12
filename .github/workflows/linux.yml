@@ -107,7 +107,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bundle="build/linux/x64/release/bundle"
+          bundle="$(pwd)/build/linux/x64/release/bundle"
+          export LD_LIBRARY_PATH="$bundle/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ldd "$bundle/pagesage" > "$RUNNER_TEMP/pagesage-ldd.txt"
           if grep -Fq 'not found' "$RUNNER_TEMP/pagesage-ldd.txt"; then
             cat "$RUNNER_TEMP/pagesage-ldd.txt"
