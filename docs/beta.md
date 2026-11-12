@@ -5,6 +5,8 @@
 PageSage 是本地优先的 EPUB、PDF、Markdown 阅读器，目前处于早期测试阶段。
 公开源码与发布二进制是两件事：仓库可访问不代表已有正式稳定版。
 
+版本说明见 [v0.0.1 Beta](releases/v0.0.1.md)；测试包统一从下方 Releases 入口获取。
+
 ## 测试范围
 
 - Linux x86_64 已有候选包与本机安装验证，GitHub 在 Ubuntu 22.04 构建。

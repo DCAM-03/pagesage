@@ -45,6 +45,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('关于').first);
       await tester.pumpAndSettle();
+      final version = RegExp(
+        r'^version:\s*(\S+)',
+        multiLine: true,
+      ).firstMatch(File('pubspec.yaml').readAsStringSync())!.group(1)!;
+      expect(find.textContaining('版本 $version，'), findsOneWidget);
       await tester.tap(find.text('开源许可说明'));
       await tester.pumpAndSettle();
       expect(

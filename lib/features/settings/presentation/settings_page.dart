@@ -1262,6 +1262,8 @@ final class _PrivacyDataCard extends StatelessWidget {
 final class _AboutPageSageCard extends StatelessWidget {
   const _AboutPageSageCard();
 
+  static const _version = '0.0.1+2';
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -1270,7 +1272,7 @@ final class _AboutPageSageCard extends StatelessWidget {
           const ListTile(
             leading: Icon(Icons.menu_book_outlined),
             title: Text('PageSage'),
-            subtitle: Text('版本 0.1.0+1，本地优先 EPUB/PDF/Markdown 阅读器'),
+            subtitle: Text('版本 $_version，本地优先 EPUB/PDF/Markdown 阅读器'),
           ),
           _SettingsActionTile(
             icon: Icons.privacy_tip_outlined,
@@ -1291,7 +1293,7 @@ final class _AboutPageSageCard extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'PageSage',
-              applicationVersion: '0.1.0+1',
+              applicationVersion: _version,
               applicationLegalese:
                   'Copyright 2026 PageSage contributors\nApache License 2.0',
             ),
