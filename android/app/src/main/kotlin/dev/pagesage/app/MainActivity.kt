@@ -218,7 +218,7 @@ class MainActivity : FlutterActivity() {
         for (block in visionText.textBlocks) {
             for (line in block.lines) {
                 val lineText = line.text?.trim().orEmpty()
-                if (lineText.isEmpty) {
+                if (lineText.isEmpty()) {
                     continue
                 }
                 val box = line.boundingBox

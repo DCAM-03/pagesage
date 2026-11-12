@@ -1603,7 +1603,7 @@ void main() {
 
     expect(captured, isNotNull);
     expect(captured!.folderRelativePath, 'sub/b.md');
-    expect(captured!.documentPath, second.path);
+    expect(File(captured!.documentPath!).absolute.uri, second.absolute.uri);
     expect(captured!.progress?.locator.href, 'sub/b.md');
 
     // The saved file is open. Its outline names only that file's headings.
@@ -1635,7 +1635,7 @@ void main() {
     });
     await tester.pump();
     expect(captured!.folderRelativePath, 'a.md');
-    expect(captured!.documentPath, first.path);
+    expect(File(captured!.documentPath!).absolute.uri, first.absolute.uri);
     expect(captured!.progress?.locator.href, 'a.md');
 
     // Selecting a file leaves the tree in place; the outline is explicit.

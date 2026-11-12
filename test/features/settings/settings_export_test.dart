@@ -17,6 +17,7 @@ import 'package:pagesage/core/platform/platform_providers.dart';
 import 'package:pagesage/core/security/secure_store.dart';
 import 'package:pagesage/core/tasks/task_models.dart';
 import 'package:pagesage/features/settings/presentation/settings_page.dart';
+import 'package:pagesage/features/settings/application/ai_settings_providers.dart';
 import 'package:pagesage/features/export/application/export_providers.dart';
 
 void main() {
@@ -196,6 +197,20 @@ void main() {
           return (await database.select(database.notes).getSingle()).content;
         });
         expect(content, '备份中的笔记');
+        // Invalidating the database also restarts the settings stream. Let its
+        // credential guard finish real file I/O before closing the temporary
+        // database: Windows cannot delete an open credentials.lock file.
+        for (
+          var attempt = 0;
+          attempt < 200 && container.read(aiSettingsProvider).isLoading;
+          attempt++
+        ) {
+          await tester.pump();
+          await tester.runAsync(() async {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          });
+        }
+        expect(container.read(aiSettingsProvider).hasValue, isTrue);
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());

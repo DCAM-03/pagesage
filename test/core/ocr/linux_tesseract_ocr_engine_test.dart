@@ -51,7 +51,10 @@ void main() {
       expect(await engine.isAvailable(), isTrue);
       expect(await engine.supportedLanguages(), ['eng', 'chi_sim']);
       expect(harness.calls.length, 3);
-      expect(harness.privateModes.single & 0x3f, 0);
+      // Windows FileStat.mode does not describe POSIX group/other permissions.
+      if (!Platform.isWindows) {
+        expect(harness.privateModes.single & 0x3f, 0);
+      }
       expect(await directory.list().toList(), isEmpty);
       await engine.capability(refresh: true);
       expect(harness.calls.length, 6);

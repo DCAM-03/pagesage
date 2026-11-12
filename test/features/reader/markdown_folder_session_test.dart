@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/features/reader/application/markdown_folder_session.dart';
@@ -53,7 +54,10 @@ void main() {
     expect(session.initialLocator?.href, 'sub/b.md');
     expect(session.initialLocator?.chapterIndex, 1);
     expect(session.initialLocator?.chapterOffset, 6);
-    expect(controller.activeFile?.absolutePath, endsWith('sub/b.md'));
+    expect(
+      controller.activeFile?.absolutePath,
+      p.join(root.path, 'sub', 'b.md'),
+    );
   });
 
   test('switching a file keeps a jump on its requested file', () async {

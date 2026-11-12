@@ -1,0 +1,46 @@
+name: Set up locked Flutter
+description: Verify the official SDK tag, revision and release version
+inputs:
+  platform:
+    description: Flutter precache target
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install and verify SDK
+      shell: pwsh
+      env:
+        PRECACHE_PLATFORM: ${{ inputs.platform }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $PSNativeCommandUseErrorActionPreference = $true
+        if ($env:PRECACHE_PLATFORM -notin @('windows', 'android')) { throw 'Invalid platform' }
+        $sdk = Join-Path $env:RUNNER_TEMP 'pagesage-flutter'
+        git init $sdk
+        git -C $sdk remote add origin https://github.com/flutter/flutter.git
+        git -C $sdk fetch --depth 1 origin "refs/tags/$($env:FLUTTER_VERSION):refs/tags/$($env:FLUTTER_VERSION)"
+        git -C $sdk checkout --detach "refs/tags/$($env:FLUTTER_VERSION)"
+        if ((git -C $sdk rev-parse HEAD) -ne $env:FLUTTER_REVISION) { throw 'Flutter revision mismatch' }
+        if ((git -C $sdk describe --tags --exact-match HEAD) -ne $env:FLUTTER_VERSION) { throw 'Flutter tag mismatch' }
+        $bin = Join-Path $sdk 'bin'
+        $bin >> $env:GITHUB_PATH
+        $flutter = Join-Path $bin $(if ($IsWindows) { 'flutter.bat' } else { 'flutter' })
+        & $flutter --version
+        $version = (& $flutter --version --machine | ConvertFrom-Json)
+        if ($version.frameworkVersion -ne $env:FLUTTER_VERSION -or $version.frameworkRevision -ne $env:FLUTTER_REVISION) {
+          throw 'Flutter reports an unexpected version'
+        }
+        & $flutter precache "--$($env:PRECACHE_PLATFORM)"
+
+    - name: Check tag matches app version
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $match = [regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^version:\s+(\S+)\s*$')
+        if (-not $match.Success) { throw 'Missing pubspec version' }
+        $version = $match.Groups[1].Value
+        if ($env:GITHUB_REF -like 'refs/tags/v*') {
+          if ($env:GITHUB_REF_NAME -notin @("v$version", "v$($version.Split('+')[0])")) {
+            throw "Tag $($env:GITHUB_REF_NAME) does not match pubspec version $version"
+          }
+        }

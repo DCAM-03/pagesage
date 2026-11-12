@@ -26,6 +26,38 @@ OCR 可见页编排从阅读页拆到独立协调器，阅读页只保留状态�
 
 ---
 
+## 2026-11-12 增量：Windows / Android GitHub 自动构建
+
+- 补齐 `windows-android.yml`：固定 Flutter、双项目锁文件恢复、分析、Windows 默认回归、
+  无窗口原生 PDF 测试和完整 ZIP；Android API 36 无窗口集成测试后构建普通 APK。
+- Android 支持四项 Secrets 正式签名，PR 隔离签名；未配置时分支产物明确标记 test，
+  版本标签要求正式签名并生成 APK/AAB。测试密钥实际签名构建及证书校验已通过，密钥已删除。
+- 两平台上传包和 SHA-256，版本标签附加至共享草稿 Release；Linux 仅调整发布附件复用，
+  避免跨工作流创建冲突，不改 Linux 构建或本地安装。
+- Windows 安装排除测试遗留的绝对路径清单，保留真实 native DLL；release 重建、
+  CI 同命令原生 CTest 3 项及最终 ZIP 校验通过。
+- Windows 全量回归修正两处平台断言后 1101 PASS / 23 SKIP；打包/发布工具 13 PASS，
+  Actions / ShellCheck、静态分析与实际归档检查通过。用户已报告配置签名 Secrets，
+  随后授权提交推送到 `main`，本轮不创建标签或 Release；云端构建及正式签名结果待确认。
+- 入口、签名要求、发布范围及验证证据见
+  [Windows / Android 自动构建记录](tasks/windows-android-ci-2026-11-12.md)。
+
+## 2026-11-12 增量：Android / Windows 主机对接验证
+
+- 修复 Android OCR Kotlin 的 `isEmpty` 调用编译错误；Windows release、Android debug/release
+  构建成功。按授权补齐 Android SDK / 许可证，使用已有 JDK 21，不改全局 Flutter 配置。
+- 新增 Windows 无窗口原生 CTest，4 PASS；真实 WinRT PDF 栅格化、英文 OCR、
+  中文空格路径、像素预算与错误分支通过。
+- 独立 Android API 36 无窗口模拟器集成测试 5 PASS：原生 PDF/ML Kit、安全存储、
+  SQLite FTS5 文件重开、无效导出源文件、触摸翻页保存与页面重新挂载恢复。
+- 修复组件测试的 Windows 文件锁清理时序和路径断言；定向回归 561 PASS，
+  离屏布局/交互 25 PASS（与前组重叠），已检查桌面和移动大字号截图；静态分析无问题。
+- 用户限定静默验证，未启动 Windows 可见窗口；原生选择器人工操作、真机生命周期、
+  Windows 完整运行及部分阅读闭环仍待验收。Android release 沿用 debug 签名，供本地测试。
+  本次 Linux 重装受 WSL 缺原生构建环境阻断，未更新 Linux 安装。
+- 产物、日志、复验入口及证据边界见
+  [Android / Windows 续验记录](tasks/android-windows-alignment-2026-11-12.md)。
+
 ## 2026-11-12 增量：Linux 自动构建与私有分发仓库
 
 - 已创建私有仓库 `DCAM-03/pagesage`，配置本地 SSH remote 并完成首次提交推送；

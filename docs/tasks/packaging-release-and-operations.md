@@ -4,6 +4,10 @@
 
 建立 Android 和 Windows 的可发布流程，包括版本号、签名、打包、隐私说明、开源许可、更新日志、发布检查和本地诊断材料。
 
+2026-11-12：GitHub Actions、APK/AAB 签名环境配置、Windows ZIP 与校验和已补齐，
+入口和本地验证见 [Windows / Android 自动构建记录](windows-android-ci-2026-11-12.md)。
+正式 Secrets 配置及云端运行尚待完成，本页其余人工发布材料不因此自动验收。
+
 ## 来源与边界
 
 - 来源：`docs/01-product-requirements.md`、`docs/05-technical-architecture.md`、`docs/07-roadmap.md`。

@@ -11,10 +11,21 @@ const workbenchCaptureKey = ValueKey('workbench-capture');
 
 Future<void> loadWorkbenchCaptureFonts() async {
   final cjk = File(
-    '/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc',
+    Platform.isWindows
+        ? '${Platform.environment['WINDIR'] ?? r'C:\Windows'}/Fonts/msyh.ttc'
+        : '/usr/share/fonts/google-noto-sans-cjk-vf-fonts/NotoSansCJK-VF.ttc',
   );
-  final uiFont = ByteData.sublistView(await cjk.readAsBytes());
-  for (final family in ['Roboto', 'Segoe UI', 'Microsoft YaHei UI']) {
+  final uiFont = await cjk.exists()
+      ? ByteData.sublistView(await cjk.readAsBytes())
+      : await rootBundle.load('assets/fonts/LXGWWenKaiLite-Regular.ttf');
+  for (final family in [
+    'Roboto',
+    'Segoe UI',
+    'Microsoft YaHei UI',
+    // The long custom-name fixture tests wrapping, not installed-font lookup.
+    // Widget tests have no system fallback for this deliberately absent name.
+    'Noto Serif CJK SC Extra Long Custom Family Name',
+  ]) {
     await (FontLoader(family)..addFont(Future.value(uiFont))).load();
   }
   final artifacts = Directory(Platform.resolvedExecutable).parent.parent.parent;
