@@ -25,8 +25,8 @@
 已有同实现有效证据可复用；本次标签工作流承担最终全仓回归。
 
 用户随后明确：仅等待 Linux 与 Windows，不等待较慢的 Android 构建。
-Windows 附件任务因此仅依赖 Windows，Android 继续原有构建并保留 Actions 附件，
-不自动改动已经发布的 Release。本次 Release 不包含 Android APK/AAB。
+Windows 附件任务因此仅依赖 Windows，首次公开时 Android 仅保留 Actions 附件，
+未包含在 Release。用户随后要求补充 Android，并自动同步后续标签构建产物，结果见下文。
 
 ## 结果
 
@@ -61,3 +61,32 @@ SHA-256 文件。匿名 API 可访问，四个附件匿名下载成功，安装�
 
 真实 Windows 设备的窗口交互与 OCR 语言包仍需设备验收；
 CI 中 3 项原生 PDF 测试未包含依赖系统 OCR 语言包的用例。
+
+## Android 补充与自动同步
+
+成功运行 `43191457452` 的 Android job `131124197292`：
+API 36 无窗口集成测试 5 项通过，正式签名 APK / AAB 构建、
+APK 证书校验和 AAB 签名校验均成功。来源提交 `e1af894` 与 `v0.0.1`
+仅存在发布记录文档差异，应用与构建代码一致，不移动已有标签。
+
+已下载并核对两个安装包的 ZIP 完整性、SHA-256、三种 ABI 原生库、
+离线 OCR 模型、字体及完整许可；APK 二进制 Manifest 确认为
+`dev.pagesage.app`、`versionName=0.0.1`、`versionCode=2`。
+本地 `jarsigner -verify` 复验 AAB 返回 `jar verified.`。
+
+- APK：`pagesage-0.0.1+2-android.apk`，125729353 bytes，
+  SHA-256 `750a3360302f6216efcefb421543acb19275da0a85c7601583d5ffa79f5702f5`。
+- AAB：`pagesage-0.0.1+2-android.aab`，105444235 bytes，
+  SHA-256 `b8ba2654cc2298501b55d2c4dc7e9fcf425e72b0ea924004ccf9a8fb1b53e78a`。
+
+两个 Android 包及各自的校验和已同步至现有公开 Beta，
+原有 Linux / Windows 附件的 ID 和摘要保持不变；
+Release 仍为公开预发布版本，共 8 个附件。发布说明已补齐 Android 下载用途和来源；
+四个新增附件匿名下载通过，下载摘要与本地验证产物一致。
+
+后续 Linux、Windows、Android 的标签构建及重跑分别同步到同标签 Release，
+允许给已公开版本追加附件，并保留已有公开 / 预发布状态。
+不存在 Release 时仍创建草稿；普通 `main` / PR 不改旧版本。
+平台同步组互相独立，脚本处理并发首次创建，不因三个平台同时完成而取消待上传平台。
+工具行为测试 28 项通过，ShellCheck、actionlint 和工作流依赖 / 权限 / 产物来源检查通过。
+本次变更仅涉及 CI、发布工具、测试和说明，不改变已安装应用。

@@ -1,4 +1,4 @@
-"""Behavior checks for platform archives, checksums and draft-only uploads."""
+"""Behavior checks for platform archives, checksums and release asset uploads."""
 
 import importlib.util
 import os
@@ -156,16 +156,22 @@ case "$2" in
     case "$GH_TEST_STATE" in
       missing) exit 1 ;;
       published) echo false ;;
+      unknown) echo unavailable ;;
+      create_race*)
+        test -f "$GH_TEST_LOG.created" || exit 1
+        if [[ "$GH_TEST_STATE" == create_race_published ]]; then echo false; else echo true; fi ;;
       *) echo true ;;
     esac ;;
-  create) exit 0 ;;
+  create)
+    if [[ "$GH_TEST_STATE" == create_race* ]]; then touch "$GH_TEST_LOG.created"; exit 1; fi
+    exit 0 ;;
   upload) test "${GH_TEST_UPLOAD_FAIL:-false}" != true ;;
   *) exit 99 ;;
 esac
 ''', encoding="utf-8", newline="\n")
         gh.chmod(0o755)
 
-    def run_release(self, state, *, missing=False, upload_fail=False):
+    def run_release(self, state, *, missing=False, upload_fail=False, allow_published=False):
         script = REPO / "tool/publish_draft_release.sh"
         env = {**os.environ, "GH_TEST_STATE": state, "GH_TEST_LOG": self.log.as_posix(),
                "GH_TEST_UPLOAD_FAIL": str(upload_fail).lower()}
@@ -173,8 +179,11 @@ esac
         return subprocess.run([
             self.bash, "--noprofile", "--norc", "-c",
             'stub="$1"; if command -v cygpath >/dev/null; then stub="$(cygpath -u "$stub")"; fi; '
-            'export PATH="$stub:$PATH"; exec bash "$2" v0.1.0-beta.1 "$3"',
+            'export PATH="$stub:$PATH"; '
+            'if [[ "$4" == true ]]; then set -- "$2" --allow-published v0.1.0-beta.1 "$3"; '
+            'else set -- "$2" v0.1.0-beta.1 "$3"; fi; exec bash "$@"',
             "_", self.bin.as_posix(), script.as_posix(), asset.as_posix(),
+            str(allow_published).lower(),
         ], env=env, capture_output=True, text=True)
 
     def test_missing_release_creates_draft_then_uploads(self):
@@ -191,11 +200,51 @@ esac
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("create", self.log.read_text())
 
-    def test_published_release_is_never_modified(self):
+    def test_published_release_requires_explicit_asset_sync(self):
         result = self.run_release("published")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("upload", self.log.read_text())
         self.assertNotIn("create", self.log.read_text())
+
+    def test_explicit_sync_uploads_to_published_release_without_republishing(self):
+        result = self.run_release("published", allow_published=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        self.assertIn("upload v0.1.0-beta.1 --clobber", calls[1])
+        self.assertNotIn("create", self.log.read_text())
+        self.assertNotIn("edit", self.log.read_text())
+
+    def test_explicit_sync_keeps_new_release_as_draft(self):
+        result = self.run_release("missing", allow_published=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--draft --verify-tag", self.log.read_text())
+
+    def test_published_upload_failure_is_not_reported_as_success(self):
+        result = self.run_release("published", allow_published=True, upload_fail=True)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_parallel_creation_reuses_release_created_by_another_platform(self):
+        result = self.run_release("create_race", allow_published=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.log.read_text().splitlines()
+        self.assertEqual(len(calls), 4)
+        self.assertIn("upload v0.1.0-beta.1 --clobber", calls[-1])
+
+    def test_parallel_creation_reuses_published_release_with_explicit_sync(self):
+        result = self.run_release("create_race_published", allow_published=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("upload", self.log.read_text())
+
+    def test_parallel_creation_cannot_bypass_published_release_guard(self):
+        result = self.run_release("create_race_published")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("upload", self.log.read_text())
+
+    def test_unknown_release_state_cannot_upload(self):
+        result = self.run_release("unknown", allow_published=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("upload", self.log.read_text())
 
     def test_missing_asset_does_not_call_github(self):
         self.assertNotEqual(self.run_release("missing", missing=True).returncode, 0)

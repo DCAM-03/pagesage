@@ -54,8 +54,25 @@ Gradle 使用 `PAGESAGE_ANDROID_KEYSTORE_PATH`、`PAGESAGE_ANDROID_STORE_PASSWOR
 
 标签必须匹配 `pubspec.yaml` 的 `vVERSION` 或含 build number 的 `vVERSION+BUILD`。
 各工作流在自己的构建与门禁通过后，将对应资产附加到同一个草稿 Release；
-发布 job 使用共享 tag concurrency 串行执行，允许重跑覆盖同名资产，拒绝修改已公开 Release。
+发布 job 使用各平台独立的 tag concurrency，允许重跑覆盖同名资产；
+不同平台同时首次创建 Release 时复用已创建的同标签版本。
+三个平台分别在对应构建成功后同步，不因其他平台失败或耗时较长而阻塞。
+不存在 Release 时创建草稿；已存在草稿或公开 Release 时更新对应平台附件，
+保持 Release 的公开 / 草稿和预发布状态。脚本默认仍拒绝修改公开 Release，
+标签 CI 显式传入 `--allow-published` 启用附件同步。
+普通 `main` / PR 构建仅保留 Actions 产物，不向旧版本 Release 混入开发构建。
 预发布版本附带 prerelease 标记，最终公开发布由维护者操作。
+
+## 2026-11-12：构建后自动同步附件
+
+目标：版本标签构建及其重跑成功后，Linux、Windows、正式签名 Android
+分别把安装包和 SHA-256 同步到对应 Release；Android 后完成时也能追加到已公开版本。
+不自动公开草稿、不改变已有发布状态、不修改应用代码。
+
+验证：`test/tool/platform_distribution_test.py` 覆盖默认拒绝公开 Release、
+显式同步公开 Release、不重复创建 / 发布、新建仍为草稿及上传失败传播；
+ShellCheck 与 Actions 结构检查核对仅标签触发、同提交 artifact、
+平台独立依赖、写权限及互不取消的同步组；行为测试另覆盖并发创建竞争和无效状态。
 
 本地复验入口：
 
