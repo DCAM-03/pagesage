@@ -14,8 +14,8 @@
 
 1. 同步 `pubspec.yaml` 与应用关于页版本，以组件测试核对显示值。
 2. 运行静态分析及设置页、许可、打包相关定向测试，静默更新本地 Linux 安装。
-3. 提交推送候选并创建标签，使用既有 Actions 完成全仓回归、三平台构建与签名。
-4. 保持草稿状态，核对 Linux tar.gz、Windows ZIP、正式签名 Android APK/AAB
+3. 提交推送候选并创建标签，使用既有 Actions 完成 Linux / Windows 全仓回归与构建。
+4. 保持草稿状态，核对 Linux tar.gz、Windows ZIP
    及对应校验和均来自同一标签提交。
 5. 下载 Release 附件复核 SHA-256 与许可，发布为预发布版本，
    再通过 API 核对公开状态、标签、附件和匿名下载。
@@ -23,6 +23,10 @@
 证据保存在被忽略的 `.local-data/releases/v0.0.1/`。
 只报告实际通过的验证；不把 Windows / Android CI 当作所有真实设备的完整验收。
 已有同实现有效证据可复用；本次标签工作流承担最终全仓回归。
+
+用户随后明确：仅等待 Linux 与 Windows，不等待较慢的 Android 构建。
+Windows 附件任务因此仅依赖 Windows，Android 继续原有构建并保留 Actions 附件，
+不自动改动已经发布的 Release。本次 Release 不包含 Android APK/AAB。
 
 ## 结果
 

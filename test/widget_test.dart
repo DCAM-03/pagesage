@@ -1310,7 +1310,7 @@ void main() {
     await tester.tap(find.text('开源许可说明'));
     await tester.pumpAndSettle();
     expect(find.text('PageSage 开源许可说明'), findsOneWidget);
-    expect(find.textContaining('pubspec.lock'), findsOneWidget);
+    expect(find.textContaining('自有代码与文档采用 Apache License 2.0'), findsOneWidget);
     await tester.tap(find.text('关闭'));
     await tester.pumpAndSettle();
 
