@@ -84,7 +84,8 @@ int epubContinuousItemIndexForLocator({
 ({int chapterIndex, int start, int end, String? excerpt})? epubFocusRangeFor(
   ReadingLocator locator,
 ) {
-  if (locator.type != ReadingLocatorType.epub) {
+  if (locator.type != ReadingLocatorType.epub &&
+      locator.type != ReadingLocatorType.markdown) {
     return null;
   }
   final chapterIndex = locator.chapterIndex;
@@ -202,62 +203,5 @@ String jumpStatusLabelFor(
         JumpPrecision.coarse => '已尽量恢复阅读位置（定位信息较弱）',
       };
     }(),
-  };
-}
-
-/// Compact excerpt suitable for flash-highlight and search locators.
-String? compactLocatorExcerpt(String? text, {int maxChars = 120}) {
-  final compact = text?.replaceAll(RegExp(r'\s+'), ' ').trim();
-  if (compact == null || compact.isEmpty) {
-    return null;
-  }
-  if (compact.length <= maxChars) {
-    return compact;
-  }
-  return compact.substring(0, maxChars).trim();
-}
-
-/// Fills missing [ReadingLocator.excerpt] from note/AI source text so flash works.
-ReadingLocator enrichLocatorForJump(
-  ReadingLocator locator, {
-  String? fallbackExcerpt,
-}) {
-  final existing = locator.excerpt?.trim();
-  if (existing != null && existing.isNotEmpty) {
-    return locator;
-  }
-  final excerpt = compactLocatorExcerpt(fallbackExcerpt, maxChars: 160);
-  if (excerpt == null) {
-    return locator;
-  }
-  return switch (locator.type) {
-    ReadingLocatorType.epub => ReadingLocator.epub(
-      cfi: locator.cfi,
-      href: locator.href,
-      chapterIndex: locator.chapterIndex,
-      chapterOffset: locator.chapterOffset,
-      chapterEndOffset: locator.chapterEndOffset,
-      progress: locator.progress,
-      excerpt: excerpt,
-      selectionRects: locator.selectionRects,
-    ),
-    ReadingLocatorType.markdown => ReadingLocator.markdown(
-      href: locator.href,
-      chapterIndex: locator.chapterIndex,
-      chapterOffset: locator.chapterOffset,
-      chapterEndOffset: locator.chapterEndOffset,
-      progress: locator.progress,
-      excerpt: excerpt,
-      selectionRects: locator.selectionRects,
-    ),
-    ReadingLocatorType.pdf => ReadingLocator.pdf(
-      page: locator.page ?? 1,
-      scrollOffset: locator.scrollOffset ?? 0,
-      pageOffsetFraction: locator.pageOffsetFraction,
-      zoom: locator.zoom ?? 1,
-      progress: locator.progress,
-      excerpt: excerpt,
-      selectionRects: locator.selectionRects,
-    ),
   };
 }

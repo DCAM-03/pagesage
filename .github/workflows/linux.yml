@@ -1,0 +1,129 @@
+name: Linux
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  FLUTTER_REVISION: c9a6c484230f8b5e408ec57be1ef71dee1e77020
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+
+jobs:
+  build:
+    name: Test and package Linux x86_64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Check release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [[ "$GITHUB_REF_NAME" != "v${version%%+*}" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+              printf 'Tag %s does not match pubspec version %s\n' "$GITHUB_REF_NAME" "$version" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev \
+            libstdc++-12-dev shellcheck
+
+      - name: Install pinned Flutter SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_dir="$RUNNER_TEMP/flutter"
+          git init "$sdk_dir"
+          git -C "$sdk_dir" remote add origin https://github.com/flutter/flutter.git
+          git -C "$sdk_dir" fetch --depth 1 origin "$FLUTTER_REVISION"
+          git -C "$sdk_dir" checkout --detach FETCH_HEAD
+          test "$(git -C "$sdk_dir" rev-parse HEAD)" = "$FLUTTER_REVISION"
+          printf '%s\n' "$sdk_dir/bin" >> "$GITHUB_PATH"
+          "$sdk_dir/bin/flutter" --version
+          "$sdk_dir/bin/flutter" precache --linux
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check release scripts
+        run: |
+          shellcheck tool/build_linux_release.sh tool/package_linux.sh \
+            tool/linux_bundle_install.sh tool/linux_launcher.sh
+          dart format --output=none --set-exit-if-changed test/tool/linux_distribution_test.dart
+
+      - name: Analyze
+        run: flutter analyze --no-pub
+
+      - name: Run complete default test suite
+        run: flutter test --no-pub --concurrency=4 --reporter expanded
+
+      - name: Build and package
+        run: bash tool/build_linux_release.sh
+
+      - name: Verify package checksums
+        working-directory: dist
+        run: sha256sum --check ./*.sha256
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: pagesage-linux-x86_64-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  draft-release:
+    name: Attach Linux package to draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download tested package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: pagesage-linux-x86_64-${{ github.sha }}
+          path: dist
+
+      - name: Verify downloaded checksums
+        working-directory: dist
+        run: sha256sum --check ./*.sha256
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_flags=(--draft --verify-tag --generate-notes --title "$RELEASE_TAG")
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" "${release_flags[@]}" \
+            dist/*.tar.gz dist/*.tar.gz.sha256

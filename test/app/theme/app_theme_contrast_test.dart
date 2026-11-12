@@ -95,6 +95,32 @@ void main() {
 
   group('ReaderThemePreset contrast', () {
     for (final preset in ReaderThemePreset.values) {
+      test('${preset.label} reader chrome preserves readable surfaces', () {
+        final theme = AppTheme.reader(preset);
+        final colors = theme.colorScheme;
+        expect(colors.surface, preset.background);
+        expect(theme.appBarTheme.backgroundColor, colors.surface);
+        expect(theme.dialogTheme.backgroundColor, colors.surface);
+        expect(theme.bottomSheetTheme.backgroundColor, colors.surface);
+        expect(
+          theme
+              .appBarTheme
+              .systemOverlayStyle
+              ?.systemNavigationBarIconBrightness,
+          colors.brightness == Brightness.dark
+              ? Brightness.light
+              : Brightness.dark,
+        );
+        for (final surface in [
+          colors.surface,
+          colors.surfaceContainerHighest,
+          colors.secondaryContainer,
+        ]) {
+          _expectTextContrast(preset.name, colors.onSurface, surface);
+          _expectTextContrast(preset.name, colors.onSurfaceVariant, surface);
+          _expectTextContrast(preset.name, colors.primary, surface);
+        }
+      });
       test('${preset.label} text and links meet WCAG AA', () {
         _expectTextContrast(
           '${preset.label} foreground/background',

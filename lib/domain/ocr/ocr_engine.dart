@@ -17,6 +17,7 @@ abstract interface class OcrEngine {
   Future<OcrPageResult> recognize({
     required Uint8List imageBytes,
     required String languageHint,
+    Future<void>? cancelled,
   });
 
   /// One-shot: open PDF page on native side, OCR, return text only.

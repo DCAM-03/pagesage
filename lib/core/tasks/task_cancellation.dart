@@ -1,3 +1,5 @@
+import 'dart:async';
+
 final class TaskCancelledException implements Exception {
   const TaskCancelledException([this.message = '任务已取消']);
 
@@ -9,15 +11,21 @@ final class TaskCancelledException implements Exception {
 
 final class TaskCancelToken {
   bool _cancelled = false;
+  Completer<void>? _signal;
   final List<void Function()> _callbacks = [];
 
   bool get isCancelled => _cancelled;
+
+  Future<void> get whenCancelled => _cancelled
+      ? Future<void>.value()
+      : (_signal ??= Completer<void>()).future;
 
   void cancel() {
     if (_cancelled) {
       return;
     }
     _cancelled = true;
+    _signal?.complete();
     final callbacks = List<void Function()>.of(_callbacks);
     _callbacks.clear();
     for (final callback in callbacks) {
@@ -70,8 +78,9 @@ final class TaskCancellationRegistry {
         (_tokens[taskId]?.isCancelled ?? false);
   }
 
-  /// Whether [taskId]'s work is running in this process right now.
+  /// Whether [taskId]'s work is still owned by this process.
   ///
+  /// Owners may register before execution starts, such as a queued OCR job.
   /// Startup recovery uses this to tell a task left over from a previous run
   /// (no token at all) from one this session is still executing. A task whose
   /// token was registered but then cancelled is not live either.

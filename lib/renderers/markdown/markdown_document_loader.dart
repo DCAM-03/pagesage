@@ -20,10 +20,9 @@ final class MarkdownLoadException implements BookLoadException {
 
 /// Opens a Markdown source into the reader's document model.
 ///
-/// Both shapes of a Markdown book are here: a single file, and a folder of
-/// files read as one book. The distinction is the path's own — a directory is
-/// a folder book — so every caller that already asks for a Markdown document
-/// gets whichever one the path names without learning about a second loader.
+/// A single Markdown file is opened here. A folder book first asks
+/// [MarkdownFolderLoader] for its manifest, then opens the selected file with
+/// [loadWithHref] so the document still names the folder-relative path.
 ///
 /// The book's title comes from the file itself when it says one (front matter)
 /// and from the file name when it does not. A file with nothing to read is an
@@ -50,12 +49,29 @@ final class MarkdownDocumentLoader implements BookDocumentLoader {
   Future<EpubDocument> load(String filePath) async {
     final stat = await File(filePath).stat();
     if (stat.type == FileSystemEntityType.directory) {
-      return const MarkdownFolderLoader().load(filePath);
+      // A folder is a shelf of files, not one document. Callers must pick a
+      // file from the manifest; merging every note again would bring back the
+      // flat table of contents P7 removed.
+      throw const MarkdownLoadException('文件夹书需要先选择一个 Markdown 文件');
     }
     if (stat.type == FileSystemEntityType.notFound) {
       throw const MarkdownLoadException('找不到这个 Markdown 文件或文件夹');
     }
+    return _loadFile(filePath);
+  }
 
+  /// Opens one file of a folder book and stamps its chapters with [href].
+  ///
+  /// The parser does not know where a file sits in a folder, and it should
+  /// not: its job is to read one note. The relative path is attached here so
+  /// progress, search and AI can point back at the right note.
+  Future<EpubDocument> loadWithHref(String filePath, String href) async {
+    final document = await load(filePath);
+    return _withHref(document, href);
+  }
+
+  Future<EpubDocument> _loadFile(String filePath) async {
+    final stat = await File(filePath).stat();
     final signature = '${stat.size}|${stat.modified.millisecondsSinceEpoch}';
     final cached = _cache[filePath];
     if (cached != null && cached.signature == signature) {
@@ -98,6 +114,50 @@ final class MarkdownDocumentLoader implements BookDocumentLoader {
       throw const MarkdownLoadException('这个 Markdown 文件没有可读的正文');
     }
     return document;
+  }
+
+  EpubDocument _withHref(EpubDocument document, String href) {
+    return EpubDocument(
+      chapters: List<EpubChapter>.unmodifiable([
+        for (final chapter in document.chapters)
+          EpubChapter(
+            index: chapter.index,
+            href: href,
+            title: chapter.title,
+            text: chapter.text,
+            blocks: chapter.blocks,
+            anchors: chapter.anchors,
+          ),
+      ]),
+      toc: List<EpubTocItem>.unmodifiable([
+        for (final item in document.toc) _withHrefItem(item, href),
+      ]),
+    );
+  }
+
+  EpubTocItem _withHrefItem(EpubTocItem item, String href) {
+    return EpubTocItem(
+      title: item.title,
+      href: href,
+      chapterIndex: item.chapterIndex,
+      fragment: item.fragment,
+      chapterOffset: item.chapterOffset,
+      children: item.children
+          .map((child) => _withHrefItem(child, href))
+          .toList(growable: false),
+    );
+  }
+}
+
+/// Loads one file of a folder book with its folder-relative path.
+final class MarkdownFileDocumentLoader implements BookDocumentLoader {
+  const MarkdownFileDocumentLoader({required this.relativePath});
+
+  final String relativePath;
+
+  @override
+  Future<EpubDocument> load(String filePath) {
+    return const MarkdownDocumentLoader().loadWithHref(filePath, relativePath);
   }
 }
 

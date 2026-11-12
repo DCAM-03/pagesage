@@ -1,7 +1,5 @@
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
-
 typedef PlatformProcessRunner =
     Future<ProcessResult> Function(String executable, List<String> arguments);
 
@@ -9,16 +7,24 @@ final class OpenFileLocationService {
   factory OpenFileLocationService({
     PlatformProcessRunner runner = Process.run,
     bool? isWindows,
+    bool? isLinux,
   }) {
-    return OpenFileLocationService._(runner, isWindows);
+    return OpenFileLocationService._(runner, isWindows, isLinux);
   }
 
-  const OpenFileLocationService._(this._runner, this._isWindowsOverride);
+  const OpenFileLocationService._(
+    this._runner,
+    this._isWindowsOverride,
+    this._isLinuxOverride,
+  );
 
   final PlatformProcessRunner _runner;
   final bool? _isWindowsOverride;
+  final bool? _isLinuxOverride;
 
-  bool get isSupported => _isWindowsOverride ?? Platform.isWindows;
+  bool get _isWindows => _isWindowsOverride ?? Platform.isWindows;
+  bool get _isLinux => _isLinuxOverride ?? Platform.isLinux;
+  bool get isSupported => _isWindows || _isLinux;
 
   Future<void> revealFile(String filePath) async {
     _ensureSupported();
@@ -26,7 +32,11 @@ final class OpenFileLocationService {
     if (!await file.exists()) {
       throw FileSystemException('文件不存在', filePath);
     }
-    await _runExplorer(['/select,${file.path}']);
+    if (_isWindows) {
+      await _run('explorer.exe', ['/select,${file.path}']);
+    } else {
+      await _run('xdg-open', [file.absolute.parent.path]);
+    }
   }
 
   Future<void> openDirectory(String directoryPath) async {
@@ -35,11 +45,9 @@ final class OpenFileLocationService {
     if (!await directory.exists()) {
       throw FileSystemException('目录不存在', directoryPath);
     }
-    await _runExplorer([directory.path]);
-  }
-
-  Future<void> openContainingDirectory(String filePath) async {
-    await openDirectory(p.dirname(filePath));
+    await _run(_isWindows ? 'explorer.exe' : 'xdg-open', [
+      directory.absolute.path,
+    ]);
   }
 
   void _ensureSupported() {
@@ -48,11 +56,11 @@ final class OpenFileLocationService {
     }
   }
 
-  Future<void> _runExplorer(List<String> arguments) async {
-    final result = await _runner('explorer.exe', arguments);
+  Future<void> _run(String executable, List<String> arguments) async {
+    final result = await _runner(executable, arguments);
     if (result.exitCode != 0) {
       throw ProcessException(
-        'explorer.exe',
+        executable,
         arguments,
         result.stderr.toString(),
         result.exitCode,

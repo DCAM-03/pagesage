@@ -42,6 +42,7 @@ final class ReadingLocator {
     this.progress = 0,
     this.excerpt,
     this.selectionRects = const [],
+    this.folderFileLocal = false,
   });
 
   factory ReadingLocator.epub({
@@ -75,6 +76,7 @@ final class ReadingLocator {
     double progress = 0,
     String? excerpt,
     List<ReaderRect> selectionRects = const [],
+    bool folderFileLocal = false,
   }) {
     return ReadingLocator(
       type: ReadingLocatorType.markdown,
@@ -85,6 +87,7 @@ final class ReadingLocator {
       progress: progress,
       excerpt: excerpt,
       selectionRects: selectionRects,
+      folderFileLocal: folderFileLocal,
     );
   }
 
@@ -133,6 +136,7 @@ final class ReadingLocator {
         progress: _asDouble(json['progress']) ?? 0,
         excerpt: json['excerpt'] as String?,
         selectionRects: selectionRects,
+        folderFileLocal: json['folderFileLocal'] == true,
       );
     }
 
@@ -183,6 +187,14 @@ final class ReadingLocator {
   final String? excerpt;
   final List<ReaderRect> selectionRects;
 
+  /// Whether a Markdown locator's chapter index belongs to the file named by
+  /// [href], rather than to a whole merged folder.
+  ///
+  /// P7 changed folder books from one flattened document to one open file at
+  /// a time. The marker is what lets the reader tell a new file-local position
+  /// from an old merged one without guessing.
+  final bool folderFileLocal;
+
   Map<String, Object?> toJson() {
     return {
       'type': type.value,
@@ -197,6 +209,7 @@ final class ReadingLocator {
       if (zoom != null) 'zoom': zoom,
       'progress': progress.clamp(0, 1),
       if (excerpt != null) 'excerpt': excerpt,
+      if (folderFileLocal) 'folderFileLocal': true,
       if (selectionRects.isNotEmpty)
         'selectionRects': selectionRects
             .map((rect) => rect.toJson())

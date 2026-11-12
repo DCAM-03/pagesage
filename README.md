@@ -1,6 +1,6 @@
 # PageSage
 
-PageSage is a local-first, cross-platform intelligent reader for EPUB and PDF.
+PageSage is a local-first, cross-platform intelligent reader for EPUB, PDF, and Markdown.
 
 ## Documentation
 
@@ -23,13 +23,17 @@ Original planning draft:
 Recommended first implementation target:
 
 - Flutter app for Android and Windows
-- EPUB rendering with epub.js
-- PDF rendering with PDF.js
+- Flutter-native EPUB and Markdown rendering
+- PDF rendering with `pdf_graphics` on Flutter Canvas
 - SQLite plus FTS5 for local library data and full-text search
 
 Deferred:
 
 - MOBI/AZW import and Calibre-based conversion
+- Cloud sync, accounts, online bookstores, and collaboration
+
+A Markdown folder can be read in place as one book; other imports are copied
+into the local library directory.
 
 ## Development
 
@@ -45,3 +49,18 @@ flutter build windows
 
 Android debug builds are configured, but the first `flutter build apk --debug`
 run must download the Gradle distribution before it can complete.
+
+## Linux beta builds
+
+GitHub Actions runs analysis, the complete default test suite, and an x86_64
+release build on Ubuntu 22.04. Each successful run uploads a `tar.gz` package and
+SHA-256 checksum. Matching version tags also create a draft GitHub Release.
+
+Build the same package locally:
+
+```bash
+bash tool/build_linux_release.sh
+```
+
+See [Linux installation and runtime requirements](docs/linux-distribution.md)
+and [build and packaging implementation](docs/tasks/linux-distribution-2026-11-12.md).

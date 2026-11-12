@@ -64,10 +64,40 @@ void main() {
   test('throws unsupported error on non-Windows platforms', () async {
     final service = OpenFileLocationService(
       isWindows: false,
+      isLinux: false,
       runner: (_, _) async => ProcessResult(1, 0, '', ''),
     );
 
     expect(service.openDirectory(tempDir.path), throwsUnsupportedError);
+  });
+
+  test('Linux reveals the containing directory without a shell', () async {
+    final file = File(p.join(tempDir.path, '空 格;\$(noop).md'));
+    await file.writeAsString('export');
+    final calls = <_ProcessCall>[];
+    final service = OpenFileLocationService(
+      isWindows: false,
+      isLinux: true,
+      runner: (executable, arguments) async {
+        calls.add(_ProcessCall(executable, arguments));
+        return ProcessResult(1, 0, '', '');
+      },
+    );
+    await service.revealFile(file.path);
+    expect(calls.single.executable, 'xdg-open');
+    expect(calls.single.arguments, [tempDir.path]);
+  });
+
+  test('Linux reports desktop opener failure', () async {
+    final service = OpenFileLocationService(
+      isWindows: false,
+      isLinux: true,
+      runner: (_, _) async => ProcessResult(1, 1, '', 'no handler'),
+    );
+    await expectLater(
+      service.openDirectory(tempDir.path),
+      throwsA(isA<ProcessException>()),
+    );
   });
 }
 

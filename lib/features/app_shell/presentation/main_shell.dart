@@ -45,6 +45,7 @@ final class MainShell extends ConsumerWidget {
                       AppCommandBar(
                         taskCount: activeTaskCount,
                         showSearch: !path.startsWith('/search'),
+                        showImport: !path.startsWith('/library'),
                         onSearch: () => context.go('/search'),
                         onImport: () => _requestImport(context, ref),
                         onTasks: () => context.go('/tasks'),
@@ -159,6 +160,7 @@ final class MainShell extends ConsumerWidget {
       PageSageTaskStatus.queued ||
       PageSageTaskStatus.running ||
       PageSageTaskStatus.indexing => true,
+      PageSageTaskStatus.paused || PageSageTaskStatus.partial => false,
       PageSageTaskStatus.done ||
       PageSageTaskStatus.failed ||
       PageSageTaskStatus.cancelled => false,

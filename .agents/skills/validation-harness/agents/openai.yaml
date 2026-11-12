@@ -1,6 +1,6 @@
 interface:
-  display_name: "Validation Harness"
-  short_description: "Define focused evidence and audit contract closure"
-  default_prompt: "Use $validation-harness to define focused verification, audit affected-contract closure, and record implementation state plus validation evidence."
+  display_name: "PageSage 验证闭环"
+  short_description: "选择最小行为验证，区分测试、运行、渲染截图和本地安装证据"
+  default_prompt: "使用 $validation-harness 为本次变更选择并执行必要验证，核对构建与安装结果。"
 policy:
   allow_implicit_invocation: true

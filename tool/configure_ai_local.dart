@@ -1,8 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:pagesage/core/database/app_database.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_ai_profile_repository.dart';
 import 'package:pagesage/core/security/secure_store.dart';
-import 'package:pagesage/domain/ai/ai_models.dart';
 
 /// One-shot local config helper. Do not commit secrets.
 Future<void> main(List<String> args) async {
@@ -26,33 +25,35 @@ Future<void> main(List<String> args) async {
 
   final database = AppDatabase();
   final secureStore = SecureStore();
-  final repository = DriftAiSettingsRepository(
-    database.settingsDao,
-    secureStore,
-  );
+  final repository = DriftAiProfileRepository(database, secureStore);
 
-  await repository.saveSettings(
-    AiSettings(
-      enabled: true,
-      provider: 'openai-compatible',
-      baseUrl: baseUrl,
-      model: model,
-      temperature: 0.2,
-      maxTokens: 1200,
-      streaming: true,
-      confirmBeforeRequest: true,
-    ),
-    apiKey: apiKey,
-  );
+  try {
+    final current = await repository.getSettings();
+    await repository.saveSettings(
+      current.copyWith(
+        enabled: true,
+        provider: 'openai-compatible',
+        baseUrl: baseUrl,
+        model: model,
+        temperature: 0.2,
+        maxTokens: 1200,
+        streaming: true,
+        confirmBeforeRequest: true,
+      ),
+      apiKey: apiKey,
+    );
 
-  final saved = await repository.getSettings();
-  await database.close();
+    final saved = await repository.getSettings();
 
-  // Never print the API key.
-  // ignore: avoid_print
-  print(
-    'AI configured: enabled=${saved.enabled}, '
-    'provider=${saved.provider}, baseUrl=${saved.baseUrl}, '
-    'model=${saved.model}, hasApiKey=${saved.hasApiKey}',
-  );
+    // Never print the API key.
+    // ignore: avoid_print
+    print(
+      'AI configured: enabled=${saved.enabled}, '
+      'provider=${saved.provider}, '
+      'model=${saved.model}, hasApiKey=${saved.hasApiKey}',
+    );
+  } finally {
+    repository.dispose();
+    await database.close();
+  }
 }

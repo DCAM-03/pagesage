@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/tasks/task_cancellation.dart';
 import 'package:pagesage/domain/books/book.dart';
+import 'package:pagesage/domain/ocr/ocr_capability.dart';
 import 'package:pagesage/domain/ocr/ocr_engine.dart';
 import 'package:pagesage/domain/ocr/ocr_models.dart';
 import 'package:pagesage/domain/ocr/pdf_page_rasterizer.dart';
@@ -85,6 +87,43 @@ void main() {
     expect(engine.pdfPageCalls, 0);
   });
 
+  test('prefers the display image when one is provided', () async {
+    final rasterizer = _FakeRasterizer();
+    final engine = _FakeEngine(text: 'Visible page');
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: rasterizer,
+      engine: engine,
+      cache: OcrSessionCache(),
+    );
+
+    final result = await useCase.recognizeCurrentPage(
+      book: _pdfBook(),
+      pageNumber: 5,
+      displayImageBytes: Uint8List.fromList(const [1, 2, 3, 4]),
+    );
+
+    expect(result.text, 'Visible page');
+    expect(engine.imageCalls, 1);
+    expect(engine.pdfPageCalls, 0);
+    expect(rasterizer.calls, 0);
+  });
+
+  test('passes configured native raster settings to the engine', () async {
+    final engine = _FakeEngine(text: 'Native settings');
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: engine,
+      cache: OcrSessionCache(),
+      dpi: 180,
+      maxEdge: 1800,
+    );
+
+    await useCase.recognizeCurrentPage(book: _pdfBook(), pageNumber: 1);
+
+    expect(engine.lastDpi, 180);
+    expect(engine.lastMaxEdge, 1800);
+  });
+
   test('dedupes concurrent requests for the same page', () async {
     final engine = _FakeEngine(
       text: 'Shared',
@@ -105,6 +144,64 @@ void main() {
 
     expect(results.map((r) => r.text), everyElement('Shared'));
     expect(engine.pdfPageCalls, 1);
+  });
+
+  test('serializes rasterization across different OCR pages', () async {
+    final rasterizer = _BlockingRasterizer();
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: rasterizer,
+      engine: _FakeEngine(text: 'Serialized', supportsPdf: false),
+      cache: OcrSessionCache(),
+    );
+    final book = _pdfBook();
+
+    final first = useCase.recognizeCurrentPage(book: book, pageNumber: 1);
+    await rasterizer.firstStarted.future;
+    final second = useCase.recognizeCurrentPage(book: book, pageNumber: 2);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(rasterizer.calls, 1);
+    expect(rasterizer.maxActive, 1);
+
+    rasterizer.releaseFirst.complete();
+    await Future.wait([first, second]);
+
+    expect(rasterizer.calls, 2);
+    expect(rasterizer.maxActive, 1);
+  });
+
+  test('durable OCR does not report success when persistence fails', () async {
+    final store = _FailingOcrPageStore();
+    final cache = OcrSessionCache();
+    final engine = _FakeEngine(text: 'Durable result');
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: engine,
+      cache: cache,
+      store: store,
+    );
+    final book = _pdfBook();
+
+    await expectLater(
+      useCase.recognizeCurrentPage(
+        book: book,
+        pageNumber: 8,
+        requirePersistence: true,
+      ),
+      throwsStateError,
+    );
+    expect(cache.get(book.id, 8), isNull);
+
+    store.failWrites = false;
+    final retried = await useCase.recognizeCurrentPage(
+      book: book,
+      pageNumber: 8,
+      requirePersistence: true,
+    );
+
+    expect(retried.text, 'Durable result');
+    expect(engine.pdfPageCalls, 2);
+    expect(await store.getPage(book.id, 8), isNotNull);
   });
 
   test('session cache is LRU and bounded', () {
@@ -164,6 +261,235 @@ void main() {
       throwsA(isA<OcrUnavailableException>()),
     );
   });
+
+  test('cancelled cached requests do not return a success', () async {
+    final cache = OcrSessionCache()..put('book-ocr', 1, _result('old'));
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: _FakeEngine(text: 'new'),
+      cache: cache,
+    );
+    await expectLater(
+      useCase.recognizeCurrentPage(
+        book: _pdfBook(),
+        pageNumber: 1,
+        cancelToken: TaskCancelToken()..cancel(),
+      ),
+      throwsA(isA<TaskCancelledException>()),
+    );
+  });
+
+  test(
+    'explicit language requests do not reuse an unversioned page cache',
+    () async {
+      final cache = OcrSessionCache()..put('book-ocr', 1, _result('old'));
+      final engine = _FakeEngine(text: 'new');
+      final useCase = OcrCurrentPageUseCase(
+        rasterizer: _FakeRasterizer(),
+        engine: engine,
+        cache: cache,
+      );
+      final result = await useCase.recognizeCurrentPage(
+        book: _pdfBook(),
+        pageNumber: 1,
+        languageHint: 'eng',
+      );
+      expect(result.text, 'new');
+      expect(engine.pdfPageCalls, 1);
+    },
+  );
+
+  test(
+    'cancellation reaches the image engine and prevents cache or disk writes',
+    () async {
+      final started = Completer<Future<void>?>();
+      final engine = _FakeEngine(
+        text: 'late result',
+        supportsPdf: false,
+        delay: const Duration(milliseconds: 20),
+        onImageStarted: started.complete,
+      );
+      final cache = OcrSessionCache();
+      final store = MemoryOcrPageStore();
+      final token = TaskCancelToken();
+      final useCase = OcrCurrentPageUseCase(
+        rasterizer: _FakeRasterizer(),
+        engine: engine,
+        cache: cache,
+        store: store,
+      );
+      final assertion = expectLater(
+        useCase.recognizeCurrentPage(
+          book: _pdfBook(),
+          pageNumber: 1,
+          cancelToken: token,
+        ),
+        throwsA(isA<TaskCancelledException>()),
+      );
+      final signal = await started.future;
+      expect(signal, isNotNull);
+      token.cancel();
+      await signal;
+      await assertion;
+      expect(cache.get('book-ocr', 1), isNull);
+      expect(await store.getPage('book-ocr', 1), isNull);
+    },
+  );
+
+  test(
+    'a fresh request does not join the cancelled previous page request',
+    () async {
+      final started = Completer<void>();
+      final engine = _FakeEngine(
+        text: 'fresh',
+        supportsPdf: false,
+        delay: const Duration(milliseconds: 20),
+        onImageStarted: (_) {
+          if (!started.isCompleted) started.complete();
+        },
+      );
+      final useCase = OcrCurrentPageUseCase(
+        rasterizer: _FakeRasterizer(),
+        engine: engine,
+        cache: OcrSessionCache(),
+      );
+      final token = TaskCancelToken();
+      final previous = expectLater(
+        useCase.recognizeCurrentPage(
+          book: _pdfBook(),
+          pageNumber: 1,
+          cancelToken: token,
+        ),
+        throwsA(isA<TaskCancelledException>()),
+      );
+      await started.future;
+      token.cancel();
+      final fresh = await useCase.recognizeCurrentPage(
+        book: _pdfBook(),
+        pageNumber: 1,
+      );
+      await previous;
+      expect(fresh.text, 'fresh');
+      expect(engine.imageCalls, 2);
+    },
+  );
+
+  test(
+    'capability failures preserve an actionable message and error code',
+    () async {
+      final useCase = OcrCurrentPageUseCase(
+        rasterizer: _FakeRasterizer(),
+        engine: _UnavailableCapabilityEngine(),
+        cache: OcrSessionCache(),
+      );
+      await expectLater(
+        useCase.recognizeCurrentPage(book: _pdfBook(), pageNumber: 1),
+        throwsA(
+          isA<OcrUnavailableException>()
+              .having(
+                (error) => error.message,
+                'message',
+                contains('configs/tsv'),
+              )
+              .having((error) => error.code, 'code', 'ocr_probe_failed'),
+        ),
+      );
+    },
+  );
+
+  test('persists a signed, restorable recognition and reuses it', () async {
+    final store = MemoryOcrPageStore();
+    final engine = _FakeEngine(text: 'Signed result');
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: engine,
+      cache: OcrSessionCache(),
+      store: store,
+    );
+    final book = _pdfBook();
+
+    final first = await useCase.recognizeCurrentPage(book: book, pageNumber: 2);
+    expect(first.cacheSignature, isNotEmpty);
+    expect(first.sourceRevision, 'hash');
+    expect(first.textRevision, isNotEmpty);
+    expect(first.resultState, 'recognized');
+    expect(first.pipelineVersion, 'ocr-text-v1');
+
+    final stored = await store.getPage(book.id, 2);
+    expect(stored?.cacheSignature, first.cacheSignature);
+    expect(stored?.sourceRevision, 'hash');
+    expect(stored?.indexState, 'pending');
+
+    final freshUseCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: _FakeEngine(text: 'Should not run'),
+      cache: OcrSessionCache(),
+      store: store,
+    );
+    final restored = await freshUseCase.recognizeCurrentPage(
+      book: book,
+      pageNumber: 2,
+    );
+    expect(restored.text, 'Signed result');
+  });
+
+  test('empty OCR is a cached completion when allowEmpty is set', () async {
+    final store = MemoryOcrPageStore();
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: _FakeEngine(text: '   '),
+      cache: OcrSessionCache(),
+      store: store,
+    );
+    final book = _pdfBook();
+
+    final result = await useCase.recognizeCurrentPage(
+      book: book,
+      pageNumber: 3,
+      allowEmpty: true,
+    );
+    expect(result.text, isEmpty);
+    expect(result.resultState, 'empty');
+    expect(result.indexState, 'notApplicable');
+    final stored = await store.getPage(book.id, 3);
+    expect(stored?.resultState, 'empty');
+  });
+
+  test('a changed source revision invalidates a signed cache row', () async {
+    final store = MemoryOcrPageStore();
+    final useCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: _FakeEngine(text: 'old'),
+      cache: OcrSessionCache(),
+      store: store,
+    );
+    final book = _pdfBook();
+    await useCase.recognizeCurrentPage(book: book, pageNumber: 1);
+
+    final changedBook = Book(
+      id: book.id,
+      title: book.title,
+      format: book.format,
+      libraryFilePath: book.libraryFilePath,
+      fileHash: 'hash-new',
+      fileSize: book.fileSize,
+      createdAt: book.createdAt,
+      updatedAt: book.updatedAt,
+    );
+    final engine = _FakeEngine(text: 'new');
+    final freshUseCase = OcrCurrentPageUseCase(
+      rasterizer: _FakeRasterizer(),
+      engine: engine,
+      cache: OcrSessionCache(),
+      store: store,
+    );
+    final result = await freshUseCase.recognizeCurrentPage(
+      book: changedBook,
+      pageNumber: 1,
+    );
+    expect(result.text, 'new');
+    expect(engine.pdfPageCalls, 1);
+  });
 }
 
 Book _pdfBook() {
@@ -191,6 +517,8 @@ final class _FakeRasterizer implements PdfPageRasterizer {
     required String filePath,
     required int pageNumber,
     int dpi = PdfPageRasterizer.defaultDpi,
+    int maxEdge = PdfPageRasterizer.defaultMaxEdge,
+    int maxPixels = 5000000,
   }) async {
     calls += 1;
     return PdfPageImage(
@@ -203,20 +531,103 @@ final class _FakeRasterizer implements PdfPageRasterizer {
   }
 }
 
-final class _FakeEngine implements OcrEngine {
+final class _BlockingRasterizer implements PdfPageRasterizer {
+  final firstStarted = Completer<void>();
+  final releaseFirst = Completer<void>();
+  var calls = 0;
+  var active = 0;
+  var maxActive = 0;
+
+  @override
+  Future<PdfPageImage> renderPage({
+    required String filePath,
+    required int pageNumber,
+    int dpi = PdfPageRasterizer.defaultDpi,
+    int maxEdge = PdfPageRasterizer.defaultMaxEdge,
+    int maxPixels = 5000000,
+  }) async {
+    calls += 1;
+    active += 1;
+    if (active > maxActive) maxActive = active;
+    try {
+      if (calls == 1) {
+        firstStarted.complete();
+        await releaseFirst.future;
+      }
+      return PdfPageImage(
+        bytes: Uint8List.fromList(const [1, 2, 3]),
+        width: 10,
+        height: 10,
+        pageNumber: pageNumber,
+        dpi: dpi,
+      );
+    } finally {
+      active -= 1;
+    }
+  }
+}
+
+final class _FailingOcrPageStore implements OcrPageStore {
+  final Map<int, OcrPageResult> pages = {};
+  bool failWrites = true;
+
+  @override
+  Future<OcrPageResult?> getPage(String bookId, int pageNumber) async {
+    return pages[pageNumber];
+  }
+
+  @override
+  Future<List<OcrStoredPage>> listPages(String bookId) async => [
+    for (final entry in pages.entries)
+      OcrStoredPage(pageNumber: entry.key, result: entry.value),
+  ];
+
+  @override
+  Future<void> putPage({
+    required String bookId,
+    required int pageNumber,
+    required OcrPageResult result,
+    String? sourceRevision,
+    String? cacheSignature,
+    String? textRevision,
+    String? engineVersion,
+    String pipelineVersion = 'ocr-text-v1',
+    String resultState = 'recognized',
+    String indexState = 'pending',
+  }) async {
+    if (failWrites) throw StateError('disk write failed');
+    pages[pageNumber] = result;
+  }
+
+  @override
+  Future<void> deleteBook(String bookId) async => pages.clear();
+
+  @override
+  Future<void> deletePages(String bookId, Iterable<int> pageNumbers) async {
+    for (final pageNumber in pageNumbers) {
+      pages.remove(pageNumber);
+    }
+  }
+}
+
+class _FakeEngine implements OcrEngine {
   _FakeEngine({
     required this.text,
     this.available = true,
     this.supportsPdf = true,
     this.delay = Duration.zero,
+    this.onImageStarted,
   });
 
   final String text;
   final bool available;
   final bool supportsPdf;
   final Duration delay;
+  final void Function(Future<void>?)? onImageStarted;
   int pdfPageCalls = 0;
   int imageCalls = 0;
+  int? lastDpi;
+  int? lastMaxEdge;
 
   @override
   String get id => 'fake';
@@ -234,7 +645,9 @@ final class _FakeEngine implements OcrEngine {
   Future<OcrPageResult> recognize({
     required Uint8List imageBytes,
     required String languageHint,
+    Future<void>? cancelled,
   }) async {
+    onImageStarted?.call(cancelled);
     if (delay > Duration.zero) {
       await Future<void>.delayed(delay);
     }
@@ -250,6 +663,8 @@ final class _FakeEngine implements OcrEngine {
     int dpi = 200,
     int maxEdge = 2200,
   }) async {
+    lastDpi = dpi;
+    lastMaxEdge = maxEdge;
     if (delay > Duration.zero) {
       await Future<void>.delayed(delay);
     }
@@ -271,4 +686,16 @@ final class _FakeEngine implements OcrEngine {
       imageHeight: 1400,
     );
   }
+}
+
+final class _UnavailableCapabilityEngine extends _FakeEngine
+    implements OcrCapabilitySource {
+  _UnavailableCapabilityEngine() : super(text: 'unused');
+
+  @override
+  Future<OcrCapability> capability({bool refresh = false}) async =>
+      OcrCapability(
+        status: OcrCapabilityStatus.probeFailed,
+        message: '缺少 configs/tsv 输出配置',
+      );
 }

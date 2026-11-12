@@ -13,10 +13,14 @@ import '../../domain/books/book.dart';
 import '../../domain/books/reader_fonts.dart';
 import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
+import '../common/code_syntax.dart';
+import '../common/diagram/diagram_view.dart';
 import '../common/renderer_event.dart';
+import '../common/math_view.dart';
 import 'epub_document.dart';
 import 'epub_document_loader.dart';
 import 'epub_jump.dart';
+import '../../domain/books/locator_excerpt.dart';
 import 'epub_paginator.dart';
 
 final class EpubRendererView extends StatefulWidget {
@@ -30,6 +34,7 @@ final class EpubRendererView extends StatefulWidget {
     this.focusLocator,
     this.jumpToken = 0,
     this.documentLoader,
+    this.documentPath,
     super.key,
   });
 
@@ -52,12 +57,18 @@ final class EpubRendererView extends StatefulWidget {
   /// fake-async zone of `testWidgets` never settles.
   final BookDocumentLoader? documentLoader;
 
+  /// The file to open, when it is not the book's own library path.
+  ///
+  /// A folder book is one shelf entry over many notes; the reader opens the
+  /// active note and keeps the shelf path for identity.
+  final String? documentPath;
+
   @override
   State<EpubRendererView> createState() => _EpubRendererViewState();
 }
 
 final class _EpubRendererViewState extends State<EpubRendererView> {
-  late final Future<EpubDocument> _documentFuture;
+  late Future<EpubDocument> _documentFuture;
   final _scrollController = ScrollController();
   final _pageController = PageController();
   Timer? _locationTimer;
@@ -93,15 +104,21 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   String? _continuousItemsCacheKey;
   List<_ContinuousListItem> _continuousItems = const [];
   GlobalObjectKey? _jumpTargetKey;
+  GlobalObjectKey? _jumpTargetFragmentKey;
   int? _pendingJumpItemIndex;
+  int? _pendingJumpChapterOffset;
 
   @override
   void initState() {
     super.initState();
-    _documentFuture = (widget.documentLoader ?? EpubDocumentLoader()).load(
-      widget.book.libraryFilePath,
-    );
+    _documentFuture = _createDocumentFuture();
     _scrollController.addListener(_scheduleLocationReport);
+  }
+
+  Future<EpubDocument> _createDocumentFuture() {
+    return (widget.documentLoader ?? EpubDocumentLoader()).load(
+      widget.documentPath ?? widget.book.libraryFilePath,
+    );
   }
 
   @override
@@ -116,6 +133,21 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   @override
   void didUpdateWidget(covariant EpubRendererView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.documentPath != widget.documentPath ||
+        oldWidget.book.libraryFilePath != widget.book.libraryFilePath) {
+      _documentFuture = _createDocumentFuture();
+      _document = null;
+      _continuousRestored = false;
+      _pagedRestored = false;
+      _readySent = false;
+      _capabilitySent = false;
+      _invalidateMeasuredPages();
+      _continuousItemsCacheKey = null;
+      _jumpTargetKey = null;
+      _jumpTargetFragmentKey = null;
+      _pendingJumpItemIndex = null;
+      _pendingJumpChapterOffset = null;
+    }
     final modeChanged =
         oldWidget.settings.readerMode != widget.settings.readerMode;
     final typographyChanged =
@@ -164,6 +196,10 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
       }
       _continuousRestored = false;
       _pagedRestored = false;
+      _jumpTargetKey = null;
+      _jumpTargetFragmentKey = null;
+      _pendingJumpItemIndex = null;
+      _pendingJumpChapterOffset = null;
       if (document != null) {
         if (widget.settings.readerMode == ReaderMode.continuous) {
           _restoreInitialOffset(document);
@@ -290,7 +326,6 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
   ) {
     _restoreInitialOffset(document);
     final continuousItems = _continuousItemsFor(document);
-    final currentChapterIndex = _currentChapterIndex(document);
     final focusRange = _focusRange;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -320,7 +355,7 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
                     horizontalPadding,
                     settings.pageMargin + 8,
                     horizontalPadding,
-                    settings.pageMargin + 88,
+                    settings.pageMargin + 20,
                   ),
                   itemCount: continuousItems.length,
                   itemBuilder: (context, index) {
@@ -335,75 +370,58 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
                       key: itemKey,
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 760),
-                        child: switch (item) {
-                          _ContinuousChapterSlice(
-                            :final chapter,
-                            :final startBlock,
-                            :final endBlock,
-                            :final isFirst,
-                            :final isLast,
-                          ) =>
-                            Padding(
-                              padding: EdgeInsets.only(
-                                top: isFirst && chapter.index != 0 ? 20 : 0,
-                              ),
-                              child: _EpubChapterView(
-                                chapter: chapter,
-                                fragments: _sliceFragments(
-                                  chapter,
-                                  startBlock,
-                                  endBlock,
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: switch (item) {
+                            _ContinuousChapterSlice(
+                              :final chapter,
+                              :final startBlock,
+                              :final endBlock,
+                              :final isFirst,
+                              :final isLast,
+                            ) =>
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  top: isFirst && chapter.index != 0 ? 20 : 0,
                                 ),
-                                settings: settings,
-                                annotations: widget.annotations,
-                                searchQuery: widget.searchQuery,
-                                focusRange: focusRange,
-                                showTitle: isFirst,
-                                // Outer ListView already owns SelectionArea.
-                                enableSelection: false,
-                                bottomPadding: isLast ? 20 : 0,
-                                onAnnotationSelected: (annotation) {
-                                  widget.onEvent(
-                                    RendererAnnotationSelected(annotation.id),
-                                  );
-                                },
-                                onTextSelected: _reportTextSelected,
+                                child: _EpubChapterView(
+                                  chapter: chapter,
+                                  fragments: _sliceFragments(
+                                    chapter,
+                                    startBlock,
+                                    endBlock,
+                                  ),
+                                  settings: settings,
+                                  annotations: widget.annotations,
+                                  searchQuery: widget.searchQuery,
+                                  focusRange: focusRange,
+                                  showTitle: isFirst,
+                                  // Outer ListView already owns SelectionArea.
+                                  enableSelection: false,
+                                  bottomPadding: isLast ? 20 : 0,
+                                  jumpTargetOffset: isJumpTarget
+                                      ? _pendingJumpChapterOffset
+                                      : null,
+                                  jumpTargetKey: isJumpTarget
+                                      ? _jumpTargetFragmentKey
+                                      : null,
+                                  onAnnotationSelected: (annotation) {
+                                    widget.onEvent(
+                                      RendererAnnotationSelected(annotation.id),
+                                    );
+                                  },
+                                  onTextSelected: _reportTextSelected,
+                                  onExternalLink: (uri) => widget.onEvent(
+                                    RendererExternalLinkRequested(uri),
+                                  ),
+                                  onInternalLink: _handleInternalLink,
+                                ),
                               ),
-                            ),
-                        },
+                          },
+                        ),
                       ),
                     );
                   },
-                ),
-              ),
-            ),
-            _PageTurnZone(
-              alignment: Alignment.centerLeft,
-              tooltip: '上一页',
-              icon: Icons.chevron_left,
-              label: '上一页',
-              onTap: _pageBackward,
-            ),
-            _PageTurnZone(
-              alignment: Alignment.centerRight,
-              tooltip: '下一页',
-              icon: Icons.chevron_right,
-              label: '下一页',
-              onTap: _pageForward,
-            ),
-            Positioned(
-              left: 24,
-              right: 24,
-              bottom: 14,
-              child: Center(
-                child: _ChapterJumpBar(
-                  previousEnabled: currentChapterIndex > 0,
-                  nextEnabled:
-                      currentChapterIndex < document.chapters.length - 1,
-                  previousLabel: '上一章',
-                  nextLabel: '下一章',
-                  onPrevious: _previousChapter,
-                  onNext: _nextChapter,
                 ),
               ),
             ),
@@ -488,10 +506,21 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
           text: blocks[index].text,
           blockType: blocks[index].type,
           image: blocks[index].image,
-          tableRows: blocks[index].tableRows,
+          tableCells: blocks[index].tableCells,
           tableHasHeader: blocks[index].tableHasHeader,
+          tableAlignments: blocks[index].tableAlignments,
+          imageCaption: blocks[index].imageCaption,
           inlineRuns: blocks[index].inlineRuns,
           headingLevel: blocks[index].headingLevel,
+          listMarker: blocks[index].listMarker,
+          listIndent: blocks[index].listIndent,
+          quoteDepth: blocks[index].quoteDepth,
+          hasListHangingIndent: blocks[index].hasListHangingIndent,
+          taskChecked: blocks[index].taskChecked,
+          codeLanguage: blocks[index].codeLanguage,
+          codeRuns: blocks[index].codeRuns,
+          mathSource: blocks[index].mathSource,
+          diagramSource: blocks[index].diagramSource,
         ),
     ];
   }
@@ -548,6 +577,9 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
                         );
                       },
                       onTextSelected: _reportTextSelected,
+                      onExternalLink: (uri) =>
+                          widget.onEvent(RendererExternalLinkRequested(uri)),
+                      onInternalLink: _handleInternalLink,
                     ),
                   );
                 },
@@ -581,22 +613,51 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     final locator = widget.initialProgress?.locator;
     final items = _continuousItemsFor(document);
     if (locator != null && locator.chapterIndex != null && items.isNotEmpty) {
-      // The list holds several rows per chapter, so the saved chapter becomes
-      // that chapter's first row.
       final chapterIndex = locator.chapterIndex!.clamp(
         0,
         document.chapters.length - 1,
       );
+      final chapter = document.chapters[chapterIndex];
+      final chapterOffset = (locator.chapterOffset ?? 0).clamp(
+        0,
+        chapter.text.length,
+      );
       final firstItem = chapterIndex < _continuousChapterFirstItem.length
           ? _continuousChapterFirstItem[chapterIndex]
           : chapterIndex;
-      _pendingJumpItemIndex = firstItem.clamp(0, items.length - 1);
+      final blocks = epubBlocks(chapter);
+      var blockIndex = blocks.indexWhere(
+        (block) =>
+            block.startOffset <= chapterOffset &&
+            chapterOffset <= block.endOffset,
+      );
+      if (blockIndex < 0) {
+        blockIndex = blocks.lastIndexWhere(
+          (block) => block.startOffset <= chapterOffset,
+        );
+      }
+      if (blockIndex < 0) {
+        blockIndex = 0;
+      }
+      final sliceOffset = blockIndex ~/ _continuousBlocksPerSlice;
+      _pendingJumpItemIndex = (firstItem + sliceOffset).clamp(
+        0,
+        items.length - 1,
+      );
+      _pendingJumpChapterOffset = locator.chapterOffset;
       _jumpTargetKey = GlobalObjectKey(
         'jump-${widget.jumpToken}-$_pendingJumpItemIndex',
       );
+      _jumpTargetFragmentKey = locator.chapterOffset == null
+          ? null
+          : GlobalObjectKey(
+              'jump-fragment-${widget.jumpToken}-${locator.chapterOffset}',
+            );
     } else {
       _pendingJumpItemIndex = null;
+      _pendingJumpChapterOffset = null;
       _jumpTargetKey = null;
+      _jumpTargetFragmentKey = null;
     }
     _jumpContinuousToLocator(document, attempt: 0);
   }
@@ -614,7 +675,9 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
       }
 
       final locator = widget.initialProgress?.locator;
-      final targetContext = _jumpTargetKey?.currentContext;
+      final targetContext =
+          _jumpTargetFragmentKey?.currentContext ??
+          _jumpTargetKey?.currentContext;
       if (targetContext != null) {
         final reduceMotion = widget.settings.reduceMotion;
         Scrollable.ensureVisible(
@@ -1155,6 +1218,43 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     return compactLocatorExcerpt(text.substring(start, end));
   }
 
+  void _handleInternalLink(String target) {
+    final document = _document;
+    if (document == null || !target.startsWith('#')) {
+      return;
+    }
+    final rawId = target.substring(1);
+    var id = rawId;
+    try {
+      id = Uri.decodeComponent(rawId);
+    } on ArgumentError {
+      // A literal percent sign is a valid target name, not an encoding error.
+    }
+    for (final chapter in document.chapters) {
+      final anchor = chapter.anchors[id];
+      if (anchor == null) {
+        continue;
+      }
+      final offset = anchor.clamp(0, chapter.text.length).toInt();
+      final progress = document.progressForChapter(
+        chapterIndex: chapter.index,
+        chapterOffset: offset,
+      );
+      widget.onEvent(
+        RendererInternalLinkRequested(
+          _locator(
+            href: chapter.href,
+            chapterIndex: chapter.index,
+            chapterOffset: offset,
+            progress: progress,
+            excerpt: _excerptAtChapterOffset(chapter, offset),
+          ),
+        ),
+      );
+      return;
+    }
+  }
+
   void _reportPagedLocation(
     EpubDocument document,
     List<EpubPage> pages,
@@ -1396,9 +1496,11 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
           : chapterIndex.clamp(0, items.length - 1);
       if (itemIndex >= 0) {
         _pendingJumpItemIndex = itemIndex;
+        _pendingJumpChapterOffset = null;
         _jumpTargetKey = GlobalObjectKey(
           'chapter-jump-${widget.jumpToken}-$itemIndex',
         );
+        _jumpTargetFragmentKey = null;
         // Force one rebuild so the target item key is attached, then ensureVisible.
         setState(() {});
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1623,79 +1725,6 @@ final class _PageTurnZoneState extends State<_PageTurnZone> {
   }
 }
 
-final class _ChapterJumpBar extends StatefulWidget {
-  const _ChapterJumpBar({
-    required this.previousEnabled,
-    required this.nextEnabled,
-    required this.previousLabel,
-    required this.nextLabel,
-    required this.onPrevious,
-    required this.onNext,
-  });
-
-  final bool previousEnabled;
-  final bool nextEnabled;
-  final String previousLabel;
-  final String nextLabel;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
-
-  @override
-  State<_ChapterJumpBar> createState() => _ChapterJumpBarState();
-}
-
-final class _ChapterJumpBarState extends State<_ChapterJumpBar> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 140),
-        opacity: _hovered ? 1 : 0.72,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: colorScheme.surface.withValues(alpha: 0.9),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: colorScheme.outlineVariant),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextButton.icon(
-                  onPressed: widget.previousEnabled ? widget.onPrevious : null,
-                  icon: const Icon(Icons.skip_previous_outlined, size: 18),
-                  label: Text(widget.previousLabel),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-                SizedBox(
-                  height: 22,
-                  child: VerticalDivider(color: colorScheme.outlineVariant),
-                ),
-                TextButton.icon(
-                  onPressed: widget.nextEnabled ? widget.onNext : null,
-                  icon: const Icon(Icons.skip_next_outlined, size: 18),
-                  label: Text(widget.nextLabel),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 final class _EpubPagedPageView extends StatelessWidget {
   const _EpubPagedPageView({
     required this.page,
@@ -1711,6 +1740,8 @@ final class _EpubPagedPageView extends StatelessWidget {
     required this.onNextChapter,
     required this.onAnnotationSelected,
     required this.onTextSelected,
+    required this.onExternalLink,
+    required this.onInternalLink,
   });
 
   final EpubPage page;
@@ -1726,6 +1757,8 @@ final class _EpubPagedPageView extends StatelessWidget {
   final VoidCallback onNextChapter;
   final ValueChanged<Annotation> onAnnotationSelected;
   final ValueChanged<_EpubTextSelection> onTextSelected;
+  final ValueChanged<String> onExternalLink;
+  final ValueChanged<String> onInternalLink;
 
   @override
   Widget build(BuildContext context) {
@@ -1739,104 +1772,112 @@ final class _EpubPagedPageView extends StatelessWidget {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      page.chapter.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: textColor.withValues(alpha: 0.64),
+          child: SizedBox(
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        page.chapter.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              color: textColor.withValues(alpha: 0.64),
+                            ),
                       ),
                     ),
-                  ),
-                  Text(
-                    '${page.pageNumberInChapter}/${page.totalPagesInChapter}',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: textColor.withValues(alpha: 0.56),
+                    Text(
+                      '${page.pageNumberInChapter}/${page.totalPagesInChapter}',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: textColor.withValues(alpha: 0.56),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(
-                        color: colorScheme.outlineVariant.withValues(
-                          alpha: 0.55,
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(
+                          color: colorScheme.outlineVariant.withValues(
+                            alpha: 0.55,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  child: ClipRect(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 18, bottom: 12),
-                      child: _EpubChapterView(
-                        chapter: page.chapter,
-                        settings: settings,
-                        annotations: annotations,
-                        searchQuery: searchQuery,
-                        focusRange: focusRange,
-                        fragments: page.fragments,
-                        showTitle: false,
-                        bottomPadding: 0,
-                        onAnnotationSelected: onAnnotationSelected,
-                        onTextSelected: onTextSelected,
+                    child: ClipRect(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 18, bottom: 12),
+                        child: _EpubChapterView(
+                          chapter: page.chapter,
+                          settings: settings,
+                          annotations: annotations,
+                          searchQuery: searchQuery,
+                          focusRange: focusRange,
+                          fragments: page.fragments,
+                          showTitle: false,
+                          bottomPadding: 0,
+                          onAnnotationSelected: onAnnotationSelected,
+                          onTextSelected: onTextSelected,
+                          onExternalLink: onExternalLink,
+                          onInternalLink: onInternalLink,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: hasPreviousChapter ? onPreviousChapter : null,
-                    icon: const Icon(Icons.skip_previous_outlined, size: 18),
-                    label: const Text('上一章'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      foregroundColor: textColor.withValues(alpha: 0.72),
-                    ),
-                  ),
-                  const Spacer(),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        // Paged mode measures one chapter at a time.
-                        '本章 $bookPageNumber / $totalBookPages',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: textColor.withValues(alpha: 0.6),
-                        ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: hasPreviousChapter ? onPreviousChapter : null,
+                      icon: const Icon(Icons.skip_previous_outlined, size: 18),
+                      label: const Text('上一章'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: textColor.withValues(alpha: 0.72),
                       ),
-                      Text(
-                        '${(page.progress * 100).round()}%',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: textColor.withValues(alpha: 0.46),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: hasNextChapter ? onNextChapter : null,
-                    icon: const Icon(Icons.skip_next_outlined, size: 18),
-                    label: const Text('下一章'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      foregroundColor: textColor.withValues(alpha: 0.72),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                    const Spacer(),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          // Paged mode measures one chapter at a time.
+                          '本章 $bookPageNumber / $totalBookPages',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: textColor.withValues(alpha: 0.6),
+                              ),
+                        ),
+                        Text(
+                          '${(page.progress * 100).round()}%',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: textColor.withValues(alpha: 0.46),
+                              ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: hasNextChapter ? onNextChapter : null,
+                      icon: const Icon(Icons.skip_next_outlined, size: 18),
+                      label: const Text('下一章'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: textColor.withValues(alpha: 0.72),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1852,11 +1893,15 @@ final class _EpubChapterView extends StatefulWidget {
     required this.searchQuery,
     required this.onAnnotationSelected,
     required this.onTextSelected,
+    required this.onExternalLink,
+    required this.onInternalLink,
     this.focusRange,
     this.fragments,
     this.showTitle = true,
     this.bottomPadding = 32,
     this.enableSelection = true,
+    this.jumpTargetOffset,
+    this.jumpTargetKey,
   });
 
   final EpubChapter chapter;
@@ -1866,9 +1911,13 @@ final class _EpubChapterView extends StatefulWidget {
   final ({int chapterIndex, int start, int end, String? excerpt})? focusRange;
   final ValueChanged<Annotation> onAnnotationSelected;
   final ValueChanged<_EpubTextSelection> onTextSelected;
+  final ValueChanged<String> onExternalLink;
+  final ValueChanged<String> onInternalLink;
   final List<EpubPageFragment>? fragments;
   final bool showTitle;
   final double bottomPadding;
+  final int? jumpTargetOffset;
+  final GlobalObjectKey? jumpTargetKey;
 
   /// When false, parent owns SelectionArea (continuous mode).
   final bool enableSelection;
@@ -1891,7 +1940,12 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (widget.showTitle) ...[
+        if (widget.showTitle &&
+            !fragments.any(
+              (fragment) =>
+                  fragment.blockType == EpubBlockType.heading &&
+                  fragment.text.trim() == widget.chapter.title.trim(),
+            )) ...[
           Text(
             widget.chapter.title,
             style: Theme.of(
@@ -1901,15 +1955,20 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
           const SizedBox(height: 16),
         ],
         for (final fragment in fragments)
-          _EpubFragmentView(
-            chapter: widget.chapter,
-            fragment: fragment,
-            settings: settings,
-            annotations: widget.annotations,
-            searchQuery: widget.searchQuery,
-            focusRange: widget.focusRange,
-            onAnnotationSelected: widget.onAnnotationSelected,
-            onTextSelected: widget.onTextSelected,
+          KeyedSubtree(
+            key: _isJumpTarget(fragment) ? widget.jumpTargetKey : null,
+            child: _EpubFragmentView(
+              chapter: widget.chapter,
+              fragment: fragment,
+              settings: settings,
+              annotations: widget.annotations,
+              searchQuery: widget.searchQuery,
+              focusRange: widget.focusRange,
+              onAnnotationSelected: widget.onAnnotationSelected,
+              onTextSelected: widget.onTextSelected,
+              onExternalLink: widget.onExternalLink,
+              onInternalLink: widget.onInternalLink,
+            ),
           ),
       ],
     );
@@ -1967,6 +2026,14 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
     );
   }
 
+  bool _isJumpTarget(EpubPageFragment fragment) {
+    final offset = widget.jumpTargetOffset;
+    return widget.jumpTargetKey != null &&
+        offset != null &&
+        fragment.startOffset <= offset &&
+        offset <= fragment.endOffset;
+  }
+
   List<EpubPageFragment> _fragmentsForChapter() {
     final provided = widget.fragments;
     if (provided != null) {
@@ -1986,10 +2053,21 @@ final class _EpubChapterViewState extends State<_EpubChapterView> {
             text: block.text,
             blockType: block.type,
             image: block.image,
-            tableRows: block.tableRows,
+            tableCells: block.tableCells,
             tableHasHeader: block.tableHasHeader,
+            tableAlignments: block.tableAlignments,
+            imageCaption: block.imageCaption,
             inlineRuns: block.inlineRuns,
             headingLevel: block.headingLevel,
+            listMarker: block.listMarker,
+            listIndent: block.listIndent,
+            quoteDepth: block.quoteDepth,
+            hasListHangingIndent: block.hasListHangingIndent,
+            taskChecked: block.taskChecked,
+            codeLanguage: block.codeLanguage,
+            codeRuns: block.codeRuns,
+            mathSource: block.mathSource,
+            diagramSource: block.diagramSource,
           ),
         )
         .toList(growable: false);
@@ -2008,6 +2086,8 @@ final class _EpubFragmentView extends StatefulWidget {
     required this.searchQuery,
     required this.onAnnotationSelected,
     required this.onTextSelected,
+    required this.onExternalLink,
+    required this.onInternalLink,
     this.focusRange,
   });
 
@@ -2019,6 +2099,8 @@ final class _EpubFragmentView extends StatefulWidget {
   final ({int chapterIndex, int start, int end, String? excerpt})? focusRange;
   final ValueChanged<Annotation> onAnnotationSelected;
   final ValueChanged<_EpubTextSelection> onTextSelected;
+  final ValueChanged<String> onExternalLink;
+  final ValueChanged<String> onInternalLink;
 
   @override
   State<_EpubFragmentView> createState() => _EpubFragmentViewState();
@@ -2065,62 +2147,442 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     _inlineRecognizers.clear();
   }
 
+  /// The styled stretches inside one table cell.
+  ///
+  /// Cell runs use offsets local to the cell, because the cell is laid out as
+  /// its own text widget. Links still go through the same host callbacks as
+  /// links in prose, and search hits and annotations are mapped back through
+  /// the cell's chapter offset.
+  List<InlineSpan> _cellSpansFor(EpubTableCell cell, TextStyle baseStyle) {
+    final text = cell.text;
+    if (text.isEmpty) {
+      return const <InlineSpan>[];
+    }
+    final runs = cell.runs;
+    final matches = _cellMatchesFor(cell);
+    if (runs.isEmpty && matches.isEmpty) {
+      return <InlineSpan>[TextSpan(text: text)];
+    }
+    final points = <int>{0, text.length};
+    for (final run in runs) {
+      points
+        ..add(run.start.clamp(0, text.length))
+        ..add(run.end.clamp(0, text.length));
+    }
+    for (final match in matches) {
+      points
+        ..add(match.start.clamp(0, text.length))
+        ..add(match.end.clamp(0, text.length));
+    }
+    final boundaries = points.toList()..sort();
+    final accent = widget.settings.themePreset.link;
+    final codeBackground = widget.settings.themePreset.foreground.withValues(
+      alpha: 0.06,
+    );
+    final spans = <InlineSpan>[];
+    var matchIndex = 0;
+    for (var index = 0; index + 1 < boundaries.length; index += 1) {
+      final start = boundaries[index];
+      final end = boundaries[index + 1];
+      if (start >= end) {
+        continue;
+      }
+      var style = epubInlineRunStyle(
+        baseStyle,
+        runs,
+        start,
+        end,
+        accent: accent,
+        codeBackground: codeBackground,
+      );
+      while (matchIndex < matches.length && matches[matchIndex].end <= start) {
+        matchIndex += 1;
+      }
+      final match =
+          matchIndex < matches.length &&
+              matches[matchIndex].start <= start &&
+              matches[matchIndex].end >= end
+          ? matches[matchIndex]
+          : null;
+      if (match != null) {
+        if (match.isFocusHit) {
+          style = style.copyWith(backgroundColor: _focusHitColor());
+        } else if (match.isSearchHit) {
+          style = style.copyWith(backgroundColor: _searchHitColor());
+        } else {
+          final annotation = match.annotation!;
+          style = style.copyWith(
+            backgroundColor: annotation.style == AnnotationStyle.highlight
+                ? _highlightColor(annotation.color)
+                : style.backgroundColor,
+            decoration: annotation.style == AnnotationStyle.underline
+                ? TextDecoration.combine([
+                    if (style.decoration != null &&
+                        style.decoration != TextDecoration.none)
+                      style.decoration!,
+                    TextDecoration.underline,
+                  ])
+                : style.decoration,
+            decorationColor: _highlightColor(annotation.color),
+            decorationThickness: 2,
+          );
+        }
+      }
+      TapGestureRecognizer? recognizer;
+      String? target;
+      var external = false;
+      for (final run in runs) {
+        final candidate = run.target;
+        if (candidate == null ||
+            candidate.isEmpty ||
+            run.start > start ||
+            run.end < end) {
+          continue;
+        }
+        final internal =
+            candidate.startsWith('#') &&
+            (run.style == EpubInlineStyle.link ||
+                run.style == EpubInlineStyle.footnote);
+        final isExternal =
+            run.style == EpubInlineStyle.link &&
+            _isSafeExternalTarget(candidate);
+        if (!internal && !isExternal) {
+          continue;
+        }
+        target = candidate;
+        external = isExternal;
+        break;
+      }
+      if (target != null) {
+        final linkTarget = target;
+        recognizer = TapGestureRecognizer()
+          ..onTap = () => external
+              ? widget.onExternalLink(linkTarget)
+              : widget.onInternalLink(linkTarget);
+        _inlineRecognizers.add(recognizer);
+      } else if (match != null && !match.isFocusHit && !match.isSearchHit) {
+        final annotation = match.annotation!;
+        recognizer = TapGestureRecognizer()
+          ..onTap = () => widget.onAnnotationSelected(annotation);
+        _inlineRecognizers.add(recognizer);
+      }
+      EpubInlineRun? mathRun;
+      for (final run in runs) {
+        if (run.style != EpubInlineStyle.math ||
+            run.mathSource == null ||
+            run.start > start ||
+            run.end < end) {
+          continue;
+        }
+        mathRun = run;
+        break;
+      }
+      if (mathRun != null) {
+        spans.add(
+          TextSpan(
+            style: style,
+            recognizer: recognizer,
+            children: <InlineSpan>[
+              _mathSpan(
+                source: mathRun.mathSource!,
+                fallback: text.substring(start, end),
+                style: style,
+              ),
+            ],
+          ),
+        );
+      } else {
+        spans.add(
+          TextSpan(
+            text: text.substring(start, end),
+            style: style,
+            recognizer: recognizer,
+          ),
+        );
+      }
+    }
+    return spans;
+  }
+
+  /// Search, focus and annotation ranges inside one table cell.
+  ///
+  /// Annotations and focus ranges carry chapter offsets, so they are clipped
+  /// against the cell's chapter range. Text matching is the fallback for
+  /// older annotations that have no offset.
+  List<_AnnotationMatch> _cellMatchesFor(EpubTableCell cell) {
+    final matches = <_AnnotationMatch>[];
+    final chapter = widget.chapter;
+    final text = cell.text;
+    final cellStart = cell.chapterOffset;
+    final cellEnd = cellStart < 0 ? null : cellStart + text.length;
+
+    for (final annotation in widget.annotations) {
+      final locatorChapter = annotation.locator.chapterIndex;
+      if (locatorChapter != null && locatorChapter != chapter.index) {
+        continue;
+      }
+      final selected = annotation.selectedText.trim();
+      if (selected.isEmpty) {
+        continue;
+      }
+      final locatorStart = annotation.locator.chapterOffset;
+      if (cellEnd != null &&
+          locatorStart != null &&
+          annotation.locator.chapterIndex == chapter.index) {
+        final locatorEnd =
+            annotation.locator.chapterEndOffset ??
+            locatorStart + selected.length;
+        final overlapStart = locatorStart > cellStart
+            ? locatorStart
+            : cellStart;
+        final overlapEnd = locatorEnd < cellEnd ? locatorEnd : cellEnd;
+        if (overlapStart < overlapEnd) {
+          matches.add(
+            _AnnotationMatch(
+              start: overlapStart - cellStart,
+              end: overlapEnd - cellStart,
+              annotation: annotation,
+            ),
+          );
+        }
+        continue;
+      }
+      var start = 0;
+      while (true) {
+        final index = text.indexOf(selected, start);
+        if (index < 0) {
+          break;
+        }
+        matches.add(
+          _AnnotationMatch(
+            start: index,
+            end: index + selected.length,
+            annotation: annotation,
+          ),
+        );
+        start = index + selected.length;
+      }
+    }
+
+    final query = widget.searchQuery?.trim();
+    if (query != null && query.isNotEmpty) {
+      final lowerText = text.toLowerCase();
+      final lowerQuery = query.toLowerCase();
+      var start = 0;
+      while (true) {
+        final index = lowerText.indexOf(lowerQuery, start);
+        if (index < 0) {
+          break;
+        }
+        matches.add(
+          _AnnotationMatch(
+            start: index,
+            end: index + query.length,
+            annotation: null,
+            isSearchHit: true,
+          ),
+        );
+        start = index + query.length;
+      }
+    }
+
+    final focusRange = widget.focusRange;
+    final hasFocus =
+        focusRange != null && focusRange.chapterIndex == chapter.index;
+    if (hasFocus) {
+      final focusStart = focusRange.start;
+      final focusEnd = focusRange.end;
+      if (cellEnd != null && focusEnd > focusStart) {
+        final overlapStart = focusStart > cellStart ? focusStart : cellStart;
+        final overlapEnd = focusEnd < cellEnd ? focusEnd : cellEnd;
+        if (overlapStart < overlapEnd) {
+          matches.add(
+            _AnnotationMatch(
+              start: overlapStart - cellStart,
+              end: overlapEnd - cellStart,
+              annotation: null,
+              isFocusHit: true,
+            ),
+          );
+        }
+      } else {
+        final excerpt = focusRange.excerpt?.trim();
+        if (excerpt != null && excerpt.isNotEmpty) {
+          final index = text.toLowerCase().indexOf(excerpt.toLowerCase());
+          if (index >= 0) {
+            matches.add(
+              _AnnotationMatch(
+                start: index,
+                end: index + excerpt.length,
+                annotation: null,
+                isFocusHit: true,
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    matches.sort((a, b) {
+      final startCompare = a.start.compareTo(b.start);
+      if (startCompare != 0) {
+        return startCompare;
+      }
+      if (a.annotation != null && b.annotation == null) {
+        return -1;
+      }
+      if (a.annotation == null && b.annotation != null) {
+        return 1;
+      }
+      if (a.isFocusHit != b.isFocusHit) {
+        return a.isFocusHit ? 1 : -1;
+      }
+      return a.isSearchHit ? 1 : -1;
+    });
+    final kept = <_AnnotationMatch>[];
+    var cursor = 0;
+    for (final match in matches) {
+      if (match.start < cursor) {
+        continue;
+      }
+      kept.add(match);
+      cursor = match.end;
+    }
+    return kept;
+  }
+
   @override
   Widget build(BuildContext context) {
     final fragment = widget.fragment;
+    final quoteDepth = fragment.quoteDepth > 0
+        ? fragment.quoteDepth
+        : (fragment.blockType == EpubBlockType.quote ? 1 : 0);
+    final content = _contentFor(fragment);
+    final quoted = quoteDepth == 0
+        ? content
+        : _EpubQuoteBlock(
+            settings: widget.settings,
+            depth: quoteDepth,
+            child: content,
+          );
+    return Padding(
+      padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
+      child: quoted,
+    );
+  }
+
+  Widget _contentFor(EpubPageFragment fragment) {
     if (fragment.blockType == EpubBlockType.image) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
-        child: _EpubImageView(settings: widget.settings, image: fragment.image),
+      return _EpubImageView(
+        settings: widget.settings,
+        image: fragment.image,
+        caption: fragment.imageCaption,
       );
     }
-    final tableRows = fragment.tableRows;
-    if (tableRows != null) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
-        child: _EpubTableBlock(
-          settings: widget.settings,
-          rows: tableRows,
-          hasHeader: fragment.tableHasHeader,
-        ),
+    final tableCells = fragment.tableCells;
+    if (tableCells != null) {
+      _disposeInlineRecognizers();
+      return _EpubTableBlock(
+        settings: widget.settings,
+        cells: tableCells,
+        hasHeader: fragment.tableHasHeader,
+        alignments: fragment.tableAlignments,
+        cellSpans: _cellSpansFor,
       );
     }
     if (fragment.blockType == EpubBlockType.divider) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
-        child: _EpubDivider(settings: widget.settings),
+      return _EpubDivider(settings: widget.settings);
+    }
+    if (fragment.blockType == EpubBlockType.math &&
+        fragment.mathSource != null) {
+      return DisplayMathView(
+        source: fragment.mathSource!,
+        fallback: fragment.text,
+        style: _baseStyle(),
       );
     }
     final style = _styleForFragment(fragment, _baseStyle());
+    final marker = fragment.listMarker;
+    final markerLength = fragment.listMarker != null ? marker?.length ?? 0 : 0;
+    final visibleText = markerLength == 0
+        ? fragment.text
+        : fragment.text.substring(markerLength.clamp(0, fragment.text.length));
     // Use plain Text.rich so a parent SelectionArea can span multiple
     // paragraphs. SelectableText creates isolated selection regions.
     final text = Text.rich(
-      TextSpan(style: style, children: _spansFor(style)),
+      TextSpan(
+        style: style,
+        children: _spansFor(
+          style,
+          markerLength: markerLength,
+          visibleText: visibleText,
+        ),
+      ),
       strutStyle: StrutStyle.fromTextStyle(style, forceStrutHeight: true),
       textAlign: fragment.blockType == EpubBlockType.heading
           ? TextAlign.start
           : TextAlign.left,
     );
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: _spacingForFragment(fragment)),
-      child: switch (fragment.blockType) {
-        EpubBlockType.code => _EpubCodeBlock(
-          settings: widget.settings,
-          child: text,
-        ),
-        EpubBlockType.caption => _EpubCaption(child: text),
-        EpubBlockType.quote => _EpubQuoteBlock(
-          settings: widget.settings,
-          child: text,
-        ),
-        EpubBlockType.image ||
-        EpubBlockType.table ||
-        EpubBlockType.divider ||
-        EpubBlockType.heading ||
-        EpubBlockType.paragraph => text,
-      },
-    );
+    final body = marker == null
+        ? text
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (fragment.hasListHangingIndent)
+                SizedBox(
+                  width: epubListHangingIndent * (fragment.listIndent + 1.0),
+                  child: SelectionContainer.disabled(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        left: epubListHangingIndent * fragment.listIndent,
+                      ),
+                      child: fragment.taskChecked == null
+                          ? Text(marker.trim(), style: style)
+                          : _EpubTaskMarker(
+                              checked: fragment.taskChecked!,
+                              style: style,
+                              settings: widget.settings,
+                            ),
+                    ),
+                  ),
+                ),
+              Expanded(child: text),
+            ],
+          );
+
+    return switch (fragment.blockType) {
+      EpubBlockType.code => _EpubCodeBlock(
+        settings: widget.settings,
+        language: fragment.codeLanguage,
+        child: body,
+      ),
+      EpubBlockType.math => _EpubCodeBlock(
+        settings: widget.settings,
+        language: fragment.codeLanguage ?? 'LaTeX',
+        child: body,
+      ),
+      EpubBlockType.diagram => _EpubCodeBlock(
+        settings: widget.settings,
+        language: fragment.codeLanguage ?? 'Mermaid',
+        child: _diagramBodyFor(fragment, body),
+      ),
+      EpubBlockType.caption => _EpubCaption(child: body),
+      EpubBlockType.quote => body,
+      EpubBlockType.image ||
+      EpubBlockType.table ||
+      EpubBlockType.divider ||
+      EpubBlockType.heading ||
+      EpubBlockType.paragraph => body,
+    };
+  }
+
+  Widget _diagramBodyFor(EpubPageFragment fragment, Widget fallback) {
+    final source = fragment.diagramSource;
+    if (source == null || source.isEmpty) {
+      return fallback;
+    }
+    return MermaidDiagramView(source: source, settings: widget.settings);
   }
 
   TextStyle _baseStyle() {
@@ -2145,18 +2607,12 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
   }
 
   double _spacingForFragment(EpubPageFragment fragment) {
-    return switch (fragment.blockType) {
-      EpubBlockType.heading =>
-        widget.settings.paragraphSpacing *
-            epubHeadingSpacingFactor(fragment.headingLevel),
-      EpubBlockType.code => widget.settings.paragraphSpacing * 1.35,
-      EpubBlockType.caption => widget.settings.paragraphSpacing * 0.6,
-      EpubBlockType.image => widget.settings.paragraphSpacing * 1.2,
-      EpubBlockType.table => widget.settings.paragraphSpacing * 1.1,
-      EpubBlockType.divider => widget.settings.paragraphSpacing * 1.1,
-      EpubBlockType.quote ||
-      EpubBlockType.paragraph => widget.settings.paragraphSpacing,
-    };
+    return epubBlockSpacing(
+      type: fragment.blockType,
+      paragraphSpacing: widget.settings.paragraphSpacing,
+      headingLevel: fragment.headingLevel,
+      isList: fragment.listMarker != null,
+    );
   }
 
   TextStyle _styleForFragment(EpubPageFragment fragment, TextStyle baseStyle) {
@@ -2169,6 +2625,11 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
         fontFamily: 'monospace',
         fontSize: baseStyle.fontSize! * 0.92,
         height: 1.52,
+      ),
+      EpubBlockType.math || EpubBlockType.diagram => baseStyle.copyWith(
+        fontSize: baseStyle.fontSize! * 0.9,
+        height: 1.45,
+        color: baseStyle.color?.withValues(alpha: 0.72),
       ),
       EpubBlockType.caption => baseStyle.copyWith(
         fontSize: baseStyle.fontSize! * 0.88,
@@ -2185,13 +2646,18 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     };
   }
 
-  List<InlineSpan> _spansFor(TextStyle style) {
+  List<InlineSpan> _spansFor(
+    TextStyle style, {
+    required int markerLength,
+    required String visibleText,
+  }) {
     final focus = widget.focusRange;
     final cacheKey = Object.hash(
       widget.fragment.startOffset,
       widget.fragment.endOffset,
-      widget.fragment.text,
+      visibleText,
       Object.hashAll(widget.fragment.inlineRuns),
+      Object.hashAll(widget.fragment.codeRuns),
       widget.searchQuery,
       focus?.chapterIndex,
       focus?.start,
@@ -2199,6 +2665,8 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       focus?.excerpt,
       widget.annotations.length,
       widget.settings.themePreset,
+      widget.fragment.codeLanguage,
+      markerLength,
       style.fontSize,
       style.height,
       style.fontFamily,
@@ -2210,7 +2678,12 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       return _cachedSpans!;
     }
     _disposeInlineRecognizers();
-    final spans = _buildTextSpans(widget.fragment, style);
+    final spans = _buildTextSpans(
+      widget.fragment,
+      style,
+      markerLength,
+      visibleText,
+    );
     _spanCacheKey = cacheKey;
     _cachedSpans = spans;
     _cachedBaseStyle = style;
@@ -2220,8 +2693,9 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
   List<InlineSpan> _buildTextSpans(
     EpubPageFragment fragment,
     TextStyle baseStyle,
+    int markerLength,
+    String text,
   ) {
-    final text = fragment.text;
     final chapter = widget.chapter;
     final chapterAnnotations = widget.annotations
         .where((annotation) {
@@ -2234,11 +2708,15 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     final hasFocus =
         focusRange != null && focusRange.chapterIndex == chapter.index;
     final runs = _inlineRunsFor(fragment);
+    final targets = _linkTargetsFor(fragment, markerLength);
+    final codeRuns = _codeRunsFor(fragment);
     if (runs.isEmpty &&
+        codeRuns.isEmpty &&
         chapterAnnotations.isEmpty &&
         (query == null || query.isEmpty) &&
-        !hasFocus) {
-      return [TextSpan(text: text)];
+        !hasFocus &&
+        targets.isEmpty) {
+      return _plainSpans(text, markerLength);
     }
 
     final matches = <_AnnotationMatch>[];
@@ -2394,8 +2872,8 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       kept.add(match);
       cursor = match.end;
     }
-    if (kept.isEmpty && runs.isEmpty) {
-      return [TextSpan(text: text)];
+    if (kept.isEmpty && runs.isEmpty && codeRuns.isEmpty && targets.isEmpty) {
+      return _plainSpans(text, markerLength);
     }
 
     // A span is as long as the stretch where nothing changes: a run of styled
@@ -2403,8 +2881,16 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     // styles honest instead of letting one of them swallow the others.
     final points = <int>{0, text.length};
     for (final run in runs) {
+      points.add(run.start - markerLength);
+      points.add(run.end - markerLength);
+    }
+    for (final run in codeRuns) {
       points.add(run.start);
       points.add(run.end);
+    }
+    for (final target in targets) {
+      points.add(target.start - markerLength);
+      points.add(target.end - markerLength);
     }
     for (final match in kept) {
       points.add(match.start);
@@ -2416,6 +2902,7 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
 
     final spans = <InlineSpan>[];
     var matchIndex = 0;
+    var targetIndex = 0;
     for (var index = 0; index + 1 < boundaries.length; index += 1) {
       final start = boundaries[index];
       final end = boundaries[index + 1];
@@ -2425,14 +2912,34 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
       while (matchIndex < kept.length && kept[matchIndex].end <= start) {
         matchIndex += 1;
       }
+      while (targetIndex < targets.length &&
+          targets[targetIndex].end - markerLength <= start) {
+        targetIndex += 1;
+      }
       final match =
           matchIndex < kept.length &&
               kept[matchIndex].start <= start &&
               kept[matchIndex].end >= end
           ? kept[matchIndex]
           : null;
-      var style = _styleWithInlineRuns(baseStyle, runs, start, end);
+      var style = _styleWithInlineRuns(
+        baseStyle,
+        runs,
+        start + markerLength,
+        end + markerLength,
+      );
+      if (codeRuns.isNotEmpty) {
+        style = _styleWithCodeRuns(style, codeRuns, start, end);
+      }
       TapGestureRecognizer? recognizer;
+      ({int start, int end, String target, bool external})? linkedTarget;
+      if (targetIndex < targets.length) {
+        final target = targets[targetIndex];
+        if (target.start - markerLength <= start &&
+            target.end - markerLength >= end) {
+          linkedTarget = target;
+        }
+      }
       if (match != null) {
         if (match.isFocusHit) {
           style = style.copyWith(backgroundColor: _focusHitColor());
@@ -2460,15 +2967,68 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
           );
         }
       }
+      if (linkedTarget != null) {
+        final target = linkedTarget;
+        recognizer = TapGestureRecognizer()
+          ..onTap = () => target.external
+              ? widget.onExternalLink(target.target)
+              : widget.onInternalLink(target.target);
+        _inlineRecognizers.add(recognizer);
+      }
       spans.add(
-        TextSpan(
+        _spanForStretch(
           text: text.substring(start, end),
-          recognizer: recognizer,
           style: style,
+          recognizer: recognizer,
+          runs: runs,
+          markerLength: markerLength,
+          start: start,
+          end: end,
         ),
       );
     }
     return spans;
+  }
+
+  InlineSpan _spanForStretch({
+    required String text,
+    required TextStyle style,
+    required GestureRecognizer? recognizer,
+    required List<EpubInlineRun> runs,
+    required int markerLength,
+    required int start,
+    required int end,
+  }) {
+    for (final run in runs) {
+      if (run.style != EpubInlineStyle.math || run.mathSource == null) {
+        continue;
+      }
+      final runStart = run.start - markerLength;
+      final runEnd = run.end - markerLength;
+      if (runStart < start || runEnd > end) {
+        continue;
+      }
+      final left = text.substring(0, runStart - start);
+      final right = text.substring(runEnd - start);
+      return TextSpan(
+        style: style,
+        recognizer: recognizer,
+        children: <InlineSpan>[
+          if (left.isNotEmpty) TextSpan(text: left, style: style),
+          _mathSpan(
+            source: run.mathSource!,
+            fallback: text.substring(runStart - start, runEnd - start),
+            style: style,
+          ),
+          if (right.isNotEmpty) TextSpan(text: right, style: style),
+        ],
+      );
+    }
+    return TextSpan(text: text, recognizer: recognizer, style: style);
+  }
+
+  List<InlineSpan> _plainSpans(String text, int markerLength) {
+    return [TextSpan(text: text)];
   }
 
   /// The styled stretches of [fragment], in offsets local to its text.
@@ -2482,22 +3042,136 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     }
     final start = fragment.startOffset;
     final end = fragment.endOffset;
+    final markerLength = fragment.listMarker != null
+        ? fragment.listMarker?.length ?? 0
+        : 0;
     final local = <EpubInlineRun>[];
     for (final run in runs) {
       final runStart = run.start > start ? run.start : start;
       final runEnd = run.end < end ? run.end : end;
+      final localStart = runStart - start - markerLength;
+      final localEnd = runEnd - start - markerLength;
+      if (localStart < 0 || localEnd > fragment.text.length - markerLength) {
+        continue;
+      }
       if (runStart >= runEnd) {
         continue;
       }
       local.add(
         EpubInlineRun(
-          start: runStart - start,
-          end: runEnd - start,
+          start: localStart,
+          end: localEnd,
           style: run.style,
+          target: run.target,
+          mathSource: run.mathSource,
         ),
       );
     }
     return local;
+  }
+
+  /// Syntax-colour runs clipped to this fragment's visible text.
+  ///
+  /// Both sides of the comparison stay in chapter offsets. Unlike the shared
+  /// inline styles, the visible text of a code block has no marker column.
+  List<EpubCodeRun> _codeRunsFor(EpubPageFragment fragment) {
+    if (fragment.blockType != EpubBlockType.code || fragment.codeRuns.isEmpty) {
+      return const <EpubCodeRun>[];
+    }
+    final local = <EpubCodeRun>[];
+    for (final run in fragment.codeRuns) {
+      final runStart = run.start > fragment.startOffset
+          ? run.start
+          : fragment.startOffset;
+      final runEnd = run.end < fragment.endOffset
+          ? run.end
+          : fragment.endOffset;
+      if (runStart >= runEnd) {
+        continue;
+      }
+      local.add(
+        EpubCodeRun(
+          start: runStart - fragment.startOffset,
+          end: runEnd - fragment.startOffset,
+          type: run.type,
+        ),
+      );
+    }
+    return local;
+  }
+
+  TextStyle _styleWithCodeRuns(
+    TextStyle baseStyle,
+    List<EpubCodeRun> runs,
+    int start,
+    int end,
+  ) {
+    for (final run in runs) {
+      if (run.start <= start && run.end >= end) {
+        return baseStyle.copyWith(
+          color: codeSyntaxColor(widget.settings.themePreset, run.type),
+        );
+      }
+    }
+    return baseStyle;
+  }
+
+  List<({int start, int end, String target, bool external})> _linkTargetsFor(
+    EpubPageFragment fragment,
+    int markerLength,
+  ) {
+    final localOffset = fragment.startOffset;
+    final results = <({int start, int end, String target, bool external})>[];
+    for (final run in fragment.inlineRuns) {
+      final target = run.target;
+      if (target == null || target.isEmpty) {
+        continue;
+      }
+      final internal =
+          target.startsWith('#') &&
+          (run.style == EpubInlineStyle.footnote ||
+              run.style == EpubInlineStyle.link);
+      final external = switch (run.style) {
+        EpubInlineStyle.link => _isSafeExternalTarget(target),
+        _ => false,
+      };
+      if (!internal && !external) {
+        continue;
+      }
+      final start = run.start > localOffset ? run.start : localOffset;
+      final end = run.end < fragment.endOffset ? run.end : fragment.endOffset;
+      if (start < end) {
+        final localStart = start - localOffset - markerLength;
+        final localEnd = end - localOffset - markerLength;
+        if (localStart < 0 || localEnd > fragment.text.length - markerLength) {
+          continue;
+        }
+        results.add((
+          start: localStart,
+          end: localEnd,
+          target: target,
+          external: external,
+        ));
+      }
+    }
+    return results;
+  }
+
+  bool _isSafeExternalTarget(String target) {
+    if (target.startsWith('#')) {
+      return false;
+    }
+    final colon = target.indexOf(':');
+    final scheme = colon <= 0 ? '' : target.substring(0, colon).toLowerCase();
+    return const {'http', 'https', 'mailto'}.contains(scheme);
+  }
+
+  InlineSpan _mathSpan({
+    required String source,
+    required String fallback,
+    required TextStyle style,
+  }) {
+    return InlineMathSpan(source: source, fallback: fallback, style: style);
   }
 
   /// [baseStyle] with every inline style reaching across this stretch applied.
@@ -2510,64 +3184,16 @@ final class _EpubFragmentViewState extends State<_EpubFragmentView> {
     int start,
     int end,
   ) {
-    var strong = false;
-    var emphasis = false;
-    var code = false;
-    var strike = false;
-    var link = false;
-    for (final run in runs) {
-      if (run.start > start || run.end < end) {
-        continue;
-      }
-      switch (run.style) {
-        case EpubInlineStyle.strong:
-          strong = true;
-        case EpubInlineStyle.emphasis:
-          emphasis = true;
-        case EpubInlineStyle.code:
-          code = true;
-        case EpubInlineStyle.strike:
-          strike = true;
-        case EpubInlineStyle.link:
-          link = true;
-      }
-    }
-    if (!strong && !emphasis && !code && !strike && !link) {
-      return baseStyle;
-    }
-    final accent = widget.settings.themePreset.link;
-    var style = baseStyle;
-    if (strong) {
-      style = style.copyWith(fontWeight: FontWeight.w700);
-    }
-    if (emphasis) {
-      style = style.copyWith(fontStyle: FontStyle.italic);
-    }
-    if (code) {
-      style = style.copyWith(
-        fontFamily: 'monospace',
-        fontSize: style.fontSize! * 0.94,
-        backgroundColor: widget.settings.themePreset.foreground.withValues(
-          alpha: 0.06,
-        ),
-      );
-    }
-    if (link) {
-      style = style.copyWith(color: accent);
-    }
-    final decorations = <TextDecoration>[
-      if (style.decoration != null && style.decoration != TextDecoration.none)
-        style.decoration!,
-      if (strike) TextDecoration.lineThrough,
-      if (link) TextDecoration.underline,
-    ];
-    if (decorations.isNotEmpty) {
-      style = style.copyWith(
-        decoration: TextDecoration.combine(decorations),
-        decorationColor: link ? accent : style.color,
-      );
-    }
-    return style;
+    return epubInlineRunStyle(
+      baseStyle,
+      runs,
+      start,
+      end,
+      accent: widget.settings.themePreset.link,
+      codeBackground: widget.settings.themePreset.foreground.withValues(
+        alpha: 0.06,
+      ),
+    );
   }
 
   Color _highlightColor(AnnotationColor color) {
@@ -2654,11 +3280,54 @@ final class _ContinuousChapterSlice extends _ContinuousListItem {
   final bool isLast;
 }
 
+/// A task-list checkbox.
+///
+/// The glyph stays in the chapter text for offsets and search, but the eye
+/// gets a real checkbox in the marker column instead of a second bullet.
+final class _EpubTaskMarker extends StatelessWidget {
+  const _EpubTaskMarker({
+    required this.checked,
+    required this.style,
+    required this.settings,
+  });
+
+  final bool checked;
+  final TextStyle style;
+  final ReaderSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    final lineHeight = (style.fontSize ?? 16) * (style.height ?? 1.4);
+    final color = checked
+        ? settings.themePreset.link.withValues(alpha: 0.86)
+        : settings.themePreset.foreground.withValues(alpha: 0.66);
+    return SizedBox(
+      height: lineHeight,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Icon(
+          checked
+              ? Icons.check_box_rounded
+              : Icons.check_box_outline_blank_rounded,
+          size: 17,
+          color: color,
+          semanticLabel: checked ? '已完成' : '未完成',
+        ),
+      ),
+    );
+  }
+}
+
 final class _EpubCodeBlock extends StatelessWidget {
-  const _EpubCodeBlock({required this.settings, required this.child});
+  const _EpubCodeBlock({
+    required this.settings,
+    required this.child,
+    this.language,
+  });
 
   final ReaderSettings settings;
   final Widget child;
+  final String? language;
 
   @override
   Widget build(BuildContext context) {
@@ -2666,17 +3335,48 @@ final class _EpubCodeBlock extends StatelessWidget {
     final backgroundAlpha = settings.themePreset == ReaderThemePreset.night
         ? 0.10
         : 0.055;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: foreground.withValues(alpha: backgroundAlpha),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: foreground.withValues(alpha: 0.13)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: child,
+    final label = language?.trim();
+    return SizedBox(
+      width: double.infinity,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: foreground.withValues(alpha: backgroundAlpha),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: epubCodeBlockPadding,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (label != null && label.isNotEmpty)
+                SizedBox(
+                  height: epubCodeLanguageHeight,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: foreground.withValues(alpha: 0.56),
+                        fontSize: 11,
+                        height: 1.2,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: child,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2690,102 +3390,145 @@ final class _EpubCodeBlock extends StatelessWidget {
 /// photograph that looks wrong under a night theme is worse than a
 /// photograph that is a little bright.
 final class _EpubImageView extends StatelessWidget {
-  const _EpubImageView({required this.settings, required this.image});
+  const _EpubImageView({
+    required this.settings,
+    required this.image,
+    this.caption,
+  });
 
   final ReaderSettings settings;
   final EpubImage? image;
+  final String? caption;
 
   @override
   Widget build(BuildContext context) {
     final picture = image;
-    if (picture == null || !picture.isAvailable) {
-      return _EpubImagePlaceholder(
-        settings: settings,
-        label: picture?.unavailableReason ?? '图片',
-        alt: picture?.alt,
-      );
-    }
-    return Semantics(
-      label: picture.alt ?? '插图',
-      image: true,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // The picture is drawn at the width of the column, unless it is
-          // smaller than that to begin with: an icon stretched across the
-          // page is a blur, and a book that meant it as an icon should
-          // look like one.
-          final available = constraints.maxWidth;
-          final width = picture.pixelWidth > 0 && picture.pixelWidth < available
-              ? picture.pixelWidth.toDouble()
-              : available;
-          // Decode at the size the page will show, not at the picture's own
-          // resolution: a 4000px photo in a 700px column costs sixteen times
-          // the memory it earns.
-          final cacheWidth = width.isFinite && width > 0
-              ? (width * MediaQuery.devicePixelRatioOf(context)).round()
-              : null;
-          Widget placeholder(
-            BuildContext context,
-            Object error,
-            StackTrace? _,
-          ) {
-            return _EpubImagePlaceholder(
-              settings: settings,
-              label: '图片无法显示',
-              alt: picture.alt,
-            );
-          }
+    final captionText = caption?.trim() ?? '';
+    final hasCaption = captionText.isNotEmpty;
+    final placeholder = picture == null || !picture.isAvailable;
+    final visiblePicture = placeholder ? null : picture;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (placeholder)
+          _EpubImagePlaceholder(
+            settings: settings,
+            label: picture?.unavailableReason ?? '图片',
+          )
+        else
+          Semantics(
+            label: visiblePicture!.alt ?? '插图',
+            image: true,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final available = constraints.maxWidth;
+                final width =
+                    visiblePicture.pixelWidth > 0 &&
+                        visiblePicture.pixelWidth < available
+                    ? visiblePicture.pixelWidth.toDouble()
+                    : available;
+                final cacheWidth = width.isFinite && width > 0
+                    ? (width * MediaQuery.devicePixelRatioOf(context)).round()
+                    : null;
+                Widget placeholderBuilder(
+                  BuildContext context,
+                  Object error,
+                  StackTrace? _,
+                ) {
+                  return _EpubImagePlaceholder(
+                    settings: settings,
+                    label: '图片无法显示',
+                  );
+                }
 
-          return ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            // A picture in a file is loaded when it is drawn; the platform
-            // image cache is what keeps it decoded afterwards.
-            child: picture.sourcePath != null
-                ? Image.file(
-                    File(picture.sourcePath!),
-                    fit: BoxFit.contain,
-                    width: width,
-                    cacheWidth: cacheWidth,
-                    errorBuilder: placeholder,
-                  )
-                : Image.memory(
-                    picture.bytes,
-                    fit: BoxFit.contain,
-                    width: width,
-                    cacheWidth: cacheWidth,
-                    errorBuilder: placeholder,
-                  ),
-          );
-        },
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: visiblePicture.sourcePath != null
+                      ? Image.file(
+                          File(visiblePicture.sourcePath!),
+                          fit: BoxFit.contain,
+                          width: width,
+                          cacheWidth: cacheWidth,
+                          errorBuilder: placeholderBuilder,
+                        )
+                      : Image.memory(
+                          visiblePicture.bytes,
+                          fit: BoxFit.contain,
+                          width: width,
+                          cacheWidth: cacheWidth,
+                          errorBuilder: placeholderBuilder,
+                        ),
+                );
+              },
+            ),
+          ),
+        if (hasCaption) ...[
+          const SizedBox(height: epubImageCaptionGap),
+          SelectionContainer.disabled(
+            child: Text(
+              captionText,
+              textAlign: TextAlign.center,
+              style: _imageCaptionStyle(settings),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  TextStyle _imageCaptionStyle(ReaderSettings settings) {
+    final family = ReaderFonts.renderFamilyFor(settings.fontFamily);
+    return epubImageCaptionTextStyle(
+      TextStyle(
+        fontFamily: family.isEmpty ? null : family,
+        fontSize: settings.fontSize,
+        height: settings.lineHeight,
       ),
+      settings.themePreset.foreground,
     );
   }
 }
 
 /// A figure's caption: quieter than the prose around it.
-/// A quote: the words sit behind a bar, quieter than the prose.
+/// A quote: the words sit behind one bar per nesting level.
 ///
-/// The bar is what makes a quote readable as a quote without indenting the
-/// text into a shape that collides with the page margin.
+/// The bars are what make nested quotes readable without turning the page
+/// into a stack of boxes. The paginator reserves the same width for each
+/// level, so measured and painted lines stay in step.
 final class _EpubQuoteBlock extends StatelessWidget {
-  const _EpubQuoteBlock({required this.settings, required this.child});
+  const _EpubQuoteBlock({
+    required this.settings,
+    required this.depth,
+    required this.child,
+  });
 
   final ReaderSettings settings;
+  final int depth;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-            color: settings.themePreset.link.withValues(alpha: 0.45),
-            width: 3,
+    final levels = depth < 1 ? 1 : depth;
+    var framed = child;
+    for (var level = 0; level < levels; level += 1) {
+      final alpha = (0.45 - level * 0.04).clamp(0.25, 0.45).toDouble();
+      framed = DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+              color: settings.themePreset.link.withValues(alpha: alpha),
+              width: 3,
+            ),
           ),
         ),
-      ),
-      child: Padding(padding: const EdgeInsets.only(left: 12), child: child),
-    );
+        child: Padding(
+          padding: const EdgeInsets.only(left: epubQuoteIndent),
+          child: framed,
+        ),
+      );
+    }
+    return framed;
   }
 }
 
@@ -2826,23 +3569,38 @@ final class _EpubDivider extends StatelessWidget {
 /// because a reader who raises the font size must not be handed a table that
 /// runs off the edge. A table taller than a page is split between rows, and
 /// each part repeats its header — that happens in the paginator.
+TextAlign _textAlignFor(EpubTableAlignment alignment) {
+  return switch (alignment) {
+    EpubTableAlignment.center => TextAlign.center,
+    EpubTableAlignment.right => TextAlign.right,
+    EpubTableAlignment.none || EpubTableAlignment.left => TextAlign.left,
+  };
+}
+
+typedef _EpubCellSpanBuilder =
+    List<InlineSpan> Function(EpubTableCell cell, TextStyle style);
+
 final class _EpubTableBlock extends StatelessWidget {
   const _EpubTableBlock({
     required this.settings,
-    required this.rows,
+    required this.cells,
     required this.hasHeader,
+    required this.cellSpans,
+    this.alignments = const <EpubTableAlignment>[],
   });
 
   final ReaderSettings settings;
 
   /// The rows this page shows; the header row first, when there is one.
-  final List<List<String>> rows;
+  final List<List<EpubTableCell>> cells;
 
   final bool hasHeader;
+  final List<EpubTableAlignment> alignments;
+  final _EpubCellSpanBuilder cellSpans;
 
   @override
   Widget build(BuildContext context) {
-    if (rows.isEmpty) {
+    if (cells.isEmpty) {
       return const SizedBox.shrink();
     }
     final foreground = settings.themePreset.foreground;
@@ -2863,7 +3621,7 @@ final class _EpubTableBlock extends StatelessWidget {
     // Columns share the line the way their contents ask for it, so a column
     // of sentences is not squeezed into the slot of a column of numbers. The
     // paginator measures rows from the same shares.
-    final flex = epubTableColumnFlex(rows);
+    final flex = epubTableColumnFlex(cells);
     return Semantics(
       label: '表格',
       child: Table(
@@ -2875,28 +3633,50 @@ final class _EpubTableBlock extends StatelessWidget {
         defaultVerticalAlignment: TableCellVerticalAlignment.top,
         border: TableBorder(top: rule, bottom: rule, horizontalInside: rule),
         children: [
-          for (var row = 0; row < rows.length; row += 1)
+          for (var row = 0; row < cells.length; row += 1)
             TableRow(
               decoration: hasHeader && row == 0
                   ? BoxDecoration(color: foreground.withValues(alpha: 0.06))
                   : null,
               children: [
-                for (final cell in rows[row])
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: epubTableCellPaddingHorizontal,
-                      vertical: epubTableCellPaddingVertical,
-                    ),
-                    child: Text(
-                      cell,
-                      style: hasHeader && row == 0
-                          ? style.copyWith(fontWeight: FontWeight.w600)
-                          : style,
-                    ),
+                for (var column = 0; column < cells[row].length; column += 1)
+                  _cell(
+                    cells[row][column],
+                    row: row,
+                    column: column,
+                    style: style,
                   ),
               ],
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _cell(
+    EpubTableCell cell, {
+    required int row,
+    required int column,
+    required TextStyle style,
+  }) {
+    final cellStyle = hasHeader && row == 0
+        ? style.copyWith(fontWeight: FontWeight.w600)
+        : style;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: epubTableCellPaddingHorizontal,
+        vertical: epubTableCellPaddingVertical,
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        child: Text.rich(
+          TextSpan(style: cellStyle, children: cellSpans(cell, cellStyle)),
+          textAlign: _textAlignFor(
+            column < alignments.length
+                ? alignments[column]
+                : EpubTableAlignment.none,
+          ),
+        ),
       ),
     );
   }
@@ -2917,27 +3697,17 @@ final class _EpubCaption extends StatelessWidget {
 }
 
 final class _EpubImagePlaceholder extends StatelessWidget {
-  const _EpubImagePlaceholder({
-    required this.settings,
-    required this.label,
-    this.alt,
-  });
+  const _EpubImagePlaceholder({required this.settings, required this.label});
 
   final ReaderSettings settings;
   final String label;
-
-  /// The book's own description of the picture, shown under the reason.
-  final String? alt;
 
   @override
   Widget build(BuildContext context) {
     final foreground = settings.themePreset.foreground;
     final normalizedLabel = label.trim().isEmpty ? '图片占位' : label.trim();
-    final altText = alt?.trim();
     return Semantics(
-      label: altText == null || altText.isEmpty
-          ? normalizedLabel
-          : '$normalizedLabel：$altText',
+      label: normalizedLabel,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: foreground.withValues(alpha: 0.045),
@@ -2967,17 +3737,6 @@ final class _EpubImagePlaceholder extends StatelessWidget {
                         color: foreground.withValues(alpha: 0.68),
                       ),
                     ),
-                    if (altText != null && altText.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        altText,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: foreground.withValues(alpha: 0.52),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),

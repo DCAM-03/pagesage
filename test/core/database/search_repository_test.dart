@@ -2,7 +2,7 @@ import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_search_repository.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/search/search_models.dart';
 
@@ -261,6 +261,45 @@ void main() {
       final orders = chunks.single.chunks.map((chunk) => chunk.sortOrder);
       expect(orders, orderedEquals(orders.toList()..sort()));
       expect(chunks.single.chunks.last.sortOrder, 30);
+    });
+
+    test('keeps parent context attached to its child chunks', () async {
+      await repository.indexTexts([
+        const SearchIndexEntry(
+          sourceType: 'book',
+          sourceId: 'book-epub:chapter-2:0',
+          bookId: 'book-epub',
+          title: '第一章 › 条件',
+          text: '第一段是条件。',
+          sortOrder: 70,
+          parentId: 'book-epub:chapter-2:p0',
+          parentTitle: '第一章 › 条件',
+          parentText: '第一段是条件。第二段是结论。',
+          parentSortOrder: 70,
+        ),
+        const SearchIndexEntry(
+          sourceType: 'book',
+          sourceId: 'book-epub:chapter-2:1',
+          bookId: 'book-epub',
+          title: '第一章 › 条件',
+          text: '第二段是结论。',
+          sortOrder: 71,
+          parentId: 'book-epub:chapter-2:p0',
+          parentTitle: '第一章 › 条件',
+          parentText: '第一段是条件。第二段是结论。',
+          parentSortOrder: 70,
+        ),
+      ]);
+
+      final chunks = (await repository.bookChunks(
+        bookIds: ['book-epub'],
+      )).single.chunks;
+      final second = chunks.where((chunk) => chunk.text == '第二段是结论。');
+
+      expect(second, hasLength(1));
+      expect(second.single.parentId, 'book-epub:chapter-2:p0');
+      expect(second.single.parentTitle, '第一章 › 条件');
+      expect(second.single.parentText, '第一段是条件。第二段是结论。');
     });
 
     test('no book named and no folder returns everything', () async {

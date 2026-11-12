@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/renderers/epub/epub_document.dart';
 import 'package:pagesage/renderers/epub/epub_document_loader.dart';
 
 void main() {
@@ -233,6 +234,60 @@ void main() {
     expect(document.toc, hasLength(2));
     expect(document.toc.first.title, '第一章');
     expect(document.toc.last.chapterIndex, 1);
+  });
+
+  test('nested EPUB blockquotes keep their depth', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'pagesage_epub_quote_',
+    );
+    addTearDown(() => tempDir.delete(recursive: true));
+
+    final archive = Archive()
+      ..addFile(
+        ArchiveFile.string('META-INF/container.xml', '''
+          <?xml version="1.0"?>
+          <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+            <rootfiles>
+              <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+            </rootfiles>
+          </container>
+        '''),
+      )
+      ..addFile(
+        ArchiveFile.string('OEBPS/content.opf', '''
+          <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+            <manifest>
+              <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+            </manifest>
+            <spine><itemref idref="chapter1"/></spine>
+          </package>
+        '''),
+      )
+      ..addFile(
+        ArchiveFile.string('OEBPS/chapter1.xhtml', '''
+            <html><head><title>引用</title></head><body>
+              <h1>引用</h1>
+              <blockquote>
+                <p>外层引用</p>
+                <blockquote>
+                  <p>内层引用</p>
+                  <blockquote><p>深层引用</p></blockquote>
+                </blockquote>
+              </blockquote>
+            </body></html>
+          '''),
+      );
+    final file = File('${tempDir.path}/book.epub');
+    await file.writeAsBytes(ZipEncoder().encode(archive), flush: true);
+
+    final document = await EpubDocumentLoader().load(file.path);
+    final quotes = document.chapters.single.blocks
+        .whereType<EpubTextBlock>()
+        .where((block) => block.type == EpubBlockType.quote)
+        .toList();
+
+    expect(quotes.map((block) => block.text), ['外层引用', '内层引用', '深层引用']);
+    expect(quotes.map((block) => block.quoteDepth), [1, 2, 3]);
   });
 }
 

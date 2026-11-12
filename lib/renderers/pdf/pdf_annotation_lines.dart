@@ -34,11 +34,6 @@ final class PdfLineBand {
 
   double get height => bottom - top;
   double get cy => (top + bottom) * 0.5;
-
-  PdfLineBand widen(PdfLineBand other) => PdfLineBand(
-    top: math.min(top, other.top),
-    bottom: math.max(bottom, other.bottom),
-  );
 }
 
 /// Trims stored highlight bands so they cannot bleed into the next line.
@@ -53,8 +48,6 @@ final class PdfLineBand {
 /// a page whose lines cannot be determined; bands are then only capped to a
 /// single line height.
 ///
-/// Mirrors `prepareHighlightRects` in `assets/renderer/pdf/bridge.js`, which
-/// this has to keep matching until the WebView renderer is deleted (S7).
 List<PdfLineRect> prepareAnnotationRects(
   List<PdfLineRect> rects, {
   required List<PdfLineBand> Function(int page) lineBands,
@@ -67,7 +60,13 @@ List<PdfLineRect> prepareAnnotationRects(
     // before the band snap below can split it. Only boxes past a whole line's
     // height collapse — a mid-sized box is still a plausible multi-line
     // selection and the snap below handles it line by line.
-    if (rect.height > _legacyMegaBox) rect.height = _legacyTallBox;
+    //
+    // A rotated page turns a line of text vertical: its band is tall and
+    // narrow. That is not legacy data, so the width check keeps the band from
+    // being crushed into a horizontal sliver.
+    if (rect.height > _legacyMegaBox && rect.width > rect.height) {
+      rect.height = _legacyTallBox;
+    }
     items.add(rect);
   }
   if (items.isEmpty) return const [];

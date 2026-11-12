@@ -3,6 +3,7 @@ import '../books/reading_position.dart';
 enum NoteType {
   text('text'),
   excerpt('excerpt'),
+  comment('comment'),
   ai('ai'),
   question('question');
 

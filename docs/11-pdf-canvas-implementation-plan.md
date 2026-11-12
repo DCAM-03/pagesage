@@ -346,18 +346,18 @@ Canvas 当前把下划线画成 `box.rect.height * 0.15`（`:672`），而 `box.
 - [x] 桌面拖选、移动长按选词 + 手柄、跨页选择（S3）
 - [x] 书内搜索可取消、可跳转（S4）— 命中/清空/聚焦跳转均有视图用例
 - [x] 标注显示与点击命中（S5）
-- [x] **F-02：永久标注不盖住未选中的下一行**（S5）— `pdf_annotation_lines_test.dart` 17 项；S7 删除 WebView 后由 Canvas 独立满足
-- [ ] OCR 管线打通：导出图 → overlay → 划词（S5，Linux 用假引擎验管线；真实识别质量在 Android/Windows 真机验，S8）— **导出接口已就绪并有 3 项测试；假 OCR 引擎未做，管线端到端未验**
-- [ ] OCR 后的能力上报如实：无原生文本层时 `search: false`、`textSelection: true`（S5）
+- [x] **F-02：永久标注不盖住未选中的下一行**（S5）— `pdf_annotation_lines_test.dart` 18 项；S7 删除 WebView 后由 Canvas 独立满足
+- [x] OCR 覆盖层 → 划词：点击选词、拖动跨行、标准选区事件（S5）— 新增 OCR 选择模型 13 项 + 画布视图用例；真实识别质量仍在 Android/Windows 真机验（S8）
+- [x] OCR 后的能力上报如实：无原生文本层时 `search: false`、`textSelection: true`（S5）— 视图用例「an OCR overlay enables selection without claiming search」
 - [x] 加密/损坏 PDF 明确错误（S0/S6）— 打开期异常映射 + 单页 `_PageFailure` 占位
-- [x] 主题纸色与夜间模式（S6）— `pdf_page_tint_test.dart` 11 项；**夜间标注配色仍待目视**
+- [x] 主题纸色与夜间模式（S6）— `pdf_page_tint_test.dart` 11 项；夜间标注色板与真实窗口截图见 §26
 - [ ] 大文档滚动性能与内存基线（S6/S8）
   - 页面解释已移出 UI 线程（§19.2）；剩余项为帧时间与峰值内存基线
 - [ ] 三端回归通过（S7/S8）— **Linux 自动化全绿；Windows/Android 未跑**
 - [x] WebView 渲染器与 PDF.js 资源删除（S7）— 见 §24
 - [x] 文档、许可、任务清单同步（S7）— 见 §24.5
-- [ ] 90°/270° 旋转页布局、选区、标注全部正确（S1/S3/S6，含 replay 路径 `rotation: null`）
-  - 布局与选区已有测试（契约测试「rotated page geometry」3 项 + 视图用例）；**标注在旋转页上的投影仍未验**
+- [x] 90°/270° 旋转页布局、选区、标注全部正确（S1/S3/S6，含 replay 路径 `rotation: null`）
+  - 布局与选区有契约测试「rotated page geometry」3 项 + 视图用例；标注投影由 §26 的单元、widget 与真实窗口用例收口
 
 ## 7. 风险与应对
 
@@ -597,6 +597,8 @@ pkill -f "kwin_wayland --virtual --socket pagesage-test"
 ```
 
 注意只清理带 `--socket pagesage-test` 的进程，不要误杀桌面自己的 kwin。
+
+自动化分步执行时，合成器必须留在同一会话里（或用 `setsid ... &` 保持存活）；父 shell 退出会带走 `dbus-run-session`，随后 GTK 会回落到当前桌面或报 `cannot open display`。不要省略 `GDK_BACKEND=wayland` 与 `WAYLAND_DISPLAY`，也不要在没有虚拟显示环境时直接运行 `-d linux`。每个集成测试文件使用独立的虚拟会话；同一个 `kwin_wayland` 会话里连续启动第二个集成文件时，测试工具可能在 `Unable to start the app on the device` 处失败，这不等于产品失败。
 
 ## 17. S2 施工记录（2026-10-20）
 
@@ -935,9 +937,9 @@ abstract interface class PdfPageImageSource {
 | 标注投影按显示页尺寸 | **本已正确**：`annotation.locator.selectionRects` 是 0..1 的显示页坐标，代码直接乘 `viewSize`，未走页面空间，不存在重复 /Rotate |
 | 按 z 逆序命中 | 已实现（`_emitAnnotationTap` 遍历 `.reversed`） |
 | `RendererAnnotationSelected` 带全局 `sourceRect` | 已实现 |
-| OCR 块参与选区（矩形命中 + 文本拼接） | **未做**，见 §4.7 |
+| OCR 块参与选区（矩形命中 + 文本拼接） | 已实现：`pdf_ocr_selection_controller.dart` + 画布视图用例 |
 | `ReaderRendererHostConfig.ocrOverlayToken` | 已存在（canvas 侧已响应 token 变化） |
-| OCR 后能力上报（`search=false` / `textSelection=true`） | **未做** |
+| OCR 后能力上报（`search=false` / `textSelection=true`） | 已实现并有视图回归 |
 | 假 OCR 引擎（仅测试） | **未做**；Linux 上 `StubOcrEngine` 仍 `supportsPdfPageOcr => false` |
 
 后三项需要在 Linux 上有一条可跑的 OCR 管线才有验证价值，计划把它们与 S7 的真机验证一起排。
@@ -1127,3 +1129,77 @@ abstract interface class PdfPageImageSource {
 - **上下标**：`_sameLine` 用「带高 50% 重叠」判同一行，数学公式里上下标带会和正文重叠，可能被判成同一行。最坏偏 5pt，属于可接受误判。
 - **匿名技术文档**：本机没有这本书，未直接验证。它的排版特征（中文正文 + 代码块）与 匿名样本 01 中文版同类，后者已验证。
 - **竖排/从右往左**：`_offsetInRun` 走 `charOffsets` 二分，RTL 已处理（取反）。竖排文本未测。
+
+## 26. S8 先行收口：旋转页标注与夜间标注色（2026-11-08）
+
+本轮只处理 S8 中不依赖 Windows / Android 真机的两项：旋转页标注投影，以及夜间主题下的标注色。S8 的手工矩阵、真机帧时间与峰值内存仍未完成，不能据此宣称 S8 整体通过。
+
+### 26.1 旋转页标注：不是纯验收，发现了真实缺陷
+
+`prepareAnnotationRects` 原本把所有高度超过 `0.055` 的标注框当成旧版遗留的「半页大框」，直接压成 `0.022` 高的横条。这个规则隐含了「文字行一定是横向的」。
+
+`/Rotate 90` 的页面把一行文字转成竖排：显示坐标里的合法标注是一个**高而窄**的条带。实测一条选区为 `height=0.249, width=0.016`，被压成 `height=0.022` 后，标注画到了选文上方，点击原位置无法命中。修复是先判断方向：
+
+```dart
+if (rect.height > _legacyMegaBox && rect.width > rect.height) {
+  rect.height = _legacyTallBox;
+}
+```
+
+横向多行框仍按 F-02 折叠；旋转页的竖直长条保持原样，再交给行带裁剪。这样既没有放宽遗留大框的防护，也没有把合法旋转标注误伤。
+
+### 26.2 夜间标注色
+
+新增 `lib/renderers/pdf/pdf_annotation_colors.dart`：
+
+- 白昼继续使用原来的亮色洗色。
+- 夜间改用 `docs/09-design-system.md` §3.3 的暗色建议（Yellow `#8C7A2A`、Blue `#51768F`、Green `#527A5F`、Red `#805858`、Purple `#6B5C8C`），透明度与 EPUB 夜间高亮一致。
+- `_PicturePainter` 用 `tint.inverted` 选择色板。标注仍然画在夜间滤镜之后，不会被页面的反相矩阵二次翻转。
+
+### 26.3 验证与证据
+
+| 检查 | 结果 |
+| --- | --- |
+| `test/renderers/pdf/pdf_annotation_lines_test.dart` | 18 项 PASS，新增「旋转页高窄条带不被折叠」用例 |
+| `test/renderers/pdf/pdf_annotation_colors_test.dart` | 3 项 PASS，锁定白昼 / 夜间五色与二者差异 |
+| `test/renderers/pdf/pdf_canvas_view_test.dart` → `a stored annotation is clickable on a rotated page` | PASS：真实旋转页选区写入标注后重开，原点位命中，空白处不误命中 |
+| `integration_test/reader_s0_test.dart` → `a rotated page keeps its annotation readable at night` | 12/12 PASS（整个文件）；截图 `build/integration-captures/10-rotated-night-annotation.png` |
+| `bash tool/check.sh` | PASS：`flutter test` 533 通过 / 2 跳过，`flutter analyze` 0 问题 |
+
+实现状态：`IMPLEMENTED`；本切片验证证据：`TOOLING_PASS` + `RUNTIME_PASS`（离屏虚拟 Wayland）。S8 整体仍为 `BLOCKED`，剩余项是 Windows / Android 手工回归、真机帧时间与峰值内存、OCR 假引擎端到端管线。
+
+## 27. S5 补齐：OCR 文本划词闭环（2026-11-11）
+
+本轮把此前标记为未做的「OCR 块参与选区」补上，验证入口是读取器现有的 OCR overlay，而不是再复制一条业务链路。
+
+### 27.1 坐标与数据流
+
+OCR 块由 Tesseract TSV 解析为**行级**文本，坐标已经是相对显示页的 0..1 值（左上角原点）。因此新控制器直接在这些坐标上命中，不经过 `PdfPageGeometry`，也不再次应用 `/Rotate`；旋转页不会出现二次投影。
+
+选择模型 `PdfOcrSelectionController` 与原生 `PdfSelectionController` 实现同一个 `PdfTextSelectionSource`：
+
+- `caretAt`：点击严格命中行带；拖动吸附最近行，并允许 24px 页外回拖。
+- `readerRectsFor`：按行输出归一化矩形，部分行按字符比例裁剪，可直接持久化为批注。
+- `pageText`：OCR 行以换行拼接；摘录仍由 `pdfSelectionText` 折叠空白。
+
+最终事件仍是标准 `RendererTextSelected`，因此复制、高亮、下划线、批注、摘录笔记和继续问 AI 全部复用宿主现有动作，没有新增 OCR 专用菜单或数据库字段。
+
+### 27.2 页面接线
+
+- OCR overlay 页的能力上报改为 `textSelection: true`、`ocrTextLayer: true`；`search` 仍跟随原生文本层，避免重蹈 WebView「搜索可用但搜不到」的误报。
+- `_selectionRanges` 的页文本长度、`_wordAt` 的词边界、选区高亮与手柄都改为向 `PdfTextSelectionSource` 取数。
+- 标注重绘时，OCR 行块同时作为 `_lineBands()` 的来源；否则保存后的 OCR 高亮会被原生空文本层错误裁剪。
+- 点击空白纸张不再退化为「选最近词」，拖动仍保留最近行回退。
+
+### 27.3 验证
+
+| 检查 | 结果 |
+| --- | --- |
+| `test/renderers/pdf/pdf_ocr_selection_test.dart` | 13 项 PASS：解析、行拼接、点击选词、CJK 单字、空白/页外、跨行矩形 |
+| `test/renderers/pdf/pdf_canvas_view_test.dart` | 46 项 PASS，新增 OCR 能力、点击选词、跨行拖动、OCR 页标注点击 4 项 |
+| 选择 / 标注契约 | 64 项 PASS |
+| 阅读器选区动作与 OCR 覆盖层 | 23 项 PASS |
+| 全仓 `flutter test` | 1001 项 PASS，6 项按环境跳过 |
+| `flutter analyze` / `git diff --check` | 0 问题 / 无输出 |
+
+实现状态：`IMPLEMENTED`；验证证据为 Linux widget/单元回归与静默安装。真实窗口手测、真实 OCR 识别质量、Windows/Android 仍未执行，不能据此宣称 S8 整体通过。

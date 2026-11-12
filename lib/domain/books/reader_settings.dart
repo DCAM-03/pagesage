@@ -75,6 +75,8 @@ enum ReaderMode {
   }
 }
 
+enum ReaderContextTab { search, notebook, ai }
+
 enum PdfZoomMode {
   custom('custom', '自定义'),
   actual('actual', '实际大小'),
@@ -121,6 +123,7 @@ final class ReaderSettings {
     this.desktopContextOpen = false,
     this.desktopTocWidth = 300,
     this.desktopContextWidth = 420,
+    this.desktopContextTab = ReaderContextTab.search,
   });
 
   final ThemeMode appThemeMode;
@@ -138,6 +141,7 @@ final class ReaderSettings {
   final bool desktopContextOpen;
   final double desktopTocWidth;
   final double desktopContextWidth;
+  final ReaderContextTab desktopContextTab;
 
   ReaderSettings copyWith({
     ThemeMode? appThemeMode,
@@ -155,6 +159,7 @@ final class ReaderSettings {
     bool? desktopContextOpen,
     double? desktopTocWidth,
     double? desktopContextWidth,
+    ReaderContextTab? desktopContextTab,
   }) {
     return ReaderSettings(
       appThemeMode: appThemeMode ?? this.appThemeMode,
@@ -172,6 +177,21 @@ final class ReaderSettings {
       desktopContextOpen: desktopContextOpen ?? this.desktopContextOpen,
       desktopTocWidth: desktopTocWidth ?? this.desktopTocWidth,
       desktopContextWidth: desktopContextWidth ?? this.desktopContextWidth,
+      desktopContextTab: desktopContextTab ?? this.desktopContextTab,
+    );
+  }
+
+  ReaderSettings resetReadingAppearance() {
+    return copyWith(
+      fontFamily: '',
+      fontSize: 18,
+      lineHeight: 1.7,
+      paragraphSpacing: 12,
+      pageMargin: 24,
+      readerMode: ReaderMode.continuous,
+      pdfScale: 1,
+      pdfZoomMode: PdfZoomMode.fitWidth,
+      themePreset: ReaderThemePreset.day,
     );
   }
 
@@ -208,6 +228,7 @@ final class ReaderSettings {
       'desktopContextOpen': desktopContextOpen,
       'desktopTocWidth': desktopTocWidth,
       'desktopContextWidth': desktopContextWidth,
+      'desktopContextTab': desktopContextTab.name,
     });
   }
 
@@ -239,6 +260,10 @@ final class ReaderSettings {
       desktopContextOpen: json['desktopContextOpen'] == true,
       desktopTocWidth: _asDouble(json['desktopTocWidth']) ?? 300,
       desktopContextWidth: _asDouble(json['desktopContextWidth']) ?? 360,
+      desktopContextTab: ReaderContextTab.values.firstWhere(
+        (tab) => tab.name == json['desktopContextTab'],
+        orElse: () => ReaderContextTab.search,
+      ),
     );
   }
 

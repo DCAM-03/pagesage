@@ -82,7 +82,9 @@
 - `flutter analyze`
 - `flutter test`
 - 本轮已验证（2026-10-21，S7）：`dart format .`、`flutter analyze`（0 error / 0 warning，仅 3 条 `poc_pdf_canvas/` info）、`flutter test`（327 通过 / 2 跳过）。
-- 当前实现说明：PDF 由 `pdf_graphics` 在 Flutter Canvas 上直接绘制，无 WebView、无本地 loopback HTTP 服务。已支持连续滚动与单页/双页分页、页码跳转、0.5–3.0 连续缩放与四种缩放模式、桌面 `Ctrl + 鼠标滚轮`、locator 恢复（像素 `scrollOffset` + 页内比例 `pageOffsetFraction`）、文本选区（含 CJK 与旋转页）、书内搜索高亮、outline 与内部/外部链接、永久标注高亮（含 F-02 跨行裁剪）、主题纸色与夜间滤镜，以及加密/损坏/单页失败的分级错误提示。
+- 当前实现说明：PDF 由 `pdf_graphics` 在 Flutter Canvas 上直接绘制，无 WebView、无本地 loopback HTTP 服务。已支持连续滚动与单页/双页分页、页码跳转、0.5–3.0 连续缩放与四种缩放模式、桌面 `Ctrl + 鼠标滚轮`、locator 恢复（像素 `scrollOffset` + 页内比例 `pageOffsetFraction`）、文本选区（含 CJK 与旋转页）、书内搜索高亮、outline 与内部/外部链接、永久标注高亮（含 F-02 跨行裁剪、旋转页投影与夜间色板）、主题纸色与夜间滤镜，以及加密/损坏/单页失败的分级错误提示。
+- 目录选中规则（2026-11-09）：同一页常同时包含章标题和多个小节标题，不能再按“页码相等”把整条分支都点亮。连续滚动时渲染器在 location locator 中回传页内比例 `pageOffsetFraction`；目录选取最后一个位置不晚于当前阅读位置的大纲项。没有页内比例时，只选当前页顶端（`offsetFraction <= 0.01`）的第一个条目；如果当前页没有顶端条目，则保留最后一个页码小于当前页的条目。桌面与移动目录共用同一规则，`RendererOutlineItem.offsetFraction` 只参与选中，不改变跳转目标。
+- 页内选中证据（2026-11-09）：`reader_panels_test.dart` 覆盖桌面与移动同页三标题只亮一个、仅按页顶与跨页保留；`pdf_canvas_view_test.dart` 覆盖连续滚动上报非零页内比例。聚焦 51 项、全仓 697 项通过（2 skipped）；本地安装产物一致（`libapp.so` SHA256 `58f7ec77…`），安装后已重启实例。Windows / Android 与真实大 PDF 视检仍未执行。
 - 手动样本：标准 PDF、大 PDF、扫描版 PDF、损坏 PDF、带 outline 与链接 PDF。
 - 平台验证：**Linux 自动化已覆盖；Windows/Android 手工回归待 S8 执行。**
 

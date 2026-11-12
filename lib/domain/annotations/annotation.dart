@@ -117,5 +117,7 @@ abstract interface class AnnotationRepository {
 
   Future<void> linkNote({required String annotationId, required String noteId});
 
+  Future<void> unlinkNote({required String annotationId});
+
   Future<void> deleteAnnotation(String id);
 }

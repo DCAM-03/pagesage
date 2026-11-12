@@ -66,18 +66,6 @@ final class AppPaths {
     return Directory(p.join(root.path, 'cache'));
   }
 
-  /// Extracted pictures for one book.
-  ///
-  /// These are derived data: every one of them can be rebuilt from the book
-  /// by cropping the page again, so they live under the cache and never in
-  /// the library. A book that is removed takes its folder with it.
-  Future<Directory> imagesCacheDirectoryForBook(String bookId) async {
-    final root = await cacheDirectory();
-    final dir = Directory(p.join(root.path, 'images', bookId));
-    await dir.create(recursive: true);
-    return dir;
-  }
-
   Future<String> libraryBookPath({
     required String bookId,
     required String fileHash,

@@ -37,6 +37,19 @@ void main() {
     expect(find.textContaining('图片不在书中'), findsOneWidget);
     expect(find.textContaining('A picture'), findsOneWidget);
   });
+
+  testWidgets('an available picture shows its alt caption once', (
+    tester,
+  ) async {
+    final loader = await tester.runAsync(
+      () => _loaderFor(_archiveWithPicture()),
+    );
+    await _pumpReader(tester, loader: loader!);
+
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.text('A picture'), findsOneWidget);
+    expect(find.text('图注文字。'), findsOneWidget);
+  });
 }
 
 /// A loader that hands the renderer a document built outside the test's

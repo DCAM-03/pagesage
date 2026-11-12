@@ -1,9 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
+import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as sqlite;
+import 'package:uuid/uuid.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../../core/files/app_paths.dart';
@@ -16,6 +20,7 @@ import '../../../domain/books/bookmark.dart';
 import '../../../domain/books/book_repository.dart';
 import '../../../domain/books/reading_position.dart';
 import '../../../domain/notes/note.dart';
+import 'restore_database_preparation.dart';
 
 final class RestoreBackupResult {
   const RestoreBackupResult({
@@ -263,7 +268,7 @@ final class ExportService {
     final imageDirectory = Directory(
       p.join(
         p.dirname(file.path),
-        '${p.basenameWithoutExtension(file.path)}_images',
+        '${p.basenameWithoutExtension(file.path)}_images_${const Uuid().v4()}',
       ),
     );
 
@@ -280,43 +285,97 @@ final class ExportService {
     var imageCount = 0;
     var missingCount = 0;
     final sections = <_ImageExportSection>[];
-
-    for (final annotation in imageAnnotations) {
-      cancelToken?.throwIfCancelled();
-      final anchor = annotation.imageAnchor!;
-      final cached = await _imageCacheStore.get(
-        bookId: annotation.bookId,
-        anchor: anchor,
-      );
-      String? relativePath;
-      if (cached == null) {
-        missingCount++;
-      } else {
-        await imageDirectory.create(recursive: true);
-        final name = '${CachedImageStore.fileNameFor(anchor)}.png';
-        final destination = File(p.join(imageDirectory.path, name));
-        await destination.writeAsBytes(await cached.readAsBytes(), flush: true);
-        relativePath = p.join(p.basename(imageDirectory.path), name);
-        imageCount++;
+    var published = false;
+    try {
+      for (final annotation in imageAnnotations) {
+        cancelToken?.throwIfCancelled();
+        final anchor = annotation.imageAnchor!;
+        final cached = await _imageCacheStore.get(
+          bookId: annotation.bookId,
+          anchor: anchor,
+        );
+        String? relativePath;
+        if (cached == null) {
+          missingCount++;
+        } else {
+          await imageDirectory.create(recursive: true);
+          final name =
+              '${const Uuid().v5(Namespace.url.value, annotation.bookId)}_'
+              '${CachedImageStore.fileNameFor(anchor)}.png';
+          final destination = File(p.join(imageDirectory.path, name));
+          await destination.writeAsBytes(
+            await cached.readAsBytes(),
+            flush: true,
+          );
+          relativePath = p.posix.join(p.basename(imageDirectory.path), name);
+          imageCount++;
+        }
+        sections.add(
+          _ImageExportSection(
+            annotation: annotation,
+            bookTitle: titles[annotation.bookId] ?? '未知书籍',
+            imagePath: relativePath,
+          ),
+        );
       }
-      sections.add(
-        _ImageExportSection(
-          annotation: annotation,
-          bookTitle: titles[annotation.bookId] ?? '未知书籍',
-          imagePath: relativePath,
-        ),
-      );
-    }
 
-    cancelToken?.throwIfCancelled();
-    final markdown = _renderImageAnnotations(sections);
-    await _writeTextAtomically(file, markdown, cancelToken: cancelToken);
-    return ImageAnnotationExportResult(
-      markdownFile: file,
-      imageDirectory: imageDirectory,
-      imageCount: imageCount,
-      missingCount: missingCount,
-    );
+      cancelToken?.throwIfCancelled();
+      final markdown = _renderImageAnnotations(sections);
+      await _writeTextAtomically(file, markdown, cancelToken: cancelToken);
+      published = true;
+      return ImageAnnotationExportResult(
+        markdownFile: file,
+        imageDirectory: imageDirectory,
+        imageCount: imageCount,
+        missingCount: missingCount,
+      );
+    } finally {
+      if (!published && await imageDirectory.exists()) {
+        await imageDirectory.delete(recursive: true);
+      }
+    }
+  }
+
+  Future<File> packageImageAnnotations(
+    ImageAnnotationExportResult result, {
+    TaskCancelToken? cancelToken,
+  }) async {
+    final file = File('${result.markdownFile.path}.zip');
+    final temporary = File('${file.path}.${const Uuid().v4()}.part');
+    final encoder = ZipFileEncoder();
+    try {
+      cancelToken?.throwIfCancelled();
+      encoder.create(temporary.path);
+      try {
+        await encoder.addFile(
+          result.markdownFile,
+          p.basename(result.markdownFile.path),
+        );
+        if (await result.imageDirectory.exists()) {
+          await for (final entity in result.imageDirectory.list(
+            followLinks: false,
+          )) {
+            cancelToken?.throwIfCancelled();
+            if (entity is File) {
+              await encoder.addFile(
+                entity,
+                p.posix.join(
+                  p.basename(result.imageDirectory.path),
+                  p.basename(entity.path),
+                ),
+              );
+            }
+          }
+        }
+      } finally {
+        await encoder.close();
+      }
+      cancelToken?.throwIfCancelled();
+      return await temporary.rename(file.path);
+    } on Object {
+      await _deleteIfExists(temporary);
+      rethrow;
+    }
   }
 
   Future<File> backupDatabaseZip({
@@ -332,10 +391,25 @@ final class ExportService {
       extension: 'zip',
     );
     await zipFile.parent.create(recursive: true);
-    final tempFile = File('${zipFile.path}.part');
-    await _deleteIfExists(tempFile);
+    final tempFile = File('${zipFile.path}.${const Uuid().v4()}.part');
+    final snapshot = File('${tempFile.path}.sqlite');
     final encoder = ZipFileEncoder();
     try {
+      final sourcePath = database.path;
+      final snapshotPath = snapshot.path;
+      await Isolate.run(() {
+        final source = sqlite.sqlite3.open(
+          sourcePath,
+          mode: sqlite.OpenMode.readOnly,
+        );
+        try {
+          source.execute('PRAGMA busy_timeout = 5000');
+          source.execute('VACUUM INTO ?', [snapshotPath]);
+        } finally {
+          source.close();
+        }
+      });
+      cancelToken?.throwIfCancelled();
       encoder.create(tempFile.path);
       final covers = await _appPaths.coversDirectory();
       cancelToken?.throwIfCancelled();
@@ -351,9 +425,7 @@ final class ExportService {
         ),
       );
       cancelToken?.throwIfCancelled();
-      if (await database.exists()) {
-        await encoder.addFile(database, 'database/pagesage.sqlite');
-      }
+      await encoder.addFile(snapshot, 'database/pagesage.sqlite');
       cancelToken?.throwIfCancelled();
       if (await covers.exists()) {
         await encoder.addDirectory(covers, includeDirName: true, level: 6);
@@ -361,9 +433,6 @@ final class ExportService {
       cancelToken?.throwIfCancelled();
       await encoder.close();
       cancelToken?.throwIfCancelled();
-      if (await zipFile.exists()) {
-        await zipFile.delete();
-      }
       await tempFile.rename(zipFile.path);
       return zipFile;
     } on Object {
@@ -374,6 +443,8 @@ final class ExportService {
       }
       await _deleteIfExists(tempFile);
       rethrow;
+    } finally {
+      await _deleteIfExists(snapshot);
     }
   }
 
@@ -391,6 +462,18 @@ final class ExportService {
       verify: true,
     );
     cancelToken?.throwIfCancelled();
+    final manifestEntry = archive.findFile('manifest.json');
+    if (manifestEntry == null || !manifestEntry.isFile) {
+      throw const FormatException('备份中缺少 manifest.json');
+    }
+    final manifest = jsonDecode(utf8.decode(manifestEntry.content));
+    if (manifest is! Map<String, dynamic> ||
+        manifest['app'] != 'PageSage' ||
+        manifest['version'] != 1 ||
+        manifest['contents'] is! List ||
+        !(manifest['contents'] as List).contains('database/pagesage.sqlite')) {
+      throw const FormatException('备份清单无效或版本不受支持');
+    }
     final databaseEntry = archive.findFile('database/pagesage.sqlite');
     if (databaseEntry == null || !databaseEntry.isFile) {
       throw const FormatException('备份中缺少 database/pagesage.sqlite');
@@ -404,23 +487,85 @@ final class ExportService {
 
     final database = await _appPaths.databaseFile();
     await database.parent.create(recursive: true);
-    final rollback = await _rollbackFileFor(database);
-    if (await database.exists()) {
-      await database.copy(rollback.path);
-    } else {
-      await rollback.writeAsBytes(const []);
-    }
-    cancelToken?.throwIfCancelled();
-
-    await _database.close();
-    await database.writeAsBytes(databaseBytes, flush: true);
-    await _deleteIfExists(File('${database.path}-wal'));
-    await _deleteIfExists(File('${database.path}-shm'));
-
-    return RestoreBackupResult(
-      databasePath: database.path,
-      rollbackPath: rollback.path,
+    final stagedDatabase = File(
+      p.join(
+        database.parent.path,
+        '.${p.basename(database.path)}.${DateTime.now().microsecondsSinceEpoch}.restore',
+      ),
     );
+    final stagedCovers = Directory('${stagedDatabase.path}.covers');
+    final covers = await _appPaths.coversDirectory();
+    try {
+      await stagedDatabase.writeAsBytes(databaseBytes, flush: true);
+      await _validateBackupDatabase(stagedDatabase);
+      await stagedCovers.create();
+      for (final entry in archive.files) {
+        if (!entry.isFile || !entry.name.startsWith('covers/')) continue;
+        final name = entry.name.substring('covers/'.length);
+        if (name.isEmpty ||
+            name.contains('\\') ||
+            p.posix.isAbsolute(name) ||
+            name.split('/').contains('..') ||
+            entry.isSymbolicLink) {
+          throw const FormatException('备份封面路径无效');
+        }
+        final destination = File(p.join(stagedCovers.path, name));
+        await destination.parent.create(recursive: true);
+        await destination.writeAsBytes(entry.content, flush: true);
+      }
+      cancelToken?.throwIfCancelled();
+    } on Object {
+      await _deleteIfExists(stagedDatabase);
+      if (await stagedCovers.exists()) {
+        await stagedCovers.delete(recursive: true);
+      }
+      rethrow;
+    }
+
+    var stagedInstalled = false;
+    try {
+      cancelToken?.throwIfCancelled();
+      await _database.close();
+      final rollback = await _rollbackFileFor(database);
+      final rollbackCovers = Directory('${rollback.path}.covers');
+      if (await database.exists()) {
+        await database.copy(rollback.path);
+      } else {
+        await rollback.writeAsBytes(const []);
+      }
+
+      var coversMoved = false;
+      var coversInstalled = false;
+      try {
+        await covers.rename(rollbackCovers.path);
+        coversMoved = true;
+        await stagedCovers.rename(covers.path);
+        coversInstalled = true;
+        await _deleteIfExists(File('${database.path}-wal'));
+        await _deleteIfExists(File('${database.path}-shm'));
+        await stagedDatabase.rename(database.path);
+        stagedInstalled = true;
+      } on Object {
+        if (coversInstalled) await covers.delete(recursive: true);
+        if (coversMoved) await rollbackCovers.rename(covers.path);
+        if (await rollback.exists()) {
+          await rollback.copy(database.path);
+        }
+        rethrow;
+      }
+
+      return RestoreBackupResult(
+        databasePath: database.path,
+        rollbackPath: rollback.path,
+      );
+    } finally {
+      if (!stagedInstalled) {
+        await _deleteIfExists(stagedDatabase);
+        if (await stagedCovers.exists()) {
+          await stagedCovers.delete(recursive: true);
+        }
+      }
+    }
   }
 
   String _renderImageAnnotations(List<_ImageExportSection> sections) {
@@ -614,7 +759,14 @@ final class ExportService {
           body: [
             if (conversation.sourceText?.isNotEmpty == true)
               '> ${conversation.sourceText!.replaceAll('\n', '\n> ')}',
+            '回答状态：${_aiAnswerStatusLabel(conversation)}',
             conversation.answer,
+            if (conversation.answerMeta != null)
+              '回答核验：`${conversation.answerMeta!.toJsonText()}`',
+            if (conversation.profileSnapshot != null)
+              '请求配置快照：`${conversation.profileSnapshot!}`',
+            if (conversation.contextSnapshot != null)
+              _renderAiSources(conversation.contextSnapshot!),
           ].join('\n\n'),
           bookId: conversation.bookId,
           locator: conversation.locator,
@@ -655,6 +807,19 @@ final class ExportService {
     return buffer.toString();
   }
 
+  String _renderAiSources(AiContextSnapshot snapshot) {
+    return [
+      '### 引用来源',
+      '',
+      for (final reference in snapshot.references)
+        '- ${_escapeHeading(reference.label)}',
+      '',
+      '```json',
+      snapshot.toJsonText(),
+      '```',
+    ].join('\n');
+  }
+
   String _renderAiConversations(List<AiConversation> conversations) {
     final buffer = StringBuffer()
       ..writeln('# PageSage AI 问答导出')
@@ -673,6 +838,7 @@ final class ExportService {
         ..writeln()
         ..writeln('- Provider：${conversation.provider}')
         ..writeln('- 模型：${conversation.model}')
+        ..writeln('- 回答状态：${_aiAnswerStatusLabel(conversation)}')
         ..writeln(
           '- 创建时间：${DateTime.fromMillisecondsSinceEpoch(conversation.createdAt).toIso8601String()}',
         );
@@ -681,6 +847,27 @@ final class ExportService {
       }
       if (conversation.locator != null) {
         buffer.writeln('- 位置：`${conversation.locator!.toJsonText()}`');
+      }
+      if (conversation.contextSnapshot != null) {
+        buffer.writeln(_renderAiSources(conversation.contextSnapshot!));
+      }
+      if (conversation.answerMeta != null) {
+        buffer
+          ..writeln()
+          ..writeln('### 回答核验')
+          ..writeln()
+          ..writeln('```json');
+        buffer.writeln(conversation.answerMeta!.toJsonText());
+        buffer.writeln('```');
+      }
+      if (conversation.profileSnapshot != null) {
+        buffer
+          ..writeln()
+          ..writeln('### 请求配置快照')
+          ..writeln()
+          ..writeln('```json');
+        buffer.writeln(conversation.profileSnapshot!);
+        buffer.writeln('```');
       }
       if (conversation.contextText?.isNotEmpty == true) {
         buffer
@@ -707,6 +894,20 @@ final class ExportService {
     return buffer.toString();
   }
 
+  String _aiAnswerStatusLabel(AiConversation conversation) {
+    final meta = conversation.answerMeta;
+    if (meta == null) return '历史回答，未执行本次核验';
+    return switch (meta.answerStatus) {
+      'sourceLinked' => '已关联来源（未独立验证结论）',
+      'insufficient' =>
+        meta.producer == 'localPolicy' ? '本地检索反馈 · 证据不足，未调用模型' : '证据不足',
+      'unverified' => '未核验引用',
+      'interrupted' => '生成未完成',
+      'failed' => '生成失败',
+      _ => '历史回答，未执行本次核验',
+    };
+  }
+
   String _csv(String value) {
     return '"${value.replaceAll('"', '""')}"';
   }
@@ -719,8 +920,7 @@ final class ExportService {
     required String extension,
   }) async {
     if (targetPath != null && targetPath.trim().isNotEmpty) {
-      final normalized = _ensureExtension(targetPath.trim(), extension);
-      return File(normalized);
+      return File(targetPath);
     }
     final dir = await _appPaths.exportsDirectory();
     final date = DateTime.now();
@@ -732,25 +932,18 @@ final class ExportService {
     );
   }
 
-  String _ensureExtension(String path, String extension) {
-    return p.extension(path).isEmpty ? '$path.$extension' : path;
-  }
-
   Future<File> _writeTextAtomically(
     File file,
     String content, {
     TaskCancelToken? cancelToken,
   }) async {
     await file.parent.create(recursive: true);
-    final tempFile = File('${file.path}.part');
+    final tempFile = File('${file.path}.${const Uuid().v4()}.part');
     try {
       cancelToken?.throwIfCancelled();
       await tempFile.writeAsString(content, flush: true);
       cancelToken?.throwIfCancelled();
-      if (await file.exists()) {
-        await file.delete();
-      }
-      return tempFile.rename(file.path);
+      return await tempFile.rename(file.path);
     } on Object {
       await _deleteIfExists(tempFile);
       rethrow;
@@ -772,6 +965,59 @@ final class ExportService {
             magic;
   }
 
+  Future<void> _validateBackupDatabase(File file) async {
+    late final sqlite.Database candidate;
+    try {
+      candidate = sqlite.sqlite3.open(
+        file.path,
+        mode: sqlite.OpenMode.readOnly,
+      );
+    } on sqlite.SqliteException {
+      throw const FormatException('备份数据库无法打开');
+    }
+    try {
+      final integrity = candidate.select('PRAGMA integrity_check');
+      if (integrity.length != 1 || integrity.first.values.first != 'ok') {
+        throw const FormatException('备份数据库完整性校验失败');
+      }
+      final version = candidate.userVersion;
+      if (version < 1 || version > _database.schemaVersion) {
+        throw const FormatException('备份数据库版本不受支持');
+      }
+      final tables = candidate
+          .select("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .map((row) => row['name'] as String)
+          .toSet();
+      final requiredTables = <String>{
+        'books',
+        if (version >= 2) 'reading_progress',
+        if (version >= 2) 'search_chunks',
+        if (version >= 3) 'ocr_pages',
+        if (version >= 12) 'ocr_jobs',
+        if (version >= 12) 'ocr_job_pages',
+      };
+      if (!tables.containsAll(requiredTables)) {
+        throw const FormatException('备份数据库缺少 PageSage 必需数据表');
+      }
+    } on sqlite.SqliteException {
+      throw const FormatException('备份数据库完整性校验失败');
+    } finally {
+      candidate.close();
+    }
+
+    final migrated = AppDatabase.forTesting(NativeDatabase(file));
+    try {
+      await migrated.customSelect('SELECT COUNT(*) FROM books').get();
+      await migrated.customSelect('SELECT COUNT(*) FROM search_chunks').get();
+      await migrated.customSelect('SELECT COUNT(*) FROM ocr_jobs').get();
+      await prepareRestoredDatabase(migrated);
+    } on Object {
+      throw const FormatException('备份数据库无法升级到当前版本');
+    } finally {
+      await migrated.close();
+    }
+  }
+
   Future<File> _rollbackFileFor(File database) async {
     final dir = await _appPaths.exportsDirectory();
     final date = DateTime.now();
@@ -779,7 +1025,7 @@ final class ExportService {
       p.join(
         dir.path,
         'pagesage-rollback-${date.year}${_two(date.month)}${_two(date.day)}-'
-        '${_two(date.hour)}${_two(date.minute)}${_two(date.second)}.sqlite',
+        '${_two(date.hour)}${_two(date.minute)}${_two(date.second)}-${const Uuid().v4()}.sqlite',
       ),
     );
   }

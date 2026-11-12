@@ -62,7 +62,7 @@
 
 ## UI 与交互
 
-- 空书库显示插画、导入按钮、扫描文件夹按钮和稍后配置 AI 入口。
+- 空书库显示插画、一个「导入」菜单（导入文件 / 扫描文件夹 / 把文件夹作为一本书）和稍后配置 AI 入口。
 - 书籍点击打开阅读器。
 - 桌面列表单击选中，双击打开，方向键移动选中，Enter 打开。
 - 长标题最多两行，作者一行，避免卡片尺寸跳动。
@@ -80,6 +80,15 @@
 - [x] 索引失败的书籍仍可打开阅读。
 
 ## 测试与验证
+
+### 2026-11-10 桌面分类栏折叠
+
+- 桌面筛选栏左端提供常驻的“收起书库分类 / 展开书库分类”按钮，收起后释放分类栏的 248px 宽度。
+- 折叠状态由 `LibraryController` 管理，仅在本次应用运行中保留；不修改阅读器设置或数据库。筛选、排序、视图切换和清除筛选不改变折叠状态。
+- 收起后以紧凑菜单保留当前阅读状态和书架筛选，可修改或清除；重新展开时保留树内目录的展开状态。
+- 验证：`flutter analyze` 通过；`flutter test test/features/library test/app/widgets test/widget_test.dart --concurrency=4 --reporter expanded` 共 47 项通过。控制器测试覆盖折叠与筛选/排序/视图隔离；侧栏测试使用真实 `PageSageApp` 和明确断言的 1440px 视口，验证收起后网格实际增宽约 249px、目录展开状态保留、菜单改筛选、无结果清除以及缩窄再恢复桌面宽度。
+- `app_chrome_test.dart` 验证横向滚动筛选项时，展开入口不移动且仍可点击。`library_sidebar_test.dart` 加 `--dart-define=UPDATE_PAGESAGE_SCREENSHOTS=true` 另有 4 项通过，生成 `.codex-run/ui-screenshots/library-sidebar-{1440,1024}-{expanded,collapsed}.png` 和 `library-sidebar-1024-large-text.png`，覆盖真实壳层、两种宽度和 1.4 倍文字。渲染未报告溢出；图片查看工具未返回图像，因此不记为人工目检通过；真实桌面窗口未验收。
+- Linux release 已通过 `CMAKE_BUILD_PARALLEL_LEVEL=4 bash tool/install_linux.sh` 更新到本地安装路径；`diff -qr` 确认整个安装 bundle 与构建一致，双方 `libapp.so` SHA256 均为 `2e90704fb19d24cb68aa86380f79ac6596281e08bf5e935b7a75531fff4f2e06`。检查时无运行中的 `pagesage`，未启动窗口。
 
 - `dart format .`
 - `flutter analyze`

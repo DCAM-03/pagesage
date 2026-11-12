@@ -60,6 +60,21 @@ void main() {
       expect(result.single.height, lessThanOrEqualTo(0.022));
     });
 
+    test('a tall narrow band on a rotated page is kept whole', () {
+      // A rotated text line is a tall, narrow column in display space. It is
+      // not the legacy half-page mega-box the collapse rule was written for;
+      // squashing it would move the annotation away from the text the reader
+      // selected and make the stored mark unclickable.
+      final result = prepareAnnotationRects([
+        rect(x: 0.88, y: 0.15, width: 0.016, height: 0.25),
+      ], lineBands: bands(const [PdfLineBand(top: 0.15, bottom: 0.40)]));
+
+      expect(result, hasLength(1));
+      expect(result.single.y, closeTo(0.15, 0.001));
+      expect(result.single.height, closeTo(0.25, 0.001));
+      expect(result.single.width, closeTo(0.016, 0.0001));
+    });
+
     test('a tall box is capped when there is no line reference', () {
       // No line reference at all — the fallback cap is the only protection.
       final result = prepareAnnotationRects([

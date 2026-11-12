@@ -3,7 +3,7 @@
 > 决策日期：2026-10-21
 > 状态：已决策，待实施（B1 起）
 > 上游需求：`docs/02-feature-spec.md` §8、`docs/tasks/annotations-and-highlights.md`（TASK-11）
-> 约束来源：`AGENTS.md`（本地优先、AI 用户主动触发、渲染器不写业务数据）、`docs/privacy.md`
+> 约束来源：`AGENTS.md`（本地优先、AI 上下文范围显式、渲染器不写业务数据）、`docs/privacy.md`
 
 ## 1. 目标与范围
 

@@ -1,115 +1,37 @@
 ---
 name: workstream-triage
-description: Anchor the active software-delivery workstream and reconcile plans, accepted decisions, task records, validation, and commit evidence. Use before answering status, remaining-work, next-wave, continue, prioritization, parallelization, schedule, or release-readiness requests, especially when supporting validation or operations work may have interrupted the primary workstream.
+description: 核对 PageSage 当前任务、代码与验证证据，用于剩余工作、下一步、优先级、发布状态或继续既有工作；只做状态核对，不凭状态提问扩大实施范围。
 ---
 
-# Workstream Triage
+# PageSage 工作续接
 
-Prevent scope drift and stale backlog from controlling the next action. Read only the evidence relevant to the user's requested workstream.
+## 按需定位事实
 
-## Establish The Active Workstream
+1. 先读当前用户要求、根 `AGENTS.md` 和 `docs/implementation-status.md` 的相关条目。
+2. 沿链接读取最近相关的 `docs/tasks/` 记录，再读取影响本次判断的设计、路线图或已接受决策。
+3. 核对相关路径的 Git 差异、新文件、实现和测试。仓库常有未提交工作，不能只用 HEAD 判断是否实现。
+4. 只有判断合并、提交、安装或其他会话状态确有需要时，才检查对应 Git、产物或会话证据。
 
-1. Read the root `docs/PROJECT_TASKS.md` and its `Active Workstream` fields.
-2. Read linked active plans, accepted decisions, and the closest dated task records.
-3. Read component task indexes when the requested scope names or affects those components.
-4. Identify the workstream from explicit persisted state and the newest relevant evidence, not memory or an isolated backlog heading.
-5. If the evidence is ambiguous, state `I am treating <name> as the active workstream` and explain the source. Do not silently broaden the scope or persist the assumption.
+不要求不存在的 `PROJECT_TASKS.md`、`PROJECT_PROFILE.md` 或 IAM 任务 schema。
+不为回答状态问题改写索引、重建任务表或重跑测试。
 
-Treat these fields as the durable state when present:
+## 对齐状态
 
-- `Status`: `inactive`, `active`, `blocked`, or `completed`.
-- `Name`: the primary capability, repair line, contract, or release objective.
-- `Scope`: included components and explicit exclusions.
-- `Source`: the controlling plan, decision, or task.
-- `Current Gate`: the prerequisite or acceptance condition controlling the next action.
-- `Supporting Blockers`: validation, credentials, infrastructure, or operations work that blocks progress without replacing the primary workstream.
-- `Last Confirmed`: the date and evidence that last established this state.
+- 任务记录说明交付范围；实现和实际验证说明完成到哪里。路线图上的旧条目不是未完成工作的充分证据。
+- 列剩余事项前查找后续任务和已验证实现，排除已完成、被替代和不属于当前范围的事项。
+- 区分实现完成、组件验证、真实运行、平台验证和本地安装；一个结论不能代替其他结论。
+- 发现文档、代码、用户新要求冲突时，说明具体冲突与影响。当前明确要求优先，不把旧文档升级为新增约束。
+- 验证、安装或工具故障是支撑事项，不自动替换原产品目标。未解决的硬依赖仍需先处理。
 
-Do not edit the index merely to answer a status question. Update it only when the user explicitly switches or closes a workstream, or when a coordination session activates an accepted plan/task transition. A supporting task, smoke check, credential rotation, cleanup, release tag, or deployment action never switches the primary workstream by itself.
+## 处理“继续”
 
-## Build The Evidence Ledger
+找到原任务、最后可靠结果、当前差异和下一项未完成行为。沿用既有任务、工作区和已授权范围，
+交给 `pagesage-dart-engineering` 或确有多阶段协调需要时的 `project-coordination` 继续。
+不要重新实施已有功能，也不要因换一轮对话而自动新建任务、会话或分支。
 
-Reconcile four sources before claiming that a remaining-work list is complete:
+如果用户已明确切换到 skill、文档或其他范围，本轮只完成新范围，不自行恢复产品开发。
 
-| Evidence | Establishes |
-| --- | --- |
-| Active plan | Intended direction, stages, and sequencing candidates |
-| Accepted decision | Authoritative product or architecture constraints and unfinished stages |
-| Task index, task document, execution and acceptance records | Assigned scope and recorded delivery state |
-| Commit, merge, worktree, and validation evidence | What changed, landed, and was actually verified |
+## 输出
 
-Treat plan entries, roadmap bullets, priority lists, follow-ups, and tooling-only results as candidates, not current facts.
-
-## Run Required Audits
-
-### Decision Implementation Audit
-
-Classify every relevant accepted decision as `fully implemented`, `partially implemented`, `implementation pending`, or `customer-gated`. Add unfinished stages to the dependency graph even when the active plan omitted them. When a plan conflicts with an accepted decision, report the conflict and treat the accepted decision as authoritative until superseded.
-
-### Supersession Audit
-
-For every candidate remaining item:
-
-1. Search newer task, execution, acceptance, closed, merged, or validation records.
-2. Verify referenced commit or merge evidence when available.
-3. Classify the candidate as `active`, `blocked`, `completed`, `superseded`, or `uncertain`.
-4. Exclude completed or superseded history from remaining work.
-5. Report contradictory evidence instead of guessing.
-
-Do not provide a definitive remaining-work list if this audit has not been completed.
-
-### Drift Audit
-
-Classify recent work before proposing another wave:
-
-- `Aligned implementation`: still follows the controlling decision and workstream.
-- `Partial completion`: completed one slice without completing the broader capability.
-- `Validation follow-up`: proves behavior or resolves an external gate without changing product direction.
-- `Superseded historical backlog`: old work already completed or replaced.
-- `Potential drift`: ownership, scope, product boundary, or sequencing conflicts with the controlling source.
-
-Resolve or dispatch a correction for potential drift before extending it with downstream implementation.
-
-## Apply Dependency Gates
-
-Classify dependencies as hard prerequisites, soft dependencies, or independent work. When a hard contract, schema, migration, security, ownership, or external-input prerequisite is unresolved:
-
-- propose only the prerequisite owner as the current executable wave;
-- keep downstream work planned, not dispatched;
-- do not claim the wave is parallelizable;
-- require upstream execution and acceptance evidence before downstream implementation.
-
-## Classify The Answer
-
-Use these lanes:
-
-- `Primary workstream`
-- `Validation blocker / supporting task`
-- `Future / release / operations`
-- `Product or architecture decision`
-
-Answer only the lane the user requested. Mention another lane only when it blocks the requested one. Do not let a supporting task replace the primary workstream unless the user explicitly changes direction.
-
-For release-readiness questions, also include active release-blocking priority items, unfinished accepted decisions, explicit exclusions, external gates, and fresh runtime or end-to-end evidence. Historical pilot or tooling evidence is not current release evidence.
-
-## Output
-
-State the active workstream, controlling source, current gate, evidence confidence, drift result, and next action. Use concrete document names, dates, task states, and commit identifiers when available.
-
-Use this compact shape:
-
-```text
-I am treating <workstream> as the active workstream.
-
-Primary workstream:
-- <state, evidence, next action>
-
-Validation blocker / supporting task:
-- <only when it blocks the requested work>
-
-Future / release / operations:
-- <only when explicitly requested>
-
-Drift:
-- none | <potential drift and correction>
-```
+报告本次有关的当前状态、证据缺口和下一项可执行工作。来源矛盾或范围不确定时说明依据；
+正常情况下不输出固定的流程栏目。完成汇报与历史批注处理遵循根 `AGENTS.md` 的协作规则。

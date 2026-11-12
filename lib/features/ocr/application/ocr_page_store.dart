@@ -10,13 +10,24 @@ import '../../../domain/ocr/ocr_models.dart';
 abstract interface class OcrPageStore {
   Future<OcrPageResult?> getPage(String bookId, int pageNumber);
 
+  Future<List<OcrStoredPage>> listPages(String bookId);
+
   Future<void> putPage({
     required String bookId,
     required int pageNumber,
     required OcrPageResult result,
+    String? sourceRevision,
+    String? cacheSignature,
+    String? textRevision,
+    String? engineVersion,
+    String pipelineVersion = 'ocr-text-v1',
+    String resultState = 'recognized',
+    String indexState = 'pending',
   });
 
   Future<void> deleteBook(String bookId);
+
+  Future<void> deletePages(String bookId, Iterable<int> pageNumbers);
 }
 
 final class DriftOcrPageStore implements OcrPageStore {
@@ -35,10 +46,28 @@ final class DriftOcrPageStore implements OcrPageStore {
   }
 
   @override
+  Future<List<OcrStoredPage>> listPages(String bookId) async {
+    final rows = await _dao.listByBook(bookId);
+    return rows
+        .map(
+          (row) =>
+              OcrStoredPage(pageNumber: row.pageNumber, result: _fromRow(row)),
+        )
+        .toList(growable: false);
+  }
+
+  @override
   Future<void> putPage({
     required String bookId,
     required int pageNumber,
     required OcrPageResult result,
+    String? sourceRevision,
+    String? cacheSignature,
+    String? textRevision,
+    String? engineVersion,
+    String pipelineVersion = 'ocr-text-v1',
+    String resultState = 'recognized',
+    String indexState = 'pending',
   }) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final existing = await _dao.getPage(bookId, pageNumber);
@@ -55,6 +84,13 @@ final class DriftOcrPageStore implements OcrPageStore {
         blocksJson: _encodeBlocks(result.blocks),
         imageWidth: Value(result.imageWidth),
         imageHeight: Value(result.imageHeight),
+        sourceRevision: Value(sourceRevision),
+        cacheSignature: Value(cacheSignature),
+        textRevision: Value(textRevision),
+        engineVersion: Value(engineVersion),
+        pipelineVersion: Value(pipelineVersion),
+        resultState: Value(resultState),
+        indexState: Value(indexState),
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       ),
@@ -66,6 +102,11 @@ final class DriftOcrPageStore implements OcrPageStore {
     return _dao.deleteByBook(bookId);
   }
 
+  @override
+  Future<void> deletePages(String bookId, Iterable<int> pageNumbers) {
+    return _dao.deletePages(bookId, pageNumbers);
+  }
+
   OcrPageResult _fromRow(OcrPageRow row) {
     return OcrPageResult(
       text: row.body,
@@ -75,6 +116,13 @@ final class DriftOcrPageStore implements OcrPageStore {
       blocks: _decodeBlocks(row.blocksJson),
       imageWidth: row.imageWidth,
       imageHeight: row.imageHeight,
+      sourceRevision: row.sourceRevision,
+      cacheSignature: row.cacheSignature,
+      textRevision: row.textRevision,
+      engineVersion: row.engineVersion,
+      pipelineVersion: row.pipelineVersion,
+      resultState: row.resultState,
+      indexState: row.indexState,
     );
   }
 
@@ -139,16 +187,55 @@ final class MemoryOcrPageStore implements OcrPageStore {
   }
 
   @override
+  Future<List<OcrStoredPage>> listPages(String bookId) async {
+    final prefix = '$bookId:';
+    return _pages.entries
+        .where((entry) => entry.key.startsWith(prefix))
+        .map((entry) {
+          final pageNumber = int.tryParse(entry.key.substring(prefix.length));
+          if (pageNumber == null) {
+            return null;
+          }
+          return OcrStoredPage(pageNumber: pageNumber, result: entry.value);
+        })
+        .whereType<OcrStoredPage>()
+        .toList(growable: false)
+      ..sort((a, b) => a.pageNumber.compareTo(b.pageNumber));
+  }
+
+  @override
   Future<void> putPage({
     required String bookId,
     required int pageNumber,
     required OcrPageResult result,
+    String? sourceRevision,
+    String? cacheSignature,
+    String? textRevision,
+    String? engineVersion,
+    String pipelineVersion = 'ocr-text-v1',
+    String resultState = 'recognized',
+    String indexState = 'pending',
   }) async {
-    _pages[_key(bookId, pageNumber)] = result;
+    _pages[_key(bookId, pageNumber)] = result.copyWith(
+      sourceRevision: sourceRevision,
+      cacheSignature: cacheSignature,
+      textRevision: textRevision,
+      engineVersion: engineVersion,
+      pipelineVersion: pipelineVersion,
+      resultState: resultState,
+      indexState: indexState,
+    );
   }
 
   @override
   Future<void> deleteBook(String bookId) async {
     _pages.removeWhere((key, _) => key.startsWith('$bookId:'));
+  }
+
+  @override
+  Future<void> deletePages(String bookId, Iterable<int> pageNumbers) async {
+    for (final pageNumber in pageNumbers) {
+      _pages.remove(_key(bookId, pageNumber));
+    }
   }
 }

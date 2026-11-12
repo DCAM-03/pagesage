@@ -15,7 +15,7 @@ import 'support/reader_harness.dart';
 /// These drive the production [ReaderPage] against the real canvas renderer
 /// and real sample PDFs. The widget tests already pin the renderer's own
 /// geometry; what is verified here is what only the live host can show: menus
-/// placed by the host overlay, pointer input through the GTK window, and
+/// placed by the host overlay, Flutter pointer gestures in the GTK window, and
 /// progress surviving a reopen.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -191,7 +191,7 @@ void main() {
     await harness.settle(tester);
 
     expect(find.text('标注'), findsWidgets);
-    expect(find.text('删除标注'), findsOneWidget);
+    expect(find.byTooltip('删除标注'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await harness.capture('03-annotation-menu');
@@ -204,8 +204,12 @@ void main() {
     final harness = await harnessFor(sample: 'large-text.pdf', id: 'large');
     await harness.pumpReader(tester, 'large', size: const Size(1280, 800));
 
-    // The quick toolbar's page chip opens the dialog.
-    await tester.tap(find.byTooltip('跳转页码').first);
+    final reveal = find.byTooltip('显示阅读工具').hitTestable();
+    if (reveal.evaluate().isNotEmpty) {
+      await tester.tap(reveal);
+      await tester.pump(const Duration(milliseconds: 250));
+    }
+    await tester.tap(find.byTooltip('跳转页码').hitTestable().first);
     await harness.settle(tester, rounds: 10);
     expect(find.text('跳转页码'), findsWidgets);
 
@@ -341,6 +345,60 @@ void main() {
     expect(find.text('高亮'), findsWidgets);
 
     await harness.capture('09-rotated-page');
+    await harness.closeReader(tester);
+  });
+
+  testWidgets('a rotated page keeps its annotation readable at night', (
+    tester,
+  ) async {
+    final harness = await harnessFor(
+      sample: 'rotated-text.pdf',
+      id: 'rotated-night',
+    );
+    // The stored rect is in displayed-page fractions, exactly what a
+    // selection on the rotated page reports. It must land on that same band
+    // after a reopen, and the night wash must stay visible instead of being
+    // inverted with the page picture.
+    await harness.database.annotationDao.upsertAnnotation(
+      AnnotationsCompanion.insert(
+        id: 'rotated-night-ann',
+        bookId: 'rotated-night',
+        locator: ReadingLocator.pdf(
+          page: 1,
+          selectionRects: const [
+            ReaderRect(page: 1, x: 0.90, y: 0.15, width: 0.04, height: 0.25),
+          ],
+        ).toJsonText(),
+        selectedText: 'PageSage',
+        color: 'yellow',
+        style: 'highlight',
+        createdAt: 0,
+        updatedAt: 0,
+      ),
+    );
+    await harness.pumpReader(
+      tester,
+      'rotated-night',
+      size: const Size(1280, 800),
+      settings: const ReaderSettings(
+        themePreset: ReaderThemePreset.night,
+        pdfZoomMode: PdfZoomMode.fitPage,
+      ),
+    );
+
+    final page = pageOfAspect(tester, 792 / 612);
+    expect(page, isNotNull, reason: 'rotated page should lay out 792x612');
+    final target =
+        page!.topLeft +
+        Offset((0.90 + 0.04 / 2) * page.width, (0.15 + 0.25 / 2) * page.height);
+    await tester.tapAt(target);
+    await harness.settle(tester);
+
+    expect(find.text('标注'), findsWidgets);
+    expect(find.byTooltip('删除标注'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await harness.capture('10-rotated-night-annotation');
     await harness.closeReader(tester);
   });
 

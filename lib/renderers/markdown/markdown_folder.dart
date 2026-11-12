@@ -9,6 +9,17 @@ import '../common/book_document_loader.dart';
 import '../epub/epub_document.dart';
 import 'markdown_parser.dart';
 
+/// The folder facts a reader session needs, without tying the manifest loader
+/// to a particular application controller.
+abstract interface class MarkdownFolderSource {
+  Future<MarkdownFolderManifest> loadManifest(String folderPath);
+
+  Future<({String relativePath, int chapterIndex})?> resolveLegacyPosition(
+    String folderPath,
+    int legacyChapterIndex,
+  );
+}
+
 /// A folder of Markdown files that could not be read as one book.
 final class MarkdownFolderException implements BookLoadException {
   const MarkdownFolderException(this.message);
@@ -52,8 +63,7 @@ Future<List<File>> discoverMarkdownFiles(String rootPath) async {
     }
   }
   // The path is the only order a folder has. It is also the order the writer
-  // sees in a file manager, which is what makes the table of contents
-  // predictable.
+  // sees in a file manager, which is what makes reading order predictable.
   files.sort(
     (a, b) => _relative(a, rootPath).compareTo(_relative(b, rootPath)),
   );
@@ -79,29 +89,179 @@ String _relative(File file, String rootPath) {
   return p.split(p.relative(file.path, from: rootPath)).join('/');
 }
 
+/// One Markdown file in a folder book.
+final class MarkdownFolderFile {
+  const MarkdownFolderFile({
+    required this.relativePath,
+    required this.absolutePath,
+    required this.title,
+    required this.size,
+    required this.modified,
+  });
+
+  /// Path inside the folder, always with `/` separators.
+  final String relativePath;
+  final String absolutePath;
+
+  /// The file name without its extension, used when the file has no heading.
+  final String title;
+  final int size;
+  final DateTime modified;
+
+  int get weight => size > 0 ? size : 1;
+}
+
+/// A row in the folder panel.
+sealed class MarkdownFolderNode {
+  const MarkdownFolderNode({required this.name, required this.relativePath});
+
+  final String name;
+  final String relativePath;
+}
+
+/// A directory in the folder panel.
+final class MarkdownFolderDirectory extends MarkdownFolderNode {
+  const MarkdownFolderDirectory({
+    required super.name,
+    required super.relativePath,
+    required this.children,
+  });
+
+  final List<MarkdownFolderNode> children;
+}
+
+/// A Markdown file in the folder panel.
+final class MarkdownFolderDocument extends MarkdownFolderNode {
+  MarkdownFolderDocument({required super.name, required this.file})
+    : super(relativePath: file.relativePath);
+
+  final MarkdownFolderFile file;
+}
+
+/// What a folder book contains, without reading any of its body text.
+///
+/// The reader only needs this to draw the file tree and to translate between
+/// a file-local position and the book-wide progress shown in the library. The
+/// document for the selected file is loaded separately.
+final class MarkdownFolderManifest {
+  const MarkdownFolderManifest({
+    required this.rootPath,
+    required this.files,
+    required this.roots,
+    required this.totalBytes,
+  });
+
+  final String rootPath;
+  final List<MarkdownFolderFile> files;
+  final List<MarkdownFolderNode> roots;
+  final int totalBytes;
+
+  bool get isEmpty => files.isEmpty;
+
+  int indexOf(String relativePath) {
+    final normalized = normalizeFolderHref(relativePath);
+    for (var index = 0; index < files.length; index += 1) {
+      if (files[index].relativePath == normalized) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  MarkdownFolderFile? fileForHref(String? href) {
+    if (href == null || href.isEmpty) {
+      return null;
+    }
+    final index = indexOf(href);
+    return index < 0 ? null : files[index];
+  }
+
+  MarkdownFolderFile? get firstFile => files.isEmpty ? null : files.first;
+
+  /// The folder-wide progress of a position inside [relativePath].
+  double progressForFile(String relativePath, double localProgress) {
+    final index = indexOf(relativePath);
+    if (index < 0 || totalBytes <= 0) {
+      return localProgress.clamp(0, 1).toDouble();
+    }
+    var before = 0;
+    for (var i = 0; i < index; i += 1) {
+      before += files[i].weight;
+    }
+    final current = before + files[index].weight * localProgress.clamp(0, 1);
+    return (current / totalBytes).clamp(0, 1).toDouble();
+  }
+
+  /// The position inside [relativePath] for a folder-wide progress.
+  double localProgressForFile(String relativePath, double progress) {
+    final index = indexOf(relativePath);
+    if (index < 0 || totalBytes <= 0) {
+      return progress.clamp(0, 1).toDouble();
+    }
+    var before = 0;
+    for (var i = 0; i < index; i += 1) {
+      before += files[i].weight;
+    }
+    final weight = files[index].weight;
+    return ((progress.clamp(0, 1) * totalBytes - before) / weight)
+        .clamp(0, 1)
+        .toDouble();
+  }
+
+  /// The file a folder-wide progress falls in.
+  MarkdownFolderFile? fileAtProgress(double progress) {
+    if (files.isEmpty) {
+      return null;
+    }
+    if (totalBytes <= 0) {
+      return files.first;
+    }
+    final target = progress.clamp(0, 1) * totalBytes;
+    var cursor = 0;
+    for (final file in files) {
+      cursor += file.weight;
+      if (target < cursor) {
+        return file;
+      }
+    }
+    return files.last;
+  }
+}
+
+/// Normalizes a path stored in a folder locator.
+String normalizeFolderHref(String value) {
+  var href = value.split('#').first.split('?').first.replaceAll('\\', '/');
+  while (href.startsWith('./')) {
+    href = href.substring(2);
+  }
+  if (href.isEmpty) {
+    return href;
+  }
+  return p.posix.normalize(href);
+}
+
 /// Opens a whole folder of Markdown files as one book.
 ///
-/// Each file contributes its chapters — the same way it would if it had been
-/// imported on its own — and the files are stitched in path order. The text
-/// offsets stay inside each chapter, so search, progress and jumps need to
-/// know nothing about the folder; a chapter's [EpubChapter.href] carries the
-/// file it came from, which is what lets a reader jump back to it later.
-///
-/// Reading and parsing a folder is the one heavy thing a Markdown book can
-/// do, so it happens off the UI isolate and the result is kept until the
-/// folder changes. Without the cache, opening a book parses it once for the
-/// table of contents and again for the text; without the isolate, a real
-/// notes folder freezes the window for seconds.
-final class MarkdownFolderLoader {
+/// Discovery and the panel tree are cheap: they read paths and stat data, not
+/// the notes. [loadLegacyDocument] is retained only to translate a position
+/// saved by the old merged-document reader; the reading path never calls it.
+final class MarkdownFolderLoader implements MarkdownFolderSource {
   const MarkdownFolderLoader();
 
-  static final Map<String, _FolderCacheEntry> _cache =
+  static final Map<String, _ManifestCacheEntry> _manifestCache =
+      <String, _ManifestCacheEntry>{};
+  static final Map<String, _FolderCacheEntry> _legacyCache =
       <String, _FolderCacheEntry>{};
 
-  /// Forgets every parsed folder. Used by tests and by "重建索引".
-  static void clearCache() => _cache.clear();
+  /// Forgets every folder manifest and legacy document. Used by tests and by
+  /// "重建索引".
+  static void clearCache() {
+    _manifestCache.clear();
+    _legacyCache.clear();
+  }
 
-  Future<EpubDocument> load(String folderPath) async {
+  @override
+  Future<MarkdownFolderManifest> loadManifest(String folderPath) async {
     final files = await discoverMarkdownFiles(folderPath);
     if (files.isEmpty) {
       throw const MarkdownFolderException('这个文件夹里没有 Markdown 文件');
@@ -113,30 +273,78 @@ final class MarkdownFolderLoader {
       );
     }
 
+    final signature = await _signature(files, folderPath);
+    final cached = _manifestCache[folderPath];
+    if (cached != null && cached.signature == signature) {
+      return cached.manifest;
+    }
+
+    final manifest = _buildManifest(folderPath, files);
+    _manifestCache[folderPath] = _ManifestCacheEntry(signature, manifest);
+    _evict();
+    return manifest;
+  }
+
+  /// Reads the old merged document, only to map a legacy locator.
+  ///
+  /// A position saved before P7 calls the whole folder's flattened chapter
+  /// indexes "chapterIndex". Loading that document once is the honest way to
+  /// learn which file and which heading it meant; after the next save the
+  /// position is file-local and this path is no longer used.
+  Future<EpubDocument> loadLegacyDocument(String folderPath) async {
+    final files = await discoverMarkdownFiles(folderPath);
+    if (files.isEmpty) {
+      throw const MarkdownFolderException('这个文件夹里没有 Markdown 文件');
+    }
     final relativePaths = <String>[
       for (final file in files) _relative(file, folderPath),
     ];
     final signature = await _signature(files, folderPath);
-
-    final cached = _cache[folderPath];
+    final cached = _legacyCache[folderPath];
     if (cached != null && cached.signature == signature) {
       return cached.document;
     }
-
     final entry = _FolderCacheEntry(
       signature,
-      Isolate.run(() => _parseFolder(folderPath, relativePaths)),
+      Isolate.run(() => _parseLegacyFolder(folderPath, relativePaths)),
     );
-    _cache[folderPath] = entry;
+    _legacyCache[folderPath] = entry;
     _evict();
     try {
       return await entry.document;
     } on Object {
-      if (identical(_cache[folderPath], entry)) {
-        _cache.remove(folderPath);
+      if (identical(_legacyCache[folderPath], entry)) {
+        _legacyCache.remove(folderPath);
       }
       rethrow;
     }
+  }
+
+  /// Maps a legacy merged chapter index to a file-local position.
+  ///
+  /// Returns null when the legacy document no longer has that chapter (the
+  /// folder was edited since the position was saved).
+  @override
+  Future<({String relativePath, int chapterIndex})?> resolveLegacyPosition(
+    String folderPath,
+    int legacyChapterIndex,
+  ) async {
+    final document = await loadLegacyDocument(folderPath);
+    if (legacyChapterIndex < 0 ||
+        legacyChapterIndex >= document.chapters.length) {
+      return null;
+    }
+    final chapter = document.chapters[legacyChapterIndex];
+    if (chapter.href.isEmpty) {
+      return null;
+    }
+    var localIndex = 0;
+    for (var index = 0; index < legacyChapterIndex; index += 1) {
+      if (document.chapters[index].href == chapter.href) {
+        localIndex += 1;
+      }
+    }
+    return (relativePath: chapter.href, chapterIndex: localIndex);
   }
 
   /// What the folder looked like: every file's path, size and modification
@@ -158,10 +366,20 @@ final class MarkdownFolderLoader {
   }
 
   static void _evict() {
-    while (_cache.length > 2) {
-      _cache.remove(_cache.keys.first);
+    while (_manifestCache.length > 4) {
+      _manifestCache.remove(_manifestCache.keys.first);
+    }
+    while (_legacyCache.length > 2) {
+      _legacyCache.remove(_legacyCache.keys.first);
     }
   }
+}
+
+final class _ManifestCacheEntry {
+  _ManifestCacheEntry(this.signature, this.manifest);
+
+  final String signature;
+  final MarkdownFolderManifest manifest;
 }
 
 final class _FolderCacheEntry {
@@ -171,8 +389,98 @@ final class _FolderCacheEntry {
   final Future<EpubDocument> document;
 }
 
-/// Reads and parses the folder. Runs in its own isolate.
-Future<EpubDocument> _parseFolder(
+MarkdownFolderManifest _buildManifest(String folderPath, List<File> files) {
+  final entries = <MarkdownFolderFile>[];
+  var totalBytes = 0;
+  for (final file in files) {
+    final stat = file.statSync();
+    final relative = _relative(file, folderPath);
+    final size = stat.size;
+    totalBytes += size > 0 ? size : 1;
+    entries.add(
+      MarkdownFolderFile(
+        relativePath: relative,
+        absolutePath: file.path,
+        title: p.basenameWithoutExtension(relative),
+        size: size,
+        modified: stat.modified,
+      ),
+    );
+  }
+  if (totalBytes > markdownFolderMaxBytes) {
+    throw MarkdownFolderException(
+      '文件夹里的 Markdown 超过 '
+      '${markdownFolderMaxBytes ~/ (1024 * 1024)} MB，已放弃打开',
+    );
+  }
+
+  final root = _DirectoryBuilder('');
+  for (final entry in entries) {
+    final segments = p.posix.split(entry.relativePath);
+    var directory = root;
+    for (var index = 0; index < segments.length - 1; index += 1) {
+      directory = directory.directories.putIfAbsent(
+        segments[index],
+        () => _DirectoryBuilder(segments[index]),
+      );
+    }
+    directory.files.add(entry);
+  }
+
+  return MarkdownFolderManifest(
+    rootPath: folderPath,
+    files: List<MarkdownFolderFile>.unmodifiable(entries),
+    roots: List<MarkdownFolderNode>.unmodifiable(root.toNodes('')),
+    totalBytes: totalBytes,
+  );
+}
+
+final class _DirectoryBuilder {
+  _DirectoryBuilder(this.name);
+
+  final String name;
+  final Map<String, _DirectoryBuilder> directories =
+      <String, _DirectoryBuilder>{};
+  final List<MarkdownFolderFile> files = <MarkdownFolderFile>[];
+
+  List<MarkdownFolderNode> toNodes(String parentPath) {
+    final relativePath = parentPath.isEmpty
+        ? name
+        : (name.isEmpty ? parentPath : '$parentPath/$name');
+    final nodes = <MarkdownFolderNode>[];
+    final directoryNames = directories.keys.toList(growable: false)
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    for (final directoryName in directoryNames) {
+      final child = directories[directoryName]!;
+      nodes.add(
+        MarkdownFolderDirectory(
+          name: child.name,
+          relativePath: relativePath.isEmpty
+              ? child.name
+              : '$relativePath/${child.name}',
+          children: List<MarkdownFolderNode>.unmodifiable(
+            child.toNodes(relativePath),
+          ),
+        ),
+      );
+    }
+    final sortedFiles = files.toList(growable: false)
+      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    for (final file in sortedFiles) {
+      nodes.add(
+        MarkdownFolderDocument(
+          name: p.posix.basename(file.relativePath),
+          file: file,
+        ),
+      );
+    }
+    return nodes;
+  }
+}
+
+/// Reads and parses the folder as the old merged document. Runs in its own
+/// isolate and is only used for locating pre-P7 positions.
+Future<EpubDocument> _parseLegacyFolder(
   String folderPath,
   List<String> relativePaths,
 ) async {
@@ -196,8 +504,6 @@ Future<EpubDocument> _parseFolder(
     } on MarkdownFolderException {
       rethrow;
     } on Object {
-      // One unreadable file does not take the folder with it; the reader says
-      // which files were left out at the end of the book.
       unreadable.add(relative);
       continue;
     }

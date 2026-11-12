@@ -17,15 +17,18 @@ import '../../domain/annotations/image_anchor.dart';
 import '../../domain/books/book.dart';
 import '../../domain/books/reader_settings.dart';
 import '../../domain/books/reading_position.dart';
+import '../../domain/ocr/ocr_models.dart';
 import '../common/renderer_event.dart';
 import '../../features/ocr/application/ocr_providers.dart';
-import '../epub/epub_jump.dart';
+import '../../domain/books/locator_excerpt.dart';
+import 'pdf_annotation_colors.dart';
 import 'pdf_annotation_lines.dart';
 import 'pdf_image_detector.dart';
 import 'pdf_canvas_renderer.dart';
 import 'pdf_layout.dart';
 import 'pdf_page_image_source.dart';
 import 'pdf_links.dart';
+import 'pdf_ocr_selection_controller.dart';
 import 'pdf_outline.dart';
 import 'pdf_page_tint.dart';
 import 'pdf_selection.dart';
@@ -40,10 +43,6 @@ import 'pdf_zoom.dart';
 typedef PdfZoomChanged = void Function(double scale, PdfZoomMode mode);
 
 /// PDF renderer built on `pdf_graphics` painting straight to a Flutter Canvas.
-///
-/// Sits beside the WebView-backed [PdfRendererView] and can replace it once
-/// panning, text selection and annotation overlays are ported; see
-/// `docs/10-pdf-renderer-migration.md`.
 ///
 /// S1 makes zoom a single resolved scale: the page slot, the picture transform
 /// and `locator.zoom` all derive from [resolvePdfZoom], so a page is never
@@ -188,6 +187,31 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
 
   /// Result of the text-layer probe, or null while it is still running.
   bool? _nativeTextLayer;
+  final FocusNode _readerFocusNode = FocusNode(debugLabel: 'PDF reader');
+
+  final Map<int, List<OcrTextBlock>> _ocrBlocksByPage = {};
+  final Map<int, PdfOcrTextLayout> _ocrLayoutsByPage = {};
+
+  void _cacheOcrOverlay() {
+    final page = widget.ocrOverlayPage;
+    if (page == null || page < 1) return;
+    final blocks = parseOcrOverlayBlocks(widget.ocrOverlayBlocks);
+    if (blocks.isEmpty) {
+      _ocrBlocksByPage.remove(page);
+      _ocrLayoutsByPage.remove(page);
+      return;
+    }
+    _ocrBlocksByPage[page] = blocks;
+    _ocrLayoutsByPage[page] = PdfOcrTextLayout.fromBlocks(blocks);
+  }
+
+  List<OcrTextBlock> _ocrBlocksForPage(int pageIndex) {
+    return _ocrBlocksByPage[pageIndex + 1] ?? const [];
+  }
+
+  PdfOcrTextLayout? _ocrLayoutForPage(int pageIndex) {
+    return _ocrLayoutsByPage[pageIndex + 1];
+  }
 
   /// Exposes the renderer to the reader's OCR path.
   ///
@@ -232,11 +256,17 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     for (final segment in pdfSelectionSegments(
       anchor: anchor,
       focus: focus,
-      textLengthOf: (page) => _renderer?.textOf(page).text.length ?? 0,
+      textLengthOf: _textLengthForPage,
     )) {
       out[segment.page] = (start: segment.start, end: segment.end);
     }
     return out;
+  }
+
+  int _textLengthForPage(int pageIndex) {
+    final ocr = _ocrLayoutForPage(pageIndex);
+    if (ocr != null && !ocr.isEmpty) return ocr.text.length;
+    return _renderer?.textOf(pageIndex).text.length ?? 0;
   }
 
   ({int start, int end})? _rangeForPage(int pageIndex) =>
@@ -245,6 +275,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   @override
   void initState() {
     super.initState();
+    _cacheOcrOverlay();
     unawaited(_open());
   }
 
@@ -276,7 +307,13 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     }
     if (oldWidget.ocrOverlayToken != widget.ocrOverlayToken ||
         oldWidget.ocrOverlayPage != widget.ocrOverlayPage) {
-      _emitCapabilities();
+      _cacheOcrOverlay();
+      // Carets index the previous overlay's text; a new recognition result
+      // makes them meaningless.
+      _clearSelection();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _emitCapabilities();
+      });
     }
   }
 
@@ -290,6 +327,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
 
   @override
   void dispose() {
+    _readerFocusNode.dispose();
     _focusClearTimer?.cancel();
     final notifier = _imageSourceNotifier;
     if (notifier != null && identical(notifier.state, _imageSource)) {
@@ -401,19 +439,13 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   void _emitCapabilities() {
     final native = _nativeTextLayer;
     if (native == null) return;
-    final hasOcr =
-        widget.ocrOverlayPage != null && widget.ocrOverlayBlocks.isNotEmpty;
-    final reason = native
-        ? null
-        : hasOcr
-        ? '已叠加 OCR 文本层，划词暂未启用。'
-        : '此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别可见页」提取文字。';
+    final hasOcr = _ocrLayoutsByPage.isNotEmpty;
+    final canSelect = native || hasOcr;
+    final reason = canSelect ? null : '此 PDF 没有文本层，划词、高亮与搜索不可用。可使用「识别可见页」提取文字。';
     widget.onEvent(
       RendererCapabilityChanged(
-        // OCR block selection lands in S5; until then only native text is
-        // selectable. Search never covers OCR text in v1
-        // (`v1-experience-freeze.md` §5), so it follows the native flag.
-        textSelection: native,
+        // OCR search uses the stored-text index outside this native viewer.
+        textSelection: canSelect,
         search: native,
         nativeTextLayer: native,
         ocrTextLayer: hasOcr,
@@ -465,6 +497,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       final page = _currentPage + 1;
       final progress = pageCount <= 1 ? 1.0 : (page - 1) / (pageCount - 1);
       final offset = _scrollOffsetForCurrentPage();
+      final pageOffsetFraction = _pageOffsetFractionForCurrentPage();
 
       void emit(String? excerpt) {
         if (!mounted) return;
@@ -479,6 +512,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               // Zero outside continuous display, matching the bridge: a paged
               // layout has no meaningful sub-page position to restore into.
               scrollOffset: offset,
+              pageOffsetFraction: pageOffsetFraction,
               zoom: _layoutScale,
               progress: progress.clamp(0.0, 1.0),
               excerpt: excerpt,
@@ -795,6 +829,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
       bindings: _shortcutsFor(mode),
       child: Focus(
         autofocus: true,
+        focusNode: _readerFocusNode,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final viewport = Size(constraints.maxWidth, constraints.maxHeight);
@@ -929,9 +964,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
               imageFocus: _imageFocus[index] ?? const [],
               tint: _tint(narrow),
               annotations: widget.annotations,
-              ocrBlocks: widget.ocrOverlayPage == index + 1
-                  ? widget.ocrOverlayBlocks
-                  : const [],
+              ocrBlocks: _ocrBlocksForPage(index),
               selectionRange: _rangeForPage(index),
               selectionStartsHere: _selectionStartsAt(index),
               selectionEndsHere: _selectionEndsAt(index),
@@ -1009,9 +1042,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
                   imageFocus: _imageFocus[indices[i]] ?? const [],
                   tint: _tint(narrow),
                   annotations: widget.annotations,
-                  ocrBlocks: widget.ocrOverlayPage == indices[i] + 1
-                      ? widget.ocrOverlayBlocks
-                      : const [],
+                  ocrBlocks: _ocrBlocksForPage(indices[i]),
                   selectionRange: _rangeForPage(indices[i]),
                   selectionStartsHere: _selectionStartsAt(indices[i]),
                   selectionEndsHere: _selectionEndsAt(indices[i]),
@@ -1080,7 +1111,11 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// than resolving to nothing: dragging past the bottom of a page to the end
   /// of a paragraph is normal, and the browser selection this replaces did the
   /// same.
-  PdfCaret? _caretAtGlobal(Offset global, {int? preferPage}) {
+  PdfCaret? _caretAtGlobal(
+    Offset global, {
+    int? preferPage,
+    bool snapToNearest = true,
+  }) {
     final renderer = _renderer;
     if (renderer == null) return null;
     final preferred = preferPage == null ? null : _pageGlobalRects[preferPage];
@@ -1092,7 +1127,9 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     if (page == null) return null;
     final rect = _pageGlobalRects[page];
     if (rect == null) return null;
-    return _selectionControllerFor(page)?.caretAt(global - rect.topLeft);
+    return _selectionControllerFor(
+      page,
+    )?.caretAt(global - rect.topLeft, snapToNearest: snapToNearest);
   }
 
   int? _pageAtGlobal(Offset global) {
@@ -1123,10 +1160,22 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     return best;
   }
 
-  PdfSelectionController? _selectionControllerFor(int pageIndex) {
+  PdfTextSelectionSource? _selectionControllerFor(int pageIndex) {
     final renderer = _renderer;
     final rect = _pageGlobalRects[pageIndex];
     if (renderer == null || rect == null) return null;
+    final ocr = _ocrLayoutForPage(pageIndex);
+    if (ocr != null && !ocr.isEmpty) {
+      final pageSize = renderer.displaySizeOf(pageIndex);
+      return PdfOcrSelectionController(
+        pageIndex: pageIndex,
+        layout: ocr,
+        displayedSize: rect.size,
+        layoutScale: pageSize.width <= 0
+            ? _layoutScale
+            : rect.width / pageSize.width,
+      );
+    }
     // This page's own size, not the document's first page. A book whose
     // front matter is a different size from its body (匿名样本 01's pages 1-65 are
     // 489pt wide against 483pt for the rest; the samples' cover pages differ
@@ -1153,6 +1202,7 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// press lands inside it (a press inside a selection would otherwise kill
   /// it before a copy action could use it).
   void _beginSelection(Offset global, PointerDeviceKind kind) {
+    _readerFocusNode.requestFocus();
     final caret = _caretAtGlobal(global);
     if (caret == null) {
       _noticeNoText();
@@ -1210,11 +1260,12 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// and every desktop reader treats it that way. Tapping inside the current
   /// selection keeps it, so the toolbar can act on it.
   void _tapSelection(Offset global) {
+    _readerFocusNode.requestFocus();
     if (_selectionAnchor != null) {
       if (_selectionGlobalRects().any((r) => r.contains(global))) return;
       _clearSelection();
     }
-    final caret = _caretAtGlobal(global);
+    final caret = _caretAtGlobal(global, snapToNearest: false);
     if (caret == null) return;
     // Desktop tap selects the whole word under the pointer, matching the
     // previous behaviour.
@@ -1437,9 +1488,8 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
   /// there, so callers can decide between doing nothing and selecting a
   /// single character.
   ({PdfCaret anchor, PdfCaret focus})? _wordAt(PdfCaret caret) {
-    final renderer = _renderer;
-    if (renderer == null) return null;
-    final text = renderer.textOf(caret.page).text;
+    final text = _selectionControllerFor(caret.page)?.pageText;
+    if (text == null) return null;
     final range = pdfWordRangeAt(text, caret.index);
     if (range == null) return null;
     return (
@@ -1596,6 +1646,17 @@ final class _PdfCanvasViewState extends ConsumerState<PdfCanvasView> {
     );
   }
 
+  double? _pageOffsetFractionForCurrentPage() {
+    final renderer = _renderer;
+    if (renderer == null) {
+      return null;
+    }
+    if (_displayMode(renderer.pageCount) != PdfDisplayMode.continuous) {
+      return null;
+    }
+    return _anchorRatio?.clamp(0.0, 1.0);
+  }
+
   /// Restores the saved position once the layout exists.
   void _restoreSavedPosition() {
     final renderer = _renderer;
@@ -1737,7 +1798,7 @@ final class _CanvasPage extends StatefulWidget {
   /// Theme adjustment resolved once for the whole layout.
   final PdfPageTint tint;
   final List<Annotation> annotations;
-  final List<Map<String, Object?>> ocrBlocks;
+  final List<OcrTextBlock> ocrBlocks;
 
   /// The part of the current selection that falls on this page, or null.
   ///
@@ -1807,6 +1868,19 @@ final class _CanvasPageState extends State<_CanvasPage> {
 
   /// The page box, in logical pixels, before panning.
   Size _viewport = Size.zero;
+
+  /// Parsed OCR text for this page, rebuilt only when the overlay changes.
+  List<OcrTextBlock>? _ocrLayoutSource;
+  PdfOcrTextLayout? _ocrLayout;
+
+  PdfOcrTextLayout? get _ocrTextLayout {
+    if (widget.ocrBlocks.isEmpty) return null;
+    if (!identical(_ocrLayoutSource, widget.ocrBlocks)) {
+      _ocrLayoutSource = widget.ocrBlocks;
+      _ocrLayout = PdfOcrTextLayout.fromBlocks(widget.ocrBlocks);
+    }
+    return _ocrLayout;
+  }
 
   /// Live zoom while the fingers are down, in logical pixels per PDF point.
   ///
@@ -1934,7 +2008,7 @@ final class _CanvasPageState extends State<_CanvasPage> {
   List<Rect> get _selectionHighlights {
     final range = widget.selectionRange;
     if (range == null || range.end <= range.start) return const [];
-    return _selectionFor(Offset.zero).viewRectsFor(range.start, range.end);
+    return _textSelectionSource().viewRectsFor(range.start, range.end);
   }
 
   Widget _selectablePageFor(PdfRenderedPage page) {
@@ -1970,7 +2044,6 @@ final class _CanvasPageState extends State<_CanvasPage> {
             imageFrame: true,
           ),
       ],
-      ocrBoxes: _ocrBoxes(_paintedSize),
       onStart: _onDragStart,
       onUpdate: _onDragUpdate,
       onEnd: _onDragEnd,
@@ -2121,8 +2194,8 @@ final class _CanvasPageState extends State<_CanvasPage> {
     // last line's end, like a native text selection.
     if (widget.selectionStartsHere) {
       final startAt = Offset(
-        (first.left + origin.dx).clamp(0.0, pageRect.width - 1),
-        (first.top + origin.dy).clamp(0.0, pageRect.height - 1),
+        first.left.clamp(0.0, pageRect.width - 1) + origin.dx,
+        first.top.clamp(0.0, pageRect.height - 1) + origin.dy,
       );
       widgets.add(
         _SelectionHandle(
@@ -2137,8 +2210,8 @@ final class _CanvasPageState extends State<_CanvasPage> {
     }
     if (widget.selectionEndsHere) {
       final endAt = Offset(
-        (last.right + origin.dx).clamp(0.0, pageRect.width - 1),
-        (last.bottom + origin.dy).clamp(0.0, pageRect.height - 1),
+        last.right.clamp(0.0, pageRect.width - 1) + origin.dx,
+        last.bottom.clamp(0.0, pageRect.height - 1) + origin.dy,
       );
       widgets.add(
         _SelectionHandle(
@@ -2522,6 +2595,16 @@ final class _CanvasPageState extends State<_CanvasPage> {
   /// bands are empty and the pipeline falls back to its single-line cap, which
   /// is what the bridge does when it has no line reference either.
   List<PdfLineBand> _lineBands() {
+    final ocrBands = <({double top, double bottom})>[
+      for (final block in widget.ocrBlocks)
+        if (block.hasGeometry)
+          (
+            top: block.top!.clamp(0.0, 1.0).toDouble(),
+            bottom: (block.top! + block.height!).clamp(0.0, 1.0).toDouble(),
+          ),
+    ];
+    if (ocrBands.isNotEmpty) return lineBandsForPage(ocrBands);
+
     final text = widget.renderer.cachedTextOf(widget.pageIndex);
     if (text == null || text.runs.isEmpty) return const [];
     final geometry = _geometryFor(_pageSize);
@@ -2537,40 +2620,6 @@ final class _CanvasPageState extends State<_CanvasPage> {
     ]);
   }
 
-  /// OCR text-layer boxes for a scanned page, in view coordinates.
-  ///
-  /// OCR blocks are 0..1 fractions of the displayed page box (the OCR pipeline
-  /// rasterises exactly what is on screen), so they use the same direct
-  /// projection as annotations.
-  List<_OcrBox> _ocrBoxes(Size viewSize) {
-    final out = <_OcrBox>[];
-    for (final block in widget.ocrBlocks) {
-      final text = block['text'];
-      final left = block['left'];
-      final top = block['top'];
-      final width = block['width'];
-      final height = block['height'];
-      if (text is! String || text.trim().isEmpty) continue;
-      if (left is! num || top is! num || width is! num || height is! num) {
-        continue;
-      }
-      if (width <= 0 || height <= 0) continue;
-
-      out.add(
-        _OcrBox(
-          rect: Rect.fromLTWH(
-            left.toDouble() * viewSize.width,
-            top.toDouble() * viewSize.height,
-            width.toDouble() * viewSize.width,
-            height.toDouble() * viewSize.height,
-          ),
-          text: text,
-        ),
-      );
-    }
-    return out;
-  }
-
   PdfSelectionController _selectionFor(Offset globalOrigin) {
     final painted = _paintedSize;
     return PdfSelectionController(
@@ -2583,6 +2632,19 @@ final class _CanvasPageState extends State<_CanvasPage> {
       globalOrigin: globalOrigin,
       pageSize: _pageSize,
     );
+  }
+
+  PdfTextSelectionSource _textSelectionSource() {
+    final ocr = _ocrTextLayout;
+    if (ocr != null && !ocr.isEmpty) {
+      return PdfOcrSelectionController(
+        pageIndex: widget.pageIndex,
+        layout: ocr,
+        displayedSize: _paintedSize,
+        layoutScale: _displayScale,
+      );
+    }
+    return _selectionFor(Offset.zero);
   }
 
   /// Page-space quad -> view rectangle.
@@ -2694,7 +2756,6 @@ final class _PicturePainter extends CustomPainter {
     this.focusHighlights = const [],
     this.imageFocus = const [],
     this.annotations = const [],
-    this.ocrBoxes = const [],
     this.pxPerPoint = 1,
     this.tint = const PdfPageTint.plain(Color(0xFFFFFFFF)),
   });
@@ -2706,7 +2767,6 @@ final class _PicturePainter extends CustomPainter {
   /// Image boxes the jump landed on: framed, never filled.
   final List<Rect> imageFocus;
   final List<_AnnotationBox> annotations;
-  final List<_OcrBox> ocrBoxes;
 
   /// Painted pixels per PDF point. The canvas is sized in painted pixels, so
   /// overlays land directly; only the point-space picture needs scaling.
@@ -2752,7 +2812,8 @@ final class _PicturePainter extends CustomPainter {
       _paintImageFrame(canvas, rect, const Color(0xCCFFB300));
     }
     for (final box in annotations) {
-      final fill = Paint()..color = _annotationColor(box.color);
+      final fill = Paint()
+        ..color = pdfAnnotationColor(box.color, night: tint.inverted);
       if (box.imageFrame) {
         _paintImageFrame(canvas, box.rect, fill.color);
         continue;
@@ -2770,11 +2831,6 @@ final class _PicturePainter extends CustomPainter {
       } else {
         canvas.drawRect(box.rect, fill);
       }
-    }
-
-    // Also over the page: recognised text on scanned pages.
-    for (final box in ocrBoxes) {
-      if (!box.rect.isEmpty) _paintOcrText(canvas, box);
     }
   }
 
@@ -2820,32 +2876,12 @@ final class _PicturePainter extends CustomPainter {
     );
   }
 
-  void _paintOcrText(Canvas canvas, _OcrBox box) {
-    final fontSize = math.max(4.0, box.rect.height * 0.8);
-    final painter = TextPainter(
-      text: TextSpan(
-        text: box.text,
-        style: TextStyle(
-          fontSize: fontSize,
-          color: const Color(0xFF1A1A1A),
-          height: 1.0,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-      ellipsis: '…',
-    )..layout(maxWidth: box.rect.width);
-    painter.paint(canvas, box.rect.topLeft);
-    painter.dispose();
-  }
-
   @override
   bool shouldRepaint(_PicturePainter old) =>
       old.page != page ||
       old.highlights != highlights ||
       old.focusHighlights != focusHighlights ||
       old.annotations != annotations ||
-      old.ocrBoxes != ocrBoxes ||
       old.pxPerPoint != pxPerPoint ||
       old.tint != tint;
 }
@@ -2864,7 +2900,6 @@ final class _SelectablePage extends StatefulWidget {
     this.imageFocusRects = const [],
     required this.tint,
     required this.annotations,
-    required this.ocrBoxes,
     required this.onStart,
     required this.onUpdate,
     required this.onEnd,
@@ -2891,7 +2926,6 @@ final class _SelectablePage extends StatefulWidget {
   final List<Rect> imageFocusRects;
   final PdfPageTint tint;
   final List<_AnnotationBox> annotations;
-  final List<_OcrBox> ocrBoxes;
 
   final void Function(Offset local) onStart;
   final void Function(Offset local) onUpdate;
@@ -2999,7 +3033,6 @@ final class _SelectablePageState extends State<_SelectablePage> {
               focusHighlights: widget.focusedRects,
               imageFocus: widget.imageFocusRects,
               annotations: widget.annotations,
-              ocrBoxes: widget.ocrBoxes,
               tint: widget.tint,
               pxPerPoint: widget.pageSize.width <= 0
                   ? 1
@@ -3188,22 +3221,6 @@ final class _AnnotationBox {
   /// Draw brackets around the box instead of filling it (image annotations).
   final bool imageFrame;
 }
-
-/// One OCR text block projected into view coordinates.
-final class _OcrBox {
-  const _OcrBox({required this.rect, required this.text});
-
-  final Rect rect;
-  final String text;
-}
-
-Color _annotationColor(AnnotationColor color) => switch (color) {
-  AnnotationColor.yellow => const Color(0x66FFD54F),
-  AnnotationColor.blue => const Color(0x664FC3F7),
-  AnnotationColor.green => const Color(0x6681C784),
-  AnnotationColor.red => const Color(0x66E57373),
-  AnnotationColor.purple => const Color(0x66BA68C8),
-};
 
 /// [PdfPageImageSource] over an open [PdfCanvasView].
 ///

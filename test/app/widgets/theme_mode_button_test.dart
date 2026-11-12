@@ -104,6 +104,30 @@ void main() {
     expect(searchX, lessThan(importX));
   });
 
+  testWidgets('the command bar can omit the import action', (tester) async {
+    final settings = _RecordingSettingsRepository(const ReaderSettings());
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(
+      _harness(
+        settings,
+        Scaffold(
+          body: AppCommandBar(
+            onSearch: () {},
+            onImport: () {},
+            onTasks: () {},
+            showImport: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('搜索'), findsOneWidget);
+    expect(find.text('导入'), findsNothing);
+    expect(find.byTooltip('导入 EPUB/PDF/Markdown'), findsNothing);
+  });
+
   testWidgets('a header without the switch stays free of the settings store', (
     tester,
   ) async {

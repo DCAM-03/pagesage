@@ -167,6 +167,10 @@ class AiConversations extends Table {
   /// and the history view shows them as such rather than inventing a thread.
   /// Their `id` is a usable thread key of its own if it is ever needed.
   TextColumn get threadId => text().nullable()();
+  TextColumn get contextSnapshot => text().nullable()();
+  TextColumn get profileId => text().nullable()();
+  TextColumn get profileSnapshot => text().nullable()();
+  TextColumn get answerMeta => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -174,6 +178,31 @@ class AiConversations extends Table {
 
 @DataClassName('SearchChunkRow')
 class SearchChunks extends Table {
+  TextColumn get id => text()();
+  TextColumn get bookId => text().nullable()();
+  TextColumn get parentId => text().nullable()();
+  TextColumn get sourceType => text()();
+  TextColumn get sourceId => text().nullable()();
+  TextColumn get locator => text().nullable()();
+  TextColumn get title => text().nullable()();
+  TextColumn get body => text().named('text')();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+  TextColumn get generationId => text().nullable()();
+  TextColumn get documentSourceId => text().nullable()();
+  TextColumn get sourceRevision => text().nullable()();
+  TextColumn get textRevision => text().nullable()();
+  IntColumn get startOffset => integer().nullable()();
+  IntColumn get endOffset => integer().nullable()();
+  TextColumn get textOrigin => text().withDefault(const Constant('native'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('SearchParentChunkRow')
+class SearchParentChunks extends Table {
   TextColumn get id => text()();
   TextColumn get bookId => text().nullable()();
   TextColumn get sourceType => text()();
@@ -184,6 +213,11 @@ class SearchChunks extends Table {
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
+  TextColumn get generationId => text().nullable()();
+  TextColumn get documentSourceId => text().nullable()();
+  TextColumn get sourceRevision => text().nullable()();
+  TextColumn get textRevision => text().nullable()();
+  TextColumn get textOrigin => text().withDefault(const Constant('native'))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -234,6 +268,149 @@ class OcrPages extends Table {
   IntColumn get imageHeight => integer().nullable()();
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
+  TextColumn get sourceRevision => text().nullable()();
+  TextColumn get cacheSignature => text().nullable()();
+  TextColumn get textRevision => text().nullable()();
+  TextColumn get engineVersion => text().nullable()();
+  TextColumn get pipelineVersion => text().nullable()();
+  TextColumn get resultState => text().withDefault(const Constant('legacy'))();
+  TextColumn get indexState =>
+      text().withDefault(const Constant('notApplicable'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('DocumentSourceRow')
+class DocumentSources extends Table {
+  TextColumn get id => text()();
+  TextColumn get bookId => text()();
+  TextColumn get kind => text()();
+  TextColumn get address => text()();
+  TextColumn get currentSourceRevision => text().nullable()();
+  TextColumn get state => text().withDefault(const Constant('present'))();
+  IntColumn get observedSize => integer().nullable()();
+  IntColumn get observedMtime => integer().nullable()();
+  IntColumn get observedAt => integer()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('SearchIndexUnitRow')
+class SearchIndexUnits extends Table {
+  TextColumn get id => text()();
+  TextColumn get unitKey => text().unique()();
+  TextColumn get bookId => text().nullable()();
+  TextColumn get documentSourceId => text().nullable()();
+  TextColumn get requestedInputRevision => text()();
+  TextColumn get activeGenerationId => text().nullable()();
+  TextColumn get state => text().withDefault(const Constant('pending'))();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('SearchIndexGenerationRow')
+class SearchIndexGenerations extends Table {
+  TextColumn get id => text()();
+  TextColumn get unitId => text()();
+  TextColumn get inputRevision => text()();
+  TextColumn get sourceRevision => text().nullable()();
+  TextColumn get textRevision => text().nullable()();
+  TextColumn get textOrigin => text().withDefault(const Constant('native'))();
+  TextColumn get extractorVersion => text()();
+  TextColumn get tokenizerVersion => text()();
+  TextColumn get state => text().withDefault(const Constant('building'))();
+  IntColumn get createdAt => integer()();
+  IntColumn get publishedAt => integer().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AiProfileRow')
+class AiProfiles extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get provider =>
+      text().withDefault(const Constant('openai-compatible'))();
+  TextColumn get baseUrl => text().withDefault(const Constant(''))();
+  TextColumn get model => text().withDefault(const Constant(''))();
+  RealColumn get temperature => real().withDefault(const Constant(0.2))();
+  IntColumn get maxTokens => integer().withDefault(const Constant(1200))();
+  BoolColumn get streaming => boolean().withDefault(const Constant(true))();
+  TextColumn get systemPrompt => text().withDefault(const Constant(''))();
+  IntColumn get revision => integer().withDefault(const Constant(1))();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+  IntColumn get deletedAt => integer().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AiCredentialOperationRow')
+class AiCredentialOperations extends Table {
+  TextColumn get id => text()();
+  TextColumn get profileId => text()();
+  TextColumn get operation => text()();
+  TextColumn get phase => text()();
+  IntColumn get expectedRevision => integer()();
+  TextColumn get ownerSessionId => text()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('SearchTermDocumentRow')
+class SearchTermDocuments extends Table {
+  TextColumn get id => text()();
+  TextColumn get chunkId => text().unique()();
+  TextColumn get generationId => text().nullable()();
+  TextColumn get titleNormalized => text()();
+  TextColumn get textNormalized => text()();
+  TextColumn get titleTerms => text()();
+  TextColumn get textTerms => text()();
+  TextColumn get normalizerVersion => text()();
+  TextColumn get tokenizerVersion => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('OcrJobRow')
+class OcrJobs extends Table {
+  TextColumn get id => text()();
+  TextColumn get taskId => text().unique()();
+  TextColumn get bookId => text()();
+  TextColumn get sourceRevision => text()();
+  TextColumn get configJson => text()();
+  TextColumn get status => text().withDefault(const Constant('queued'))();
+  TextColumn get reason => text().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('OcrJobPageRow')
+class OcrJobPages extends Table {
+  TextColumn get id => text()();
+  TextColumn get jobId => text()();
+  IntColumn get pageNumber => integer()();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  IntColumn get attempt => integer().withDefault(const Constant(0))();
+  TextColumn get ocrPageId => text().nullable()();
+  TextColumn get expectedCacheSignature => text()();
+  TextColumn get errorCode => text().nullable()();
+  IntColumn get updatedAt => integer()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -251,6 +428,40 @@ final class SearchMatchRow {
 
   final SearchChunkRow chunk;
   final String snippet;
+}
+
+final class BookSearchChunkRow {
+  const BookSearchChunkRow({
+    required this.chunk,
+    this.parentTitle,
+    this.parentText,
+    this.parentLocator,
+  });
+
+  final SearchChunkRow chunk;
+  final String? parentTitle;
+  final String? parentText;
+  final String? parentLocator;
+}
+
+final class SearchCandidateRow {
+  const SearchCandidateRow({
+    required this.chunk,
+    required this.normalizedTitle,
+    required this.normalizedText,
+    required this.normalizedRank,
+    required this.cjkRank,
+    required this.hitSources,
+    this.bookTitle,
+  });
+
+  final SearchChunkRow chunk;
+  final String? bookTitle;
+  final String normalizedTitle;
+  final String normalizedText;
+  final double normalizedRank;
+  final double cjkRank;
+  final int hitSources;
 }
 
 @DriftAccessor(tables: [Books, ReadingProgress])
@@ -662,6 +873,18 @@ class AnnotationDao extends DatabaseAccessor<AppDatabase>
     );
   }
 
+  Future<void> unlinkNote({required String annotationId}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return (update(
+      annotations,
+    )..where((row) => row.id.equals(annotationId))).write(
+      AnnotationsCompanion(
+        noteId: const Value<String?>(null),
+        updatedAt: Value(now),
+      ),
+    );
+  }
+
   Future<void> deleteAnnotation(String id) {
     return (delete(annotations)..where((row) => row.id.equals(id))).go();
   }
@@ -730,15 +953,19 @@ class AiConversationDao extends DatabaseAccessor<AppDatabase>
   AiConversationDao(super.db);
 
   Stream<List<AiConversationRow>> watchConversations() {
-    return (select(
-      aiConversations,
-    )..orderBy([(row) => OrderingTerm.desc(row.createdAt)])).watch();
+    return (select(aiConversations)..orderBy([
+          (row) => OrderingTerm.desc(row.createdAt),
+          (row) => OrderingTerm.desc(row.rowId),
+        ]))
+        .watch();
   }
 
   Future<List<AiConversationRow>> getConversations() {
-    return (select(
-      aiConversations,
-    )..orderBy([(row) => OrderingTerm.desc(row.createdAt)])).get();
+    return (select(aiConversations)..orderBy([
+          (row) => OrderingTerm.desc(row.createdAt),
+          (row) => OrderingTerm.desc(row.rowId),
+        ]))
+        .get();
   }
 
   Future<void> insertConversation(AiConversationsCompanion conversation) {
@@ -765,12 +992,278 @@ class AiConversationDao extends DatabaseAccessor<AppDatabase>
   }
 }
 
-@DriftAccessor(tables: [SearchChunks, Books, BookTags])
+@DriftAccessor(
+  tables: [
+    SearchChunks,
+    SearchParentChunks,
+    SearchTermDocuments,
+    SearchIndexUnits,
+    SearchIndexGenerations,
+    Books,
+    BookTags,
+  ],
+)
 class SearchDao extends DatabaseAccessor<AppDatabase> with _$SearchDaoMixin {
   SearchDao(super.db);
 
+  Future<List<SearchChunkRow>> chunksMissingTerms({
+    required String normalizerVersion,
+    required String tokenizerVersion,
+  }) async {
+    final rows = await customSelect(
+      'SELECT c.* FROM search_chunks c '
+      'LEFT JOIN search_term_documents t ON t.chunk_id = c.id '
+      'WHERE (c.generation_id IS NULL OR c.generation_id IN '
+      '(SELECT active_generation_id FROM search_index_units)) AND '
+      '(t.id IS NULL OR t.normalizer_version != ? OR t.tokenizer_version != ?)',
+      variables: [Variable(normalizerVersion), Variable(tokenizerVersion)],
+      readsFrom: {searchChunks, searchTermDocuments},
+    ).get();
+    return rows
+        .map((row) => searchChunks.map(row.data))
+        .toList(growable: false);
+  }
+
+  Future<List<SearchCandidateRow>> searchCandidates({
+    required String normalizedMatch,
+    required String cjkMatch,
+    required Set<String> sourceTypeClauses,
+    required String? bookId,
+    required String? categoryId,
+    required Set<String> tagIds,
+    required String? format,
+    required int limit,
+  }) async {
+    if (sourceTypeClauses.isEmpty) return const [];
+    final variables = <Variable<Object>>[
+      Variable<String>(normalizedMatch),
+      Variable<String>(cjkMatch),
+    ];
+    final filters = StringBuffer()
+      ..write(' AND (')
+      ..write(sourceTypeClauses.join(' OR '))
+      ..write(')');
+    void addScope(String? value, String sql) {
+      if (value != null) {
+        filters.write(' AND $sql');
+        variables.add(Variable<String>(value));
+      }
+    }
+
+    addScope(bookId, 'c.book_id = ?');
+    if (categoryId == '__uncategorized__') {
+      filters.write(' AND b.category_id IS NULL');
+    } else {
+      addScope(categoryId, 'b.category_id = ?');
+    }
+    addScope(format, 'b.format = ?');
+    for (final tagId in tagIds) {
+      filters.write(
+        ' AND EXISTS (SELECT 1 FROM book_tags bt WHERE bt.book_id = c.book_id AND bt.tag_id = ?)',
+      );
+      variables.add(Variable<String>(tagId));
+    }
+    final query =
+        '''
+WITH normalized_hits AS (
+  SELECT rowid AS chunk_rowid, bm25(search_normalized_fts) AS rank
+  FROM search_normalized_fts
+  WHERE search_normalized_fts MATCH ?
+),
+cjk_hits AS (
+  SELECT rowid AS chunk_rowid, bm25(search_cjk_fts) AS rank
+  FROM search_cjk_fts
+  WHERE search_cjk_fts MATCH ?
+),
+candidates AS (
+  SELECT chunk_rowid, rank, 0 AS source FROM normalized_hits
+  UNION ALL
+  SELECT chunk_rowid, rank, 1 AS source FROM cjk_hits
+),
+ranked AS MATERIALIZED (
+SELECT c.id AS chunk_id, t.id AS term_id, c.sort_order,
+       MIN(CASE WHEN h.source = 0 THEN h.rank ELSE NULL END) AS normalized_rank,
+       MIN(CASE WHEN h.source = 1 THEN h.rank ELSE NULL END) AS cjk_rank,
+       COUNT(DISTINCT h.source) AS hit_sources
+FROM candidates h
+JOIN search_term_documents t ON t.rowid = h.chunk_rowid
+JOIN search_chunks c ON c.id = t.chunk_id
+LEFT JOIN books b ON b.id = c.book_id
+WHERE 1 = 1$filters
+  AND (
+    c.source_type != 'book'
+    OR c.generation_id IS NULL
+    OR c.generation_id = (
+      SELECT u.active_generation_id
+      FROM search_index_units u
+      WHERE u.unit_key = 'book:' || c.book_id
+    )
+  )
+GROUP BY c.id, t.id
+ORDER BY hit_sources DESC,
+         COALESCE(normalized_rank, 0) ASC,
+         COALESCE(cjk_rank, 0) ASC,
+         c.sort_order,
+         c.id
+LIMIT ?
+)
+SELECT c.*, b.title AS book_title, t.title_normalized, t.text_normalized,
+       r.normalized_rank, r.cjk_rank, r.hit_sources
+FROM ranked r
+JOIN search_chunks c ON c.id = r.chunk_id
+JOIN search_term_documents t ON t.id = r.term_id
+LEFT JOIN books b ON b.id = c.book_id
+ORDER BY r.hit_sources DESC, COALESCE(r.normalized_rank, 0),
+         COALESCE(r.cjk_rank, 0), r.sort_order, r.chunk_id
+''';
+    variables.add(Variable<int>(limit));
+    final rows = await customSelect(
+      query,
+      variables: variables,
+      readsFrom: {searchChunks, searchTermDocuments, books, bookTags},
+    ).get();
+    return rows
+        .map(
+          (row) => SearchCandidateRow(
+            chunk: SearchChunkRow(
+              id: row.read<String>('id'),
+              bookId: row.readNullable<String>('book_id'),
+              parentId: row.readNullable<String>('parent_id'),
+              sourceType: row.read<String>('source_type'),
+              sourceId: row.readNullable<String>('source_id'),
+              locator: row.readNullable<String>('locator'),
+              title: row.readNullable<String>('title'),
+              body: row.read<String>('text'),
+              sortOrder: row.read<int>('sort_order'),
+              createdAt: row.read<int>('created_at'),
+              updatedAt: row.read<int>('updated_at'),
+              generationId: row.readNullable<String>('generation_id'),
+              documentSourceId: row.readNullable<String>('document_source_id'),
+              sourceRevision: row.readNullable<String>('source_revision'),
+              textRevision: row.readNullable<String>('text_revision'),
+              startOffset: row.readNullable<int>('start_offset'),
+              endOffset: row.readNullable<int>('end_offset'),
+              textOrigin: row.readNullable<String>('text_origin') ?? 'native',
+            ),
+            bookTitle: row.readNullable<String>('book_title'),
+            normalizedTitle: row.read<String>('title_normalized'),
+            normalizedText: row.read<String>('text_normalized'),
+            normalizedRank: row.readNullable<double>('normalized_rank') ?? 0,
+            cjkRank: row.readNullable<double>('cjk_rank') ?? 0,
+            hitSources: row.read<int>('hit_sources'),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> upsertTermDocuments(
+    List<SearchTermDocumentsCompanion> rows,
+  ) async {
+    if (rows.isEmpty) return;
+    await batch((batch) {
+      batch.insertAllOnConflictUpdate(searchTermDocuments, rows);
+    });
+  }
+
+  Future<void> upsertSearchUnit(SearchIndexUnitsCompanion unit) {
+    return into(attachedDatabase.searchIndexUnits).insertOnConflictUpdate(unit);
+  }
+
+  Future<void> insertSearchGeneration(
+    SearchIndexGenerationsCompanion generation,
+  ) {
+    return into(
+      attachedDatabase.searchIndexGenerations,
+    ).insertOnConflictUpdate(generation);
+  }
+
+  Future<void> publishSearchGeneration(String generationId) async {
+    final rows = await customSelect(
+      'SELECT g.unit_id, u.book_id '
+      'FROM search_index_generations g '
+      'JOIN search_index_units u ON u.id = g.unit_id '
+      'WHERE g.id = ?',
+      variables: [Variable<String>(generationId)],
+      readsFrom: {
+        attachedDatabase.searchIndexGenerations,
+        attachedDatabase.searchIndexUnits,
+      },
+    ).get();
+    if (rows.isEmpty) return;
+    final unitId = rows.single.read<String>('unit_id');
+    final bookId = rows.single.readNullable<String>('book_id');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await transaction(() async {
+      if (bookId != null) {
+        await customStatement(
+          "DELETE FROM search_term_documents WHERE chunk_id IN ("
+          "SELECT id FROM search_chunks WHERE source_type = 'book' "
+          'AND book_id = ? AND (generation_id IS NULL OR generation_id != ?))',
+          [bookId, generationId],
+        );
+        await customStatement(
+          "DELETE FROM search_chunks WHERE source_type = 'book' "
+          'AND book_id = ? AND (generation_id IS NULL OR generation_id != ?)',
+          [bookId, generationId],
+        );
+        await customStatement(
+          "DELETE FROM search_parent_chunks WHERE source_type = 'book' "
+          'AND book_id = ? AND (generation_id IS NULL OR generation_id != ?)',
+          [bookId, generationId],
+        );
+      }
+      await customStatement(
+        "UPDATE search_index_units SET active_generation_id = ?, "
+        "state = 'ready', updated_at = ? WHERE id = ?",
+        [generationId, now, unitId],
+      );
+      await customStatement(
+        'DELETE FROM search_index_generations WHERE unit_id = ? AND id != ?',
+        [unitId, generationId],
+      );
+    });
+  }
+
+  Future<void> discardSearchGeneration(String generationId) async {
+    final rows = await customSelect(
+      'SELECT g.unit_id '
+      'FROM search_index_generations g '
+      'WHERE g.id = ?',
+      variables: [Variable<String>(generationId)],
+      readsFrom: {attachedDatabase.searchIndexGenerations},
+    ).get();
+    if (rows.isEmpty) return;
+    final unitId = rows.single.read<String>('unit_id');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await transaction(() async {
+      await customStatement(
+        'DELETE FROM search_term_documents WHERE chunk_id IN ('
+        'SELECT id FROM search_chunks WHERE generation_id = ?)',
+        [generationId],
+      );
+      await customStatement(
+        'DELETE FROM search_chunks WHERE generation_id = ?',
+        [generationId],
+      );
+      await customStatement(
+        'DELETE FROM search_parent_chunks WHERE generation_id = ?',
+        [generationId],
+      );
+      await customStatement(
+        'DELETE FROM search_index_generations WHERE id = ?',
+        [generationId],
+      );
+      await customStatement(
+        "UPDATE search_index_units SET state = "
+        "CASE WHEN active_generation_id IS NULL THEN 'pending' ELSE 'ready' END, "
+        'updated_at = ? WHERE id = ?',
+        [now, unitId],
+      );
+    });
+  }
+
   Future<void> upsertChunk(SearchChunksCompanion chunk) {
-    return into(searchChunks).insertOnConflictUpdate(chunk);
+    return upsertChunks([chunk]);
   }
 
   /// Bulk upsert for book indexing. One SQLite batch keeps FTS triggers in-process
@@ -779,8 +1272,25 @@ class SearchDao extends DatabaseAccessor<AppDatabase> with _$SearchDaoMixin {
     if (chunks.isEmpty) {
       return Future<void>.value();
     }
+    return transaction(() async {
+      await batch((batch) {
+        for (final chunk in chunks) {
+          batch.deleteWhere(
+            searchTermDocuments,
+            (row) => row.chunkId.equals(chunk.id.value),
+          );
+        }
+        batch.insertAllOnConflictUpdate(searchChunks, chunks);
+      });
+    });
+  }
+
+  Future<void> upsertParents(List<SearchParentChunksCompanion> parents) {
+    if (parents.isEmpty) {
+      return Future<void>.value();
+    }
     return batch((batch) {
-      batch.insertAllOnConflictUpdate(searchChunks, chunks);
+      batch.insertAllOnConflictUpdate(searchParentChunks, parents);
     });
   }
 
@@ -797,10 +1307,31 @@ class SearchDao extends DatabaseAccessor<AppDatabase> with _$SearchDaoMixin {
         .go();
   }
 
-  Future<void> deleteByBook(String bookId) {
-    return (delete(
-      searchChunks,
-    )..where((row) => row.bookId.equals(bookId))).go();
+  Future<void> deleteByBook(String bookId) async {
+    final chunkIds =
+        await (selectOnly(searchChunks)
+              ..addColumns([searchChunks.id])
+              ..where(searchChunks.bookId.equals(bookId)))
+            .map((row) => row.read<String>(searchChunks.id) ?? '')
+            .get();
+    await batch((batch) {
+      if (chunkIds.isNotEmpty) {
+        batch.deleteWhere(
+          searchTermDocuments,
+          (row) => row.chunkId.isIn(chunkIds),
+        );
+      }
+      batch.deleteWhere(searchChunks, (row) => row.bookId.equals(bookId));
+      batch.deleteWhere(searchParentChunks, (row) => row.bookId.equals(bookId));
+    });
+    await customStatement(
+      'DELETE FROM search_index_generations WHERE unit_id IN '
+      '(SELECT id FROM search_index_units WHERE book_id = ?)',
+      [bookId],
+    );
+    await customStatement('DELETE FROM search_index_units WHERE book_id = ?', [
+      bookId,
+    ]);
   }
 
   Future<List<SearchMatchRow>> search(
@@ -936,6 +1467,7 @@ WHERE search_chunks_fts MATCH ?
               sortOrder: row.read<int>('sort_order'),
               createdAt: row.read<int>('created_at'),
               updatedAt: row.read<int>('updated_at'),
+              textOrigin: row.readNullable<String>('text_origin') ?? 'native',
             ),
             snippet: row.read<String>('snippet'),
           ),
@@ -1076,6 +1608,7 @@ WHERE (lower(COALESCE(c.title, '')) LIKE ? OR lower(c.text) LIKE ?)
               sortOrder: row.read<int>('sort_order'),
               createdAt: row.read<int>('created_at'),
               updatedAt: row.read<int>('updated_at'),
+              textOrigin: row.readNullable<String>('text_origin') ?? 'native',
             ),
             snippet: _likeSnippet(row.read<String>('snippet'), trimmed),
           ),
@@ -1099,16 +1632,28 @@ WHERE (lower(COALESCE(c.title, '')) LIKE ? OR lower(c.text) LIKE ?)
   /// Only rows whose `source_id` is not the book's own id: that row is the
   /// book's title/author metadata, and a question about a topic must not match
   /// a book just because its name contains the topic.
-  Future<List<SearchChunkRow>> bookChunks({
+  Future<List<BookSearchChunkRow>> bookChunks({
     Iterable<String> bookIds = const [],
     String? categoryId,
   }) async {
     final buffer = StringBuffer('''
-SELECT c.*
+SELECT c.*,
+       p.title AS parent_title,
+       p.text AS parent_text,
+       p.locator AS parent_locator
 FROM search_chunks c
+LEFT JOIN search_parent_chunks p ON p.id = c.parent_id
 LEFT JOIN books b ON b.id = c.book_id
 WHERE c.source_type = 'book'
   AND (c.source_id IS NULL OR c.source_id != c.book_id)
+  AND (
+    c.generation_id IS NULL
+    OR c.generation_id = (
+      SELECT u.active_generation_id
+      FROM search_index_units u
+      WHERE u.unit_key = 'book:' || c.book_id
+    )
+  )
 ''');
     final variables = <Variable<Object>>[];
 
@@ -1134,22 +1679,29 @@ WHERE c.source_type = 'book'
     final rows = await customSelect(
       buffer.toString(),
       variables: variables,
-      readsFrom: {searchChunks, books},
+      readsFrom: {searchChunks, searchParentChunks, books},
     ).get();
 
     return rows
         .map(
-          (row) => SearchChunkRow(
-            id: row.read<String>('id'),
-            bookId: row.readNullable<String>('book_id'),
-            sourceType: row.read<String>('source_type'),
-            sourceId: row.readNullable<String>('source_id'),
-            locator: row.readNullable<String>('locator'),
-            title: row.readNullable<String>('title'),
-            body: row.read<String>('text'),
-            sortOrder: row.read<int>('sort_order'),
-            createdAt: row.read<int>('created_at'),
-            updatedAt: row.read<int>('updated_at'),
+          (row) => BookSearchChunkRow(
+            chunk: SearchChunkRow(
+              id: row.read<String>('id'),
+              bookId: row.readNullable<String>('book_id'),
+              parentId: row.readNullable<String>('parent_id'),
+              sourceType: row.read<String>('source_type'),
+              sourceId: row.readNullable<String>('source_id'),
+              locator: row.readNullable<String>('locator'),
+              title: row.readNullable<String>('title'),
+              body: row.read<String>('text'),
+              sortOrder: row.read<int>('sort_order'),
+              createdAt: row.read<int>('created_at'),
+              updatedAt: row.read<int>('updated_at'),
+              textOrigin: row.readNullable<String>('text_origin') ?? 'native',
+            ),
+            parentTitle: row.readNullable<String>('parent_title'),
+            parentText: row.readNullable<String>('parent_text'),
+            parentLocator: row.readNullable<String>('parent_locator'),
           ),
         )
         .toList(growable: false);
@@ -1179,6 +1731,55 @@ class SettingsDao extends DatabaseAccessor<AppDatabase>
   }
 }
 
+@DriftAccessor(tables: [AiProfiles, AiCredentialOperations])
+class AiProfileDao extends DatabaseAccessor<AppDatabase>
+    with _$AiProfileDaoMixin {
+  AiProfileDao(super.db);
+
+  Future<List<AiProfileRow>> activeProfiles() =>
+      (select(aiProfiles)..where((row) => row.deletedAt.isNull())).get();
+
+  Future<AiProfileRow?> profileById(String id) =>
+      (select(aiProfiles)..where((row) => row.id.equals(id))).getSingleOrNull();
+
+  Future<void> insertProfile(AiProfilesCompanion profile) =>
+      into(aiProfiles).insert(profile);
+
+  Future<void> updateProfile(AiProfilesCompanion profile) => (update(
+    aiProfiles,
+  )..where((row) => row.id.equals(profile.id.value))).write(profile);
+
+  Future<void> markDeleted(String id, int deletedAt) =>
+      (update(aiProfiles)..where((row) => row.id.equals(id))).write(
+        AiProfilesCompanion(deletedAt: Value(deletedAt)),
+      );
+
+  Future<void> openOperation(AiCredentialOperationsCompanion operation) =>
+      into(aiCredentialOperations).insert(operation);
+
+  Future<void> finishOperation(
+    String id,
+    int updatedAt, {
+    String phase = 'done',
+  }) =>
+      (update(aiCredentialOperations)..where((row) => row.id.equals(id))).write(
+        AiCredentialOperationsCompanion(
+          phase: Value(phase),
+          updatedAt: Value(updatedAt),
+        ),
+      );
+
+  Future<bool> hasPendingOperation(String profileId) async {
+    final rows =
+        await (select(aiCredentialOperations)..where(
+              (row) =>
+                  row.profileId.equals(profileId) & row.phase.equals('pending'),
+            ))
+            .get();
+    return rows.isNotEmpty;
+  }
+}
+
 @DriftAccessor(tables: [OcrPages])
 class OcrPageDao extends DatabaseAccessor<AppDatabase> with _$OcrPageDaoMixin {
   OcrPageDao(super.db);
@@ -1191,7 +1792,7 @@ class OcrPageDao extends DatabaseAccessor<AppDatabase> with _$OcrPageDaoMixin {
         .getSingleOrNull();
   }
 
-  Future<List<OcrPageRow>> getPagesForBook(String bookId) {
+  Future<List<OcrPageRow>> listByBook(String bookId) {
     return (select(ocrPages)
           ..where((row) => row.bookId.equals(bookId))
           ..orderBy([(row) => OrderingTerm.asc(row.pageNumber)]))
@@ -1206,10 +1807,13 @@ class OcrPageDao extends DatabaseAccessor<AppDatabase> with _$OcrPageDaoMixin {
     return (delete(ocrPages)..where((row) => row.bookId.equals(bookId))).go();
   }
 
-  Future<void> deletePage(String bookId, int pageNumber) {
+  Future<void> deletePages(String bookId, Iterable<int> pageNumbers) {
+    final pages = pageNumbers.toSet().toList(growable: false);
+    if (pages.isEmpty) {
+      return Future<void>.value();
+    }
     return (delete(ocrPages)..where(
-          (row) =>
-              row.bookId.equals(bookId) & row.pageNumber.equals(pageNumber),
+          (row) => row.bookId.equals(bookId) & row.pageNumber.isIn(pages),
         ))
         .go();
   }
@@ -1291,9 +1895,18 @@ class TaskDao extends DatabaseAccessor<AppDatabase> with _$TaskDaoMixin {
     NoteTags,
     AiConversations,
     SearchChunks,
+    SearchParentChunks,
     AppSettings,
     ImportTasks,
     OcrPages,
+    DocumentSources,
+    SearchIndexUnits,
+    SearchIndexGenerations,
+    AiProfiles,
+    AiCredentialOperations,
+    SearchTermDocuments,
+    OcrJobs,
+    OcrJobPages,
   ],
   daos: [
     BookDao,
@@ -1308,6 +1921,7 @@ class TaskDao extends DatabaseAccessor<AppDatabase> with _$TaskDaoMixin {
     SettingsDao,
     TaskDao,
     OcrPageDao,
+    AiProfileDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -1316,7 +1930,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1352,6 +1966,78 @@ class AppDatabase extends _$AppDatabase {
         // differs. Existing rows default to `text`, which is what they are.
         await migrator.addColumn(annotations, annotations.target);
         await migrator.addColumn(annotations, annotations.imageAnchor);
+      }
+      if (from < 6) {
+        await migrator.createTable(searchParentChunks);
+        if (!await _hasColumn('search_chunks', 'parent_id')) {
+          await migrator.addColumn(searchChunks, searchChunks.parentId);
+        }
+      }
+      if (from >= 2 && from < 7) {
+        await migrator.addColumn(
+          aiConversations,
+          aiConversations.contextSnapshot,
+        );
+      }
+      if (from < 8) {
+        await migrator.createTable(documentSources);
+        await migrator.createTable(searchIndexUnits);
+        await migrator.createTable(searchIndexGenerations);
+        await _addColumnIfMissing(migrator, searchChunks, 'generation_id');
+        await _addColumnIfMissing(migrator, searchChunks, 'document_source_id');
+        await _addColumnIfMissing(migrator, searchChunks, 'source_revision');
+        await _addColumnIfMissing(migrator, searchChunks, 'text_revision');
+        await _addColumnIfMissing(migrator, searchChunks, 'start_offset');
+        await _addColumnIfMissing(migrator, searchChunks, 'end_offset');
+        await _addColumnIfMissing(migrator, searchChunks, 'text_origin');
+        await _addColumnIfMissing(
+          migrator,
+          searchParentChunks,
+          'generation_id',
+        );
+        await _addColumnIfMissing(
+          migrator,
+          searchParentChunks,
+          'document_source_id',
+        );
+        await _addColumnIfMissing(
+          migrator,
+          searchParentChunks,
+          'source_revision',
+        );
+        await _addColumnIfMissing(
+          migrator,
+          searchParentChunks,
+          'text_revision',
+        );
+        await _addColumnIfMissing(migrator, searchParentChunks, 'text_origin');
+      }
+      if (from < 9) {
+        await migrator.createTable(aiProfiles);
+        await migrator.createTable(aiCredentialOperations);
+        await _addColumnIfMissing(migrator, aiConversations, 'profile_id');
+        await _addColumnIfMissing(
+          migrator,
+          aiConversations,
+          'profile_snapshot',
+        );
+      }
+      if (from < 10) {
+        await migrator.createTable(searchTermDocuments);
+      }
+      if (from < 11) {
+        await _addColumnIfMissing(migrator, aiConversations, 'answer_meta');
+      }
+      if (from < 12) {
+        await _addColumnIfMissing(migrator, ocrPages, 'source_revision');
+        await _addColumnIfMissing(migrator, ocrPages, 'cache_signature');
+        await _addColumnIfMissing(migrator, ocrPages, 'text_revision');
+        await _addColumnIfMissing(migrator, ocrPages, 'engine_version');
+        await _addColumnIfMissing(migrator, ocrPages, 'pipeline_version');
+        await _addColumnIfMissing(migrator, ocrPages, 'result_state');
+        await _addColumnIfMissing(migrator, ocrPages, 'index_state');
+        await migrator.createTable(ocrJobs);
+        await migrator.createTable(ocrJobPages);
       }
       await _createIndexesAndFts();
     },
@@ -1414,6 +2100,12 @@ class AppDatabase extends _$AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_search_chunks_source_id ON search_chunks(source_id)',
     );
     await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_search_chunks_parent_id ON search_chunks(parent_id)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_search_parent_chunks_book_id ON search_parent_chunks(book_id)',
+    );
+    await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_ocr_pages_book_id ON ocr_pages(book_id)',
     );
     await customStatement(
@@ -1447,6 +2139,76 @@ CREATE TRIGGER IF NOT EXISTS search_chunks_au AFTER UPDATE ON search_chunks BEGI
   VALUES (new.rowid, new.title, new.text);
 END
 ''');
+    await customStatement('''
+CREATE VIRTUAL TABLE IF NOT EXISTS search_normalized_fts USING fts5(
+  title_normalized,
+  text_normalized,
+  content='search_term_documents',
+  content_rowid='rowid'
+)
+''');
+    await customStatement('''
+CREATE VIRTUAL TABLE IF NOT EXISTS search_cjk_fts USING fts5(
+  title_terms,
+  text_terms,
+  content='search_term_documents',
+  content_rowid='rowid'
+)
+''');
+    for (final table in const ['search_normalized_fts', 'search_cjk_fts']) {
+      final first = table == 'search_normalized_fts'
+          ? 'title_normalized, text_normalized'
+          : 'title_terms, text_terms';
+      final second = table == 'search_normalized_fts'
+          ? 'new.title_normalized, new.text_normalized'
+          : 'new.title_terms, new.text_terms';
+      final oldValues = table == 'search_normalized_fts'
+          ? 'old.title_normalized, old.text_normalized'
+          : 'old.title_terms, old.text_terms';
+      await customStatement('''
+CREATE TRIGGER IF NOT EXISTS ${table}_ai AFTER INSERT ON search_term_documents BEGIN
+  INSERT INTO $table(rowid, $first) VALUES (new.rowid, $second);
+END
+''');
+      await customStatement('''
+CREATE TRIGGER IF NOT EXISTS ${table}_ad AFTER DELETE ON search_term_documents BEGIN
+  INSERT INTO $table($table, rowid, $first)
+  VALUES ('delete', old.rowid, $oldValues);
+END
+''');
+      await customStatement('''
+CREATE TRIGGER IF NOT EXISTS ${table}_au AFTER UPDATE ON search_term_documents BEGIN
+  INSERT INTO $table($table, rowid, $first)
+  VALUES ('delete', old.rowid, $oldValues);
+  INSERT INTO $table(rowid, $first) VALUES (new.rowid, $second);
+END
+''');
+    }
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_document_sources_active '
+      'ON document_sources(book_id, address) WHERE state != \'missing\'',
+    );
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_ocr_job_pages_job_page '
+      'ON ocr_job_pages(job_id, page_number)',
+    );
+  }
+
+  Future<bool> _hasColumn(String table, String column) async {
+    final rows = await customSelect("PRAGMA table_info('$table')").get();
+    return rows.any((row) => row.read<String>('name') == column);
+  }
+
+  Future<void> _addColumnIfMissing(
+    Migrator migrator,
+    TableInfo<Table, Object> table,
+    String columnName,
+  ) async {
+    if (await _hasColumn(table.actualTableName, columnName)) return;
+    final column = table.$columns.firstWhere(
+      (candidate) => candidate.name == columnName,
+    );
+    await migrator.addColumn(table, column);
   }
 }
 

@@ -62,14 +62,6 @@ final class ImportUseCase {
   final TaskRepository _taskRepository;
   final TaskCancellationRegistry _taskCancellationRegistry;
 
-  Future<ImportBookResult> pickAndImport({bool allowDuplicate = false}) async {
-    final pickedFile = await _filePickerService.pickBookFile();
-    if (pickedFile == null) {
-      return const ImportBookCancelled();
-    }
-    return importPath(pickedFile.path, allowDuplicate: allowDuplicate);
-  }
-
   Future<ImportBooksResult> pickAndImportMany({
     bool allowDuplicate = false,
   }) async {

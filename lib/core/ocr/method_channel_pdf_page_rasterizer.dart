@@ -14,13 +14,16 @@ final class MethodChannelPdfPageRasterizer implements PdfPageRasterizer {
     required String filePath,
     required int pageNumber,
     int dpi = PdfPageRasterizer.defaultDpi,
+    int maxEdge = PdfPageRasterizer.defaultMaxEdge,
+    int maxPixels = 5000000,
   }) async {
     try {
       final result = await _channel.invokeMethod<dynamic>('renderPage', {
         'path': filePath,
         'pageNumber': pageNumber,
         'dpi': dpi,
-        'maxEdge': PdfPageRasterizer.defaultMaxEdge,
+        'maxEdge': maxEdge,
+        'maxPixels': maxPixels,
         // JPEG is ~5–15× smaller than PNG for scan pages → faster channel + decode.
         'format': 'jpeg',
         'quality': 85,

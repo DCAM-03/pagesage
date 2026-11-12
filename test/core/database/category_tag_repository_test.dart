@@ -2,7 +2,8 @@ import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_category_repository.dart';
+import 'package:pagesage/core/database/drift_tag_repository.dart';
 
 void main() {
   group('DriftCategoryRepository', () {

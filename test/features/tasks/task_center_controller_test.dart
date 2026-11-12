@@ -137,6 +137,21 @@ void main() {
     );
   });
 
+  test('cancelling an export never deletes the existing destination', () async {
+    final directory = await Directory.systemTemp.createTemp('pagesage-cancel-');
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/notes.md');
+    await file.writeAsString('原导出');
+    final repository = _MemoryTaskRepository();
+    final task = await repository.saveTask(
+      type: PageSageTaskType.exportNotes,
+      status: PageSageTaskStatus.running,
+      targetPath: file.path,
+    );
+    await _controller(repository).cancelTask(task);
+    expect(await file.readAsString(), '原导出');
+  });
+
   test('sanitizeTaskError hides API keys and local paths', () {
     final sanitized = sanitizeTaskError(
       r'failed with sk-testsecret123456789 at C:\Users\Chaos\book.epub',

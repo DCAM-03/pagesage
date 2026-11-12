@@ -1,4 +1,7 @@
 import 'dart:math' as math;
+import 'dart:ui' show Offset, Rect;
+
+import '../../domain/books/reading_position.dart';
 
 /// A caret (insertion point) in a PDF's extracted text.
 ///
@@ -11,6 +14,34 @@ typedef PdfCaret = ({int page, int index});
 
 /// The part of a selection that falls on one page.
 typedef PdfSelectionSegment = ({int page, int start, int end});
+
+/// Text on one PDF page that pointer gestures can be mapped onto.
+///
+/// Native PDF text and OCR text live in different coordinate spaces: native
+/// text comes from PDF page space and is projected through /Rotate, while OCR
+/// blocks are already fractions of the displayed page. The reader only needs
+/// one shape from either source: a caret for a pointer, page text for a
+/// range, and rectangles that can be persisted and repainted.
+abstract interface class PdfTextSelectionSource {
+  /// Zero-based page index this source belongs to.
+  int get pageIndex;
+
+  /// The page's selectable text, in caret-index order.
+  String get pageText;
+
+  /// Caret under [widgetPoint], or null when this source cannot resolve one.
+  ///
+  /// [snapToNearest] is true while dragging: a pointer in the leading or just
+  /// outside the page should still follow the nearest line. A tap passes false
+  /// so blank paper selects nothing instead of guessing a word.
+  PdfCaret? caretAt(Offset widgetPoint, {bool snapToNearest = true});
+
+  /// Selection chrome rectangles in widget-local pixels.
+  List<Rect> viewRectsFor(int start, int end);
+
+  /// Selection rectangles normalised to 0..1 of the displayed page box.
+  List<ReaderRect> readerRectsFor(int start, int end);
+}
 
 /// A selection between two carets, in either drag direction.
 final class PdfSelection {

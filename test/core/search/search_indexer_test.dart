@@ -9,6 +9,7 @@ import 'package:pagesage/core/tasks/task_cancellation.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/book_repository.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
+import 'package:pagesage/domain/ocr/ocr_models.dart';
 import 'package:pagesage/domain/search/search_models.dart';
 
 void main() {
@@ -108,6 +109,74 @@ void main() {
     );
   });
 
+  test(
+    'indexes signed OCR cache for pages without a native text layer',
+    () async {
+      final dir = await Directory.systemTemp.createTemp(
+        'pagesage_pdf_ocr_index_',
+      );
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/image-only.pdf');
+      await file.writeAsBytes(_buildEmptyTextPdf());
+
+      final searchRepository = _FakeSearchRepository();
+      final bookRepository = _FakeBookRepository();
+      final indexer = SearchIndexer(
+        searchRepository: searchRepository,
+        bookRepository: bookRepository,
+        ocrSearchSource: _FakeOcrSearchSource([
+          const OcrIndexPage(
+            pageNumber: 2,
+            text: '扫描页识别出来的中文正文',
+            textRevision: 'text-revision',
+          ),
+        ]),
+      );
+      final book = _book(file.path, BookFormat.pdf);
+
+      await indexer.indexBook(book);
+
+      expect(bookRepository.statuses, ['running', 'done']);
+      final ocr = searchRepository.entries.singleWhere(
+        (entry) => entry.sourceId == '${book.id}:pdf:2:ocr:0',
+      );
+      expect(ocr.textOrigin, 'ocr');
+      expect(ocr.text, '扫描页识别出来的中文正文');
+      expect(ocr.title, contains('识别文本'));
+      expect(ocr.locator?.type, ReadingLocatorType.pdf);
+      expect(ocr.locator?.page, 2);
+      expect(ocr.textRevision, 'text-revision');
+    },
+  );
+
+  test('native text wins over OCR on the same PDF page', () async {
+    final dir = await Directory.systemTemp.createTemp('pagesage_pdf_native_');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/text.pdf');
+    await file.writeAsBytes(_buildTextPdf(['Native body']));
+
+    final searchRepository = _FakeSearchRepository();
+    final indexer = SearchIndexer(
+      searchRepository: searchRepository,
+      bookRepository: _FakeBookRepository(),
+      ocrSearchSource: _FakeOcrSearchSource([
+        const OcrIndexPage(pageNumber: 1, text: 'OCR duplicate'),
+      ]),
+    );
+    final book = _book(file.path, BookFormat.pdf);
+
+    await indexer.indexBook(book);
+
+    expect(
+      searchRepository.entries.any((entry) => entry.sourceId.contains(':ocr:')),
+      isFalse,
+    );
+    expect(
+      searchRepository.entries.any((entry) => entry.text == 'Native body'),
+      isTrue,
+    );
+  });
+
   test('cancels PDF indexing and removes partial search entries', () async {
     final dir = await Directory.systemTemp.createTemp('pagesage_pdf_index_');
     addTearDown(() => dir.delete(recursive: true));
@@ -160,6 +229,150 @@ void main() {
     for (var i = 1; i < reports.length; i += 1) {
       expect(reports[i], greaterThanOrEqualTo(reports[i - 1] - 0.001));
     }
+  });
+
+  test(
+    'publishes a new generation without deleting the old index first',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('pagesage_md_index_');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/note.md');
+      await file.writeAsString('# 笔记\n\n新版正文内容。');
+
+      final searchRepository = _GenerationSearchRepository();
+      final bookRepository = _FakeBookRepository();
+      final indexer = SearchIndexer(
+        searchRepository: searchRepository,
+        bookRepository: bookRepository,
+      );
+      final book = _book(file.path, BookFormat.markdown);
+
+      await indexer.indexBook(book);
+
+      expect(searchRepository.deletedBookIds, isEmpty);
+      expect(searchRepository.beginCalls, 1);
+      expect(searchRepository.publishCalls, 1);
+      expect(searchRepository.discardCalls, 0);
+      expect(
+        searchRepository.entries.any(
+          (entry) => entry.text?.contains('新版正文内容') == true,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test('a cancelled generation is discarded and the old index stays', () async {
+    final dir = await Directory.systemTemp.createTemp('pagesage_md_index_');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/note.md');
+    await file.writeAsString('# 笔记\n\n会被取消的正文。');
+
+    final token = TaskCancelToken();
+    final searchRepository = _GenerationSearchRepository(onWrite: token.cancel);
+    final bookRepository = _FakeBookRepository();
+    final indexer = SearchIndexer(
+      searchRepository: searchRepository,
+      bookRepository: bookRepository,
+    );
+    final book = _book(file.path, BookFormat.markdown);
+
+    await expectLater(
+      indexer.indexBook(book, cancelToken: token),
+      throwsA(isA<TaskCancelledException>()),
+    );
+
+    expect(searchRepository.deletedBookIds, isEmpty);
+    expect(searchRepository.publishCalls, 0);
+    expect(searchRepository.discardCalls, 1);
+    expect(bookRepository.statuses, ['running', 'pending']);
+  });
+
+  test('indexes a Markdown folder per file', () async {
+    final dir = await Directory.systemTemp.createTemp('pagesage_md_index_');
+    addTearDown(() => dir.delete(recursive: true));
+    await File('${dir.path}/a.md').writeAsString('# 甲\n\n共同关键词在甲。');
+    final sub = Directory('${dir.path}/sub')..createSync();
+    await File('${sub.path}/b.md').writeAsString('# 乙\n\n共同关键词在乙。');
+
+    final searchRepository = _FakeSearchRepository();
+    final bookRepository = _FakeBookRepository();
+    final indexer = SearchIndexer(
+      searchRepository: searchRepository,
+      bookRepository: bookRepository,
+    );
+    final book = Book(
+      id: 'book-1',
+      title: '笔记库',
+      format: BookFormat.markdown,
+      libraryFilePath: dir.path,
+      fileHash: 'hash',
+      fileSize: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    );
+
+    await indexer.indexBook(book);
+
+    final content = searchRepository.entries
+        .where((entry) => entry.sourceId.startsWith('${book.id}:md:'))
+        .toList(growable: false);
+    expect(content, hasLength(2));
+    final second = content.singleWhere(
+      (entry) => entry.locator?.href == 'sub/b.md',
+    );
+    expect(second.locator?.type, ReadingLocatorType.markdown);
+    expect(second.locator?.folderFileLocal, isTrue);
+    expect(second.locator?.chapterIndex, 0);
+    expect(second.locator?.progress, greaterThan(0));
+    expect(second.text, contains('共同关键词在乙'));
+  });
+
+  test('indexes Markdown headings as parent boundaries', () async {
+    final dir = await Directory.systemTemp.createTemp('pagesage_md_parent_');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/structured.md');
+    await file.writeAsString('''
+# 书
+
+总述。
+
+## 条件
+
+条件正文。
+
+## 结论
+
+结论正文。
+''');
+
+    final searchRepository = _FakeSearchRepository();
+    final indexer = SearchIndexer(
+      searchRepository: searchRepository,
+      bookRepository: _FakeBookRepository(),
+    );
+    final book = _book(file.path, BookFormat.markdown);
+
+    await indexer.indexBook(book);
+
+    final content = searchRepository.entries
+        .where((entry) => entry.sourceId.startsWith('${book.id}:md:'))
+        .toList(growable: false);
+    expect(content, isNotEmpty);
+    expect(content.every((entry) => entry.parentId != null), isTrue);
+    final parents = <String, _IndexedEntry>{};
+    for (final entry in content) {
+      parents.putIfAbsent(entry.parentId!, () => entry);
+    }
+    expect(parents.values.map((entry) => entry.parentTitle), [
+      '书',
+      '书 › 条件',
+      '书 › 结论',
+    ]);
+    expect(
+      parents.values.map((entry) => entry.parentText).join(),
+      allOf(contains('总述'), contains('条件正文'), contains('结论正文')),
+    );
   });
 }
 
@@ -272,6 +485,13 @@ final class _IndexedEntry {
     this.text,
     this.locator,
     this.sortOrder = 0,
+    this.parentId,
+    this.parentTitle,
+    this.parentText,
+    this.parentLocator,
+    this.parentSortOrder = 0,
+    this.textOrigin = 'native',
+    this.textRevision,
   });
 
   final String sourceType;
@@ -281,6 +501,13 @@ final class _IndexedEntry {
   final String? text;
   final ReadingLocator? locator;
   final int sortOrder;
+  final String? parentId;
+  final String? parentTitle;
+  final String? parentText;
+  final ReadingLocator? parentLocator;
+  final int parentSortOrder;
+  final String textOrigin;
+  final String? textRevision;
 }
 
 final class _FakeSearchRepository implements SearchRepository {
@@ -349,16 +576,144 @@ final class _FakeSearchRepository implements SearchRepository {
   @override
   Future<void> indexTexts(List<SearchIndexEntry> entries) async {
     for (final entry in entries) {
-      await indexText(
-        sourceType: entry.sourceType,
-        sourceId: entry.sourceId,
-        bookId: entry.bookId,
-        title: entry.title,
-        text: entry.text,
-        locator: entry.locator,
-        sortOrder: entry.sortOrder,
+      onIndexText?.call();
+      this.entries.add(
+        _IndexedEntry(
+          sourceType: entry.sourceType,
+          sourceId: entry.sourceId,
+          bookId: entry.bookId,
+          title: entry.title,
+          text: entry.text,
+          locator: entry.locator,
+          sortOrder: entry.sortOrder,
+          parentId: entry.parentId,
+          parentTitle: entry.parentTitle,
+          parentText: entry.parentText,
+          parentLocator: entry.parentLocator,
+          parentSortOrder: entry.parentSortOrder,
+          textOrigin: entry.textOrigin,
+          textRevision: entry.textRevision,
+        ),
       );
     }
+  }
+
+  @override
+  Future<List<SearchResult>> search(SearchQuery query) async => const [];
+}
+
+final class _FakeOcrSearchSource implements OcrSearchSource {
+  const _FakeOcrSearchSource(this.pages);
+
+  final List<OcrIndexPage> pages;
+
+  @override
+  Future<List<OcrIndexPage>> pagesForBook(
+    String bookId, {
+    String? sourceRevision,
+  }) async => pages;
+}
+
+final class _GenerationSearchRepository
+    implements SearchRepository, SearchGenerationRepository {
+  _GenerationSearchRepository({this.onWrite});
+
+  final void Function()? onWrite;
+  final entries = <_IndexedEntry>[];
+  final deletedBookIds = <String>[];
+  var beginCalls = 0;
+  var publishCalls = 0;
+  var discardCalls = 0;
+  String? _generationId;
+
+  @override
+  Future<SearchIndexGeneration> beginBookGeneration(String bookId) async {
+    beginCalls += 1;
+    _generationId = 'gen-$beginCalls';
+    return SearchIndexGeneration(
+      id: _generationId!,
+      bookId: bookId,
+      unitId: 'unit-$bookId',
+    );
+  }
+
+  @override
+  Future<void> indexGenerationTexts(
+    String generationId,
+    List<SearchIndexEntry> entries,
+  ) async {
+    expect(generationId, _generationId);
+    for (final entry in entries) {
+      onWrite?.call();
+      this.entries.add(
+        _IndexedEntry(
+          sourceType: entry.sourceType,
+          sourceId: entry.sourceId,
+          bookId: entry.bookId,
+          title: entry.title,
+          text: entry.text,
+          locator: entry.locator,
+          sortOrder: entry.sortOrder,
+          parentId: entry.parentId,
+          parentTitle: entry.parentTitle,
+          parentText: entry.parentText,
+          parentLocator: entry.parentLocator,
+          parentSortOrder: entry.parentSortOrder,
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<void> publishBookGeneration(String generationId) async {
+    publishCalls += 1;
+  }
+
+  @override
+  Future<void> discardBookGeneration(String generationId) async {
+    discardCalls += 1;
+  }
+
+  @override
+  Future<void> deleteByBook(String bookId) async {
+    deletedBookIds.add(bookId);
+  }
+
+  @override
+  Future<void> deleteBySource(String sourceType, String? sourceId) async {}
+
+  @override
+  Future<List<SearchBookChunks>> bookChunks({
+    Iterable<String> bookIds = const [],
+    String? categoryId,
+  }) async => const [];
+
+  @override
+  Future<void> indexBookMetadata({
+    required String bookId,
+    required String title,
+    String? author,
+    String? description,
+  }) async {
+    throw StateError('generation indexing must not use the legacy path');
+  }
+
+  @override
+  Future<void> indexText({
+    required String sourceType,
+    required String sourceId,
+    String? bookId,
+    String? title,
+    String? text,
+    ReadingLocator? locator,
+    int sortOrder = 0,
+  }) async {
+    throw StateError('generation indexing must not use the legacy path');
+  }
+
+  @override
+  Future<void> indexTexts(List<SearchIndexEntry> entries) async {
+    throw StateError('generation indexing must not use the legacy path');
   }
 
   @override

@@ -27,8 +27,6 @@ enum AppBreakpoint {
 extension AppBreakpointProperties on AppBreakpoint {
   bool get isCompact => this == AppBreakpoint.compact;
 
-  bool get isMediumOrLarger => this != AppBreakpoint.compact;
-
   bool get isExpanded => this == AppBreakpoint.expanded;
 }
 

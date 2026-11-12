@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/renderers/epub/epub_jump.dart';
+import 'package:pagesage/domain/books/locator_excerpt.dart';
 
 void main() {
   group('epubContinuousItemIndexForLocator', () {
@@ -82,6 +83,21 @@ void main() {
       expect(range, isNotNull);
       expect(range!.start, 5);
       expect(range.end, 9);
+    });
+
+    test('accepts Markdown locators on the same chapter offsets', () {
+      final range = epubFocusRangeFor(
+        ReadingLocator.markdown(
+          chapterIndex: 1,
+          chapterOffset: 12,
+          chapterEndOffset: 18,
+          excerpt: '链接',
+        ),
+      );
+      expect(range, isNotNull);
+      expect(range!.chapterIndex, 1);
+      expect(range.start, 12);
+      expect(range.end, 18);
     });
 
     test('returns null for pdf locators', () {

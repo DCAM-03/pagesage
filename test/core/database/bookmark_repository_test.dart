@@ -1,7 +1,8 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_bookmark_repository.dart';
+import 'package:pagesage/core/database/drift_search_repository.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/domain/search/search_models.dart';

@@ -14,6 +14,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+// ignore: implementation_imports
 import 'package:dart_pdf_editor/src/image_decoder.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
@@ -62,11 +63,11 @@ class _PocAppState extends State<PocApp> {
         outDir: _outDir,
         log: (m) {
           _log.add(m);
-          debugPrint('POC| $m');
-          print('POC| $m');
         },
       );
-      _log..add('')..add(report);
+      _log
+        ..add('')
+        ..add(report);
     } catch (e, s) {
       _log.add('FATAL $e');
       debugPrint('$s');
@@ -138,7 +139,12 @@ Future<String> runSelectionAndZoomPoc(
   log('  head: "${_head(text.text, 70)}"');
 
   // --- 1. Drag-select across the title band. ---
-  final band = PdfRect(box.left + 40, box.top - 110, box.left + 420, box.top - 30);
+  final band = PdfRect(
+    box.left + 40,
+    box.top - 110,
+    box.left + 420,
+    box.top - 30,
+  );
   final bandText = text.textIn(band);
   log('');
   log('[1] textIn(title band) -> ${bandText.length} chars');
@@ -162,9 +168,13 @@ Future<String> runSelectionAndZoomPoc(
     hlQuads = text.quadsFor(start, start + needle.length);
     final rects = text.rectsFor(start, start + needle.length);
     log('');
-    log('[3] quadsFor("$needle" @$start) -> ${hlQuads.length} quads, ${rects.length} rects');
+    log(
+      '[3] quadsFor("$needle" @$start) -> ${hlQuads.length} quads, ${rects.length} rects',
+    );
     for (final q in hlQuads.take(3)) {
-      final c = q.corners.map((p) => '(${p.$1.toStringAsFixed(1)},${p.$2.toStringAsFixed(1)})').join(' ');
+      final c = q.corners
+          .map((p) => '(${p.$1.toStringAsFixed(1)},${p.$2.toStringAsFixed(1)})')
+          .join(' ');
       log('    corners $c rtl=${q.isRightToLeft}');
     }
     final inPage = hlQuads.every(
@@ -178,8 +188,10 @@ Future<String> runSelectionAndZoomPoc(
   log('');
   log('[4] findAll("渲染") -> ${matches.length} matches');
   for (final m in matches.take(3)) {
-    log('    ${m.start}..${m.end} rects=${m.rects.length} '
-        'text="${text.text.substring(m.start, m.end)}"');
+    log(
+      '    ${m.start}..${m.end} rects=${m.rects.length} '
+      'text="${text.text.substring(m.start, m.end)}"',
+    );
   }
 
   // --- 5. Zoom levels, with highlights drawn in page space. ---
@@ -197,7 +209,9 @@ Future<String> runSelectionAndZoomPoc(
       outPath: '$outDir/chinese-zoom${zoom.toStringAsFixed(0)}.png',
     );
     sw.stop();
-    log('[5] ${zoom.toStringAsFixed(1)}x -> ${png.split('/').last}  ${sw.elapsedMilliseconds}ms');
+    log(
+      '[5] ${zoom.toStringAsFixed(1)}x -> ${png.split('/').last}  ${sw.elapsedMilliseconds}ms',
+    );
     out.add(png);
   }
   return 'wrote ${out.length} PNGs to $outDir';
@@ -218,11 +232,18 @@ Future<String> _renderPage({
 
   // Pass 1: scan-only walk to collect and decode every image.
   final collector = ImageCollector();
-  PdfInterpreter(cos: cos, device: collector, scanImagesOnly: true).drawPage(page);
+  PdfInterpreter(
+    cos: cos,
+    device: collector,
+    scanImagesOnly: true,
+  ).drawPage(page);
   final images = await decodeImages(cos, collector.streams);
 
   final recorder = ui.PictureRecorder();
-  final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
+  final canvas = Canvas(
+    recorder,
+    Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+  );
   canvas.drawRect(
     Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
     Paint()..color = Colors.white,
@@ -242,7 +263,10 @@ Future<String> _renderPage({
     );
   }
 
-  PdfInterpreter(cos: cos, device: CanvasPdfDevice(canvas, images: images)).drawPage(page);
+  PdfInterpreter(
+    cos: cos,
+    device: CanvasPdfDevice(canvas, images: images),
+  ).drawPage(page);
   canvas.restore();
 
   final image = await recorder.endRecording().toImage(w, h);

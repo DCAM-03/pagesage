@@ -201,6 +201,12 @@ final class _ChapterBuilder {
   /// The level of the heading being written, 1 to 6, when it is one.
   int? _paragraphLevel;
 
+  /// How many `<blockquote>` elements enclose the current element.
+  int _quoteDepth = 0;
+
+  /// The quote depth captured when the open paragraph began.
+  int _paragraphQuoteDepth = 0;
+
   void walk(XmlNode node) {
     for (final child in node.children) {
       if (child is XmlElement) {
@@ -242,11 +248,22 @@ final class _ChapterBuilder {
       // a place in the flow, so the next paragraph starts below it.
       _closeParagraph();
       _writeSeparator();
-      _blocks.add(EpubDividerBlock(startOffset: _textLength));
+      _blocks.add(
+        EpubDividerBlock(startOffset: _textLength, quoteDepth: _quoteDepth),
+      );
       return;
     }
 
     _recordAnchor(element);
+
+    if (name == 'blockquote') {
+      _closeParagraph();
+      _quoteDepth += 1;
+      walk(element);
+      _quoteDepth -= 1;
+      _closeParagraph();
+      return;
+    }
 
     if (_isBlockLevel(name)) {
       _closeParagraph();
@@ -331,8 +348,11 @@ final class _ChapterBuilder {
       return;
     }
     _inParagraph = true;
-    _paragraphType = type;
+    _paragraphType = type == EpubBlockType.paragraph && _quoteDepth > 0
+        ? EpubBlockType.quote
+        : type;
     _paragraphLevel = type == EpubBlockType.heading ? level : null;
+    _paragraphQuoteDepth = _quoteDepth;
   }
 
   void _appendText(String value) {
@@ -340,7 +360,9 @@ final class _ChapterBuilder {
       return;
     }
     if (!_inParagraph) {
-      _openParagraph(EpubBlockType.paragraph);
+      _openParagraph(
+        _quoteDepth > 0 ? EpubBlockType.quote : EpubBlockType.paragraph,
+      );
     }
     _paragraph.write(value);
   }
@@ -367,6 +389,7 @@ final class _ChapterBuilder {
         endOffset: _textLength,
         text: body,
         type: _paragraphType,
+        quoteDepth: _paragraphQuoteDepth,
         headingLevel: _paragraphLevel,
       ),
     );
@@ -399,7 +422,13 @@ final class _ChapterBuilder {
     // A picture sits between two runs of text, so the paragraph ends here.
     _closeParagraph();
     final offset = _textLength;
-    _blocks.add(EpubImageBlock(startOffset: offset, image: image));
+    _blocks.add(
+      EpubImageBlock(
+        startOffset: offset,
+        image: image,
+        quoteDepth: _quoteDepth,
+      ),
+    );
   }
 
   EpubImage _loadImage(XmlElement element) {

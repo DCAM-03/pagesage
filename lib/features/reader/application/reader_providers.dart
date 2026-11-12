@@ -58,11 +58,10 @@ final class ReaderSessionController {
       case RendererSearchResults():
       case RendererOutlineChanged():
       case RendererExternalLinkRequested():
-      case RendererBookmarkRequested():
+      case RendererInternalLinkRequested():
       case RendererCapabilityChanged():
       case RendererNotice():
       case RendererAnnotationSelected():
-      case RendererImagesDetected():
       case RendererImageAreaSelected():
       case RendererFailed():
         return;

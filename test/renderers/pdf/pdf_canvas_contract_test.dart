@@ -94,6 +94,59 @@ void main() {
       expect(first!.length, second!.length);
     });
 
+    test(
+      'OCR export obeys edge and pixel limits while preserving display aspect',
+      () async {
+        for (final file in [standard, rotated]) {
+          final renderer = open(file);
+          addTearDown(renderer.dispose);
+          final bytes = await renderer.exportPageImage(
+            0,
+            targetWidth: 10000,
+            maxEdge: 480,
+            maxPixels: 120000,
+          );
+          expect(bytes, isNotNull);
+          final header = ByteData.sublistView(bytes!);
+          final width = header.getUint32(16);
+          final height = header.getUint32(20);
+          expect(width, lessThanOrEqualTo(480));
+          expect(height, lessThanOrEqualTo(480));
+          expect(width * height, lessThanOrEqualTo(120000));
+          final size = renderer.displaySizeOf(0);
+          expect(width / height, closeTo(size.width / size.height, 0.01));
+        }
+      },
+    );
+
+    test(
+      'OCR export has an opaque white background independent of reader theme',
+      () async {
+        final renderer = open(standard);
+        addTearDown(renderer.dispose);
+        final bytes = await renderer.exportPageImage(0, targetWidth: 300);
+        final codec = await instantiateImageCodec(bytes!);
+        final frame = await codec.getNextFrame();
+        final rgba = await frame.image.toByteData(
+          format: ImageByteFormat.rawRgba,
+        );
+        expect(rgba!.buffer.asUint8List().take(4), [255, 255, 255, 255]);
+        frame.image.dispose();
+        codec.dispose();
+      },
+    );
+
+    test('invalid OCR limits are rejected without rasterizing', () async {
+      final renderer = open(standard);
+      addTearDown(renderer.dispose);
+      expect(await renderer.exportPageImage(0, maxEdge: 0), isNull);
+      expect(await renderer.exportPageImage(0, maxPixels: 0), isNull);
+      expect(
+        await renderer.exportPageImage(0, targetWidth: double.nan),
+        isNull,
+      );
+    });
+
     test('exports one region of a page at the region\'s own shape', () async {
       final renderer = open(standard);
       addTearDown(renderer.dispose);

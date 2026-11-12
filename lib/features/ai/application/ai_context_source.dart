@@ -10,6 +10,7 @@ import '../../../renderers/common/book_document_loader.dart';
 import '../../../renderers/epub/epub_document.dart';
 import '../../../renderers/epub/epub_document_loader.dart';
 import '../../../renderers/markdown/markdown_document_loader.dart';
+import '../../../renderers/markdown/markdown_folder.dart';
 import 'ai_context_range.dart';
 
 /// A block of text the AI request will carry, with where it came from.
@@ -143,6 +144,12 @@ class AiContextSource {
     ReadingLocator? locator,
     BookFormat format,
   ) async {
+    if (format == BookFormat.markdown) {
+      final stat = await File(bookPath).stat();
+      if (stat.type == FileSystemEntityType.directory) {
+        return _folderChapter(bookPath, locator);
+      }
+    }
     final BookDocumentLoader loader = format == BookFormat.markdown
         ? const MarkdownDocumentLoader()
         : _epubLoader;
@@ -181,6 +188,74 @@ class AiContextSource {
                 chapterOffset: 0,
               ),
             ),
+    );
+  }
+
+  /// One note of a folder book, read from its own file.
+  ///
+  /// The old merged document would have returned the right text by accident
+  /// while also parsing every other note. The chapter index in a folder
+  /// locator now belongs to [ReadingLocator.href], so only that file is read.
+  Future<ContextSource?> _folderChapter(
+    String folderPath,
+    ReadingLocator? locator,
+  ) async {
+    final manifest = await const MarkdownFolderLoader().loadManifest(
+      folderPath,
+    );
+    var file = manifest.fileForHref(locator?.href);
+    var chapterIndex = locator?.chapterIndex;
+    if (locator != null &&
+        locator.chapterIndex != null &&
+        !locator.folderFileLocal) {
+      final legacy = await const MarkdownFolderLoader().resolveLegacyPosition(
+        folderPath,
+        locator.chapterIndex!,
+      );
+      if (legacy != null) {
+        file = manifest.fileForHref(legacy.relativePath);
+        chapterIndex = legacy.chapterIndex;
+      }
+    }
+    file ??= manifest.fileAtProgress(locator?.progress ?? 0);
+    file ??= manifest.firstFile;
+    if (file == null) {
+      return null;
+    }
+
+    final EpubDocument document;
+    try {
+      document = await const MarkdownDocumentLoader().load(file.absolutePath);
+    } on Object {
+      throw const BookUnreadableException();
+    }
+    if (document.chapters.isEmpty) {
+      return null;
+    }
+    final index = (chapterIndex ?? 0).clamp(0, document.chapters.length - 1);
+    final chapter = document.chapters[index];
+    if (chapter.text.trim().isEmpty) {
+      return null;
+    }
+    final progress = manifest.progressForFile(
+      file.relativePath,
+      document.progressForChapter(
+        chapterIndex: chapter.index,
+        chapterOffset: 0,
+      ),
+    );
+    return ContextSource(
+      title: chapter.title == file.title
+          ? file.title
+          : '${file.title} · ${chapter.title}',
+      text: chapter.text,
+      locator: ReadingLocator.markdown(
+        href: file.relativePath,
+        chapterIndex: chapter.index,
+        chapterOffset: 0,
+        progress: progress,
+        folderFileLocal: true,
+      ),
     );
   }
 }

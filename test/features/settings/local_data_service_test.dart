@@ -1,9 +1,14 @@
 import 'dart:io';
 
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
+import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/core/files/app_paths.dart';
+import 'package:pagesage/core/security/secure_store.dart';
+import 'package:pagesage/core/security/security_keys.dart';
 import 'package:pagesage/features/settings/application/local_data_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -47,6 +52,61 @@ void main() {
     expect(await databaseFile.exists(), isFalse);
     expect(await library.exists(), isFalse);
     expect(await cache.exists(), isFalse);
+  });
+
+  test('clears credentials for active and deleted profiles', () async {
+    final file = await AppPaths().databaseFile();
+    final database = AppDatabase.forTesting(NativeDatabase(file));
+    final store = SecureStore.memory(
+      seed: {
+        aiApiKeyStorageKey: 'legacy',
+        aiProfileApiKeyStorageKey('active'): 'active-secret',
+        aiProfileApiKeyStorageKey('deleted'): 'deleted-secret',
+        'unrelated': 'retained',
+      },
+    );
+    final container = ProviderContainer(
+      overrides: [
+        appDatabaseProvider.overrideWithValue(database),
+        secureStoreProvider.overrideWithValue(store),
+      ],
+    );
+    addTearDown(container.dispose);
+    for (final id in ['active', 'deleted']) {
+      await database.aiProfileDao.insertProfile(
+        AiProfilesCompanion.insert(
+          id: id,
+          name: id,
+          createdAt: 1,
+          updatedAt: 1,
+          deletedAt: Value(id == 'deleted' ? 2 : null),
+        ),
+      );
+    }
+    await container.read(localDataServiceProvider).deleteAllLocalData();
+    expect(await store.read(aiApiKeyStorageKey), isNull);
+    expect(await store.read(aiProfileApiKeyStorageKey('active')), isNull);
+    expect(await store.read(aiProfileApiKeyStorageKey('deleted')), isNull);
+    expect(await store.read('unrelated'), 'retained');
+    expect(await file.exists(), isFalse);
+  });
+
+  test('credential failure preserves database for retry', () async {
+    final paths = AppPaths();
+    final file = await paths.databaseFile();
+    final database = AppDatabase.forTesting(NativeDatabase(file));
+    addTearDown(database.close);
+    await database.settingsDao.setValue('test.preserved', 'original', 1);
+    await expectLater(
+      LocalDataService(
+        database: database,
+        appPaths: paths,
+        clearSecrets: () async => throw StateError('credential store locked'),
+      ).deleteAllLocalData(),
+      throwsStateError,
+    );
+    expect(await file.exists(), isTrue);
+    expect(await database.settingsDao.getValue('test.preserved'), 'original');
   });
 }
 

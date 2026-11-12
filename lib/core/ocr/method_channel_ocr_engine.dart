@@ -27,11 +27,12 @@ final class MethodChannelOcrEngine implements OcrEngine {
     }
     try {
       final value = await _channel.invokeMethod<bool>('isAvailable');
-      return _availableCache = value ?? false;
+      if (value == true) _availableCache = true;
+      return value ?? false;
     } on PlatformException {
-      return _availableCache = false;
+      return false;
     } on MissingPluginException {
-      return _availableCache = false;
+      return false;
     }
   }
 
@@ -80,6 +81,7 @@ final class MethodChannelOcrEngine implements OcrEngine {
   Future<OcrPageResult> recognize({
     required Uint8List imageBytes,
     required String languageHint,
+    Future<void>? cancelled,
   }) async {
     try {
       final result = await _channel.invokeMethod<dynamic>('recognize', {
@@ -147,6 +149,9 @@ final class MethodChannelOcrEngine implements OcrEngine {
   }
 
   Never _mapPlatformException(PlatformException error) {
+    if (error.code == 'ocr_language_unavailable') {
+      throw const OcrUnavailableException('当前系统缺少所选 OCR 语言，请安装相应语言包后重试');
+    }
     if (error.code == 'ocr_unavailable') {
       throw OcrUnavailableException(
         error.message?.trim().isNotEmpty == true

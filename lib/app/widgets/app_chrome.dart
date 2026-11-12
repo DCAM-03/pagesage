@@ -137,6 +137,7 @@ final class AppCommandBar extends StatelessWidget {
     this.title,
     this.taskCount = 0,
     this.showSearch = true,
+    this.showImport = true,
     super.key,
   });
 
@@ -148,6 +149,7 @@ final class AppCommandBar extends StatelessWidget {
   final VoidCallback onTasks;
   final int taskCount;
   final bool showSearch;
+  final bool showImport;
 
   @override
   Widget build(BuildContext context) {
@@ -210,14 +212,16 @@ final class AppCommandBar extends StatelessWidget {
                 ),
                 const SizedBox(width: AppSpacing.x2),
               ],
-              _CommandButton(
-                tooltip: '导入 EPUB/PDF/Markdown',
-                icon: Icons.upload_file_outlined,
-                label: '导入',
-                filled: true,
-                onPressed: onImport,
-              ),
-              const SizedBox(width: AppSpacing.x1),
+              if (showImport) ...[
+                _CommandButton(
+                  tooltip: '导入 EPUB/PDF/Markdown',
+                  icon: Icons.upload_file_outlined,
+                  label: '导入',
+                  filled: true,
+                  onPressed: onImport,
+                ),
+                const SizedBox(width: AppSpacing.x1),
+              ],
               Tooltip(
                 message: taskCount > 0 ? '任务中心：$taskCount 个任务' : '任务中心',
                 child: Badge.count(
@@ -480,10 +484,16 @@ final class AppSidePanel extends StatelessWidget {
 }
 
 final class AppFilterBar extends StatelessWidget {
-  const AppFilterBar({required this.children, this.padding, super.key});
+  const AppFilterBar({
+    required this.children,
+    this.padding,
+    this.leading,
+    super.key,
+  });
 
   final List<Widget> children;
   final EdgeInsetsGeometry? padding;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
@@ -494,17 +504,28 @@ final class AppFilterBar extends StatelessWidget {
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: colorScheme.appBorder)),
         ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding:
-              padding ??
-              const EdgeInsets.fromLTRB(
-                AppSpacing.x4,
-                AppSpacing.x3,
-                AppSpacing.x4,
-                AppSpacing.x2,
+        child: Row(
+          children: [
+            if (leading != null)
+              Padding(
+                padding: const EdgeInsetsDirectional.only(start: AppSpacing.x2),
+                child: leading,
               ),
-          child: Row(children: children),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding:
+                    padding ??
+                    const EdgeInsets.fromLTRB(
+                      AppSpacing.x4,
+                      AppSpacing.x3,
+                      AppSpacing.x4,
+                      AppSpacing.x2,
+                    ),
+                child: Row(children: children),
+              ),
+            ),
+          ],
         ),
       ),
     );

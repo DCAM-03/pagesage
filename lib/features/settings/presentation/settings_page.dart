@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -11,10 +12,10 @@ import '../../../core/platform/platform_providers.dart';
 import '../../../core/tasks/task_cancellation.dart';
 import '../../../core/tasks/task_models.dart';
 import '../../../domain/ai/ai_models.dart';
+import '../../../domain/books/reader_fonts.dart';
 import '../../../domain/books/reader_settings.dart';
 import '../../../domain/books/category.dart';
 import '../../../domain/books/tag.dart';
-import '../../ai/application/ai_providers.dart';
 import '../../export/application/export_providers.dart';
 import '../../export/application/export_service.dart';
 import '../../library/application/library_providers.dart';
@@ -22,21 +23,47 @@ import '../../settings/application/settings_providers.dart';
 import '../../tasks/application/task_center_controller.dart';
 import '../../tasks/presentation/task_center_page.dart';
 import '../application/ai_settings_providers.dart';
+import '../application/ai_settings_form_controller.dart';
+import 'ai_profile_actions.dart';
+import 'reader_font_picker.dart';
+import 'reader_settings_save_status.dart';
 
 final class SettingsPage extends ConsumerStatefulWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({this.initialAi = false, super.key});
+
+  final bool initialAi;
 
   @override
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
 final class _SettingsPageState extends ConsumerState<SettingsPage> {
-  _SettingsSection _selectedSection = _SettingsSection.reader;
+  late _SettingsSection _selectedSection = widget.initialAi
+      ? _SettingsSection.ai
+      : _SettingsSection.reader;
+  bool _fileOperationBusy = false;
+
+  Future<void> _withFileOperation(Future<void> Function() action) async {
+    if (_fileOperationBusy) return;
+    _fileOperationBusy = true;
+    try {
+      await action();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('无法选择文件，请重试或检查保存位置权限')));
+      }
+    } finally {
+      _fileOperationBusy = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final readerSettings = ref.watch(readerSettingsProvider);
     final aiSettings = ref.watch(aiSettingsProvider);
+    ref.watch(aiSettingsFormProvider.select((state) => state.isInitialized));
 
     if (context.supportsSidePanel) {
       return Scaffold(
@@ -46,7 +73,11 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
             children: [
               // No theme control in this header: the page is where 应用外观 lives,
               // and a shortcut to the setting beside the setting is noise.
-              const AppPageHeader(title: '设置', subtitle: '管理阅读偏好、AI、本地数据和任务'),
+              AppPageHeader(
+                title: '设置',
+                subtitle: '管理阅读偏好、AI、本地数据和任务',
+                leading: widget.initialAi ? const BackButton() : null,
+              ),
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -54,6 +85,7 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
                     SizedBox(
                       width: 260,
                       child: _SettingsNavigation(
+                        readerSummary: _readerSettingsSummary(readerSettings),
                         selected: _selectedSection,
                         onSelected: (section) =>
                             setState(() => _selectedSection = section),
@@ -65,6 +97,7 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                     Expanded(
                       child: ListView(
+                        key: ValueKey(_selectedSection),
                         padding: const EdgeInsets.fromLTRB(
                           AppSpacing.x6,
                           AppSpacing.x2,
@@ -92,6 +125,26 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
       );
     }
 
+    if (widget.initialAi) {
+      return Scaffold(
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(AppSpacing.x4),
+            children: [
+              const AppPageHeader(title: 'AI 设置', leading: BackButton()),
+              const SizedBox(height: AppSpacing.x3),
+              _buildSection(
+                context,
+                _SettingsSection.ai,
+                readerSettings,
+                aiSettings,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       body: SafeArea(
         child: ListView(
@@ -107,6 +160,9 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
             for (final section in _SettingsSection.values)
               _SettingsSectionListTile(
                 section: section,
+                description: section == _SettingsSection.reader
+                    ? _readerSettingsSummary(readerSettings)
+                    : section.description,
                 onTap: () => _openMobileSection(context, section),
               ),
           ],
@@ -140,8 +196,6 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
                       icon: const Icon(Icons.arrow_back),
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.x2),
-                  _SettingsSectionHeader(section: section),
                   const SizedBox(height: AppSpacing.x3),
                   _buildSection(context, section, readerSettings, aiSettings),
                 ],
@@ -168,18 +222,42 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
       _SettingsSection.ai => aiSettings.when(
         data: (settings) => _AiSettingsCard(settings: settings),
         loading: () => const LinearProgressIndicator(),
-        error: (error, stackTrace) => const Text('无法读取 AI 设置'),
+        error: (error, stackTrace) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              error is AiProfileException
+                  ? error.message
+                  : '无法读取 AI 设置，请检查系统安全存储后重试',
+            ),
+            TextButton.icon(
+              onPressed: () {
+                ref.invalidate(aiSettingsProvider);
+                ref.invalidate(aiProfilesProvider);
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('重新读取配置'),
+            ),
+          ],
+        ),
       ),
       _SettingsSection.taxonomy => const _CategoryTagCard(),
       _SettingsSection.data => _PrivacyDataCard(
-        onExportNotes: () => _exportNotes(context, ref),
-        onExportNotebook: () => _exportNotebook(context, ref),
-        onExportAnnotations: () => _exportAnnotations(context, ref),
-        onExportBookmarks: () => _exportBookmarks(context, ref),
-        onExportAi: () => _exportAiConversations(context, ref),
-        onExportImages: () => _exportImageAnnotations(context, ref),
-        onBackup: () => _backupDatabase(context, ref),
-        onRestore: () => _restoreDatabase(context, ref),
+        onExportNotes: () =>
+            _withFileOperation(() => _exportNotes(context, ref)),
+        onExportNotebook: () =>
+            _withFileOperation(() => _exportNotebook(context, ref)),
+        onExportAnnotations: () =>
+            _withFileOperation(() => _exportAnnotations(context, ref)),
+        onExportBookmarks: () =>
+            _withFileOperation(() => _exportBookmarks(context, ref)),
+        onExportAi: () =>
+            _withFileOperation(() => _exportAiConversations(context, ref)),
+        onExportImages: () =>
+            _withFileOperation(() => _exportImageAnnotations(context, ref)),
+        onBackup: () => _withFileOperation(() => _backupDatabase(context, ref)),
+        onRestore: () =>
+            _withFileOperation(() => _restoreDatabase(context, ref)),
         onClearCache: () => _clearImageCache(context, ref),
         onClearAi: () => _confirmClearAiHistory(context, ref),
         onDeleteAll: () => _confirmDeleteAllLocalData(context, ref),
@@ -218,10 +296,12 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _exportNotes(BuildContext context, WidgetRef ref) async {
-    final targetPath = await ref
-        .read(filePickerServiceProvider)
-        .pickNotesMarkdownExportPath();
-    if (targetPath == null) {
+    final picker = ref.read(filePickerServiceProvider);
+    final targetPath = picker.supportsExportPathSelection
+        ? await picker.pickNotesMarkdownExportPath()
+        : null;
+    if ((picker.supportsExportPathSelection && targetPath == null) ||
+        !context.mounted) {
       return;
     }
     try {
@@ -242,21 +322,21 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         return;
       }
       _showFileResultSnackBar(context, ref, message: '已导出', file: file);
-    } catch (_) {
+    } on Object catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('导出失败')));
+      _showFileFailure(context, error);
     }
   }
 
   Future<void> _exportNotebook(BuildContext context, WidgetRef ref) async {
-    final targetPath = await ref
-        .read(filePickerServiceProvider)
-        .pickNotebookMarkdownExportPath();
-    if (targetPath == null) {
+    final picker = ref.read(filePickerServiceProvider);
+    final targetPath = picker.supportsExportPathSelection
+        ? await picker.pickNotebookMarkdownExportPath()
+        : null;
+    if ((picker.supportsExportPathSelection && targetPath == null) ||
+        !context.mounted) {
       return;
     }
     try {
@@ -277,21 +357,21 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         return;
       }
       _showFileResultSnackBar(context, ref, message: '已导出', file: file);
-    } catch (_) {
+    } on Object catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('导出失败')));
+      _showFileFailure(context, error);
     }
   }
 
   Future<void> _exportAnnotations(BuildContext context, WidgetRef ref) async {
-    final targetPath = await ref
-        .read(filePickerServiceProvider)
-        .pickAnnotationsJsonExportPath();
-    if (targetPath == null) {
+    final picker = ref.read(filePickerServiceProvider);
+    final targetPath = picker.supportsExportPathSelection
+        ? await picker.pickAnnotationsJsonExportPath()
+        : null;
+    if ((picker.supportsExportPathSelection && targetPath == null) ||
+        !context.mounted) {
       return;
     }
     try {
@@ -312,21 +392,21 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         return;
       }
       _showFileResultSnackBar(context, ref, message: '已导出', file: file);
-    } catch (_) {
+    } on Object catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('导出失败')));
+      _showFileFailure(context, error);
     }
   }
 
   Future<void> _exportBookmarks(BuildContext context, WidgetRef ref) async {
-    final targetPath = await ref
-        .read(filePickerServiceProvider)
-        .pickBookmarksCsvExportPath();
-    if (targetPath == null) {
+    final picker = ref.read(filePickerServiceProvider);
+    final targetPath = picker.supportsExportPathSelection
+        ? await picker.pickBookmarksCsvExportPath()
+        : null;
+    if ((picker.supportsExportPathSelection && targetPath == null) ||
+        !context.mounted) {
       return;
     }
     try {
@@ -347,13 +427,11 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         return;
       }
       _showFileResultSnackBar(context, ref, message: '已导出', file: file);
-    } catch (_) {
+    } on Object catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('导出失败')));
+      _showFileFailure(context, error);
     }
   }
 
@@ -361,10 +439,12 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
     BuildContext context,
     WidgetRef ref,
   ) async {
-    final targetPath = await ref
-        .read(filePickerServiceProvider)
-        .pickAiMarkdownExportPath();
-    if (targetPath == null) {
+    final picker = ref.read(filePickerServiceProvider);
+    final targetPath = picker.supportsExportPathSelection
+        ? await picker.pickAiMarkdownExportPath()
+        : null;
+    if ((picker.supportsExportPathSelection && targetPath == null) ||
+        !context.mounted) {
       return;
     }
     try {
@@ -385,13 +465,11 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         return;
       }
       _showFileResultSnackBar(context, ref, message: '已导出', file: file);
-    } catch (_) {
+    } on Object catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('导出失败')));
+      _showFileFailure(context, error);
     }
   }
 
@@ -399,10 +477,12 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
     BuildContext context,
     WidgetRef ref,
   ) async {
-    final targetPath = await ref
-        .read(filePickerServiceProvider)
-        .pickImageAnnotationsExportPath();
-    if (targetPath == null) {
+    final picker = ref.read(filePickerServiceProvider);
+    final targetPath = picker.supportsExportPathSelection
+        ? await picker.pickImageAnnotationsExportPath()
+        : null;
+    if ((picker.supportsExportPathSelection && targetPath == null) ||
+        !context.mounted) {
       return;
     }
     try {
@@ -412,12 +492,24 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         plannedTargetPath: targetPath,
         runningMessage: '正在导出图片批注',
         successMessage: '图片批注已导出',
-        action: (cancelToken) => ref
-            .read(exportServiceProvider)
-            .exportImageAnnotations(
-              targetPath: targetPath,
+        action: (cancelToken) async {
+          final service = ref.read(exportServiceProvider);
+          final result = await service.exportImageAnnotations(
+            targetPath: targetPath,
+            cancelToken: cancelToken,
+          );
+          if (!picker.supportsExportPathSelection) {
+            final archive = await service.packageImageAnnotations(
+              result,
               cancelToken: cancelToken,
-            ),
+            );
+            cancelToken.throwIfCancelled();
+            if (await picker.saveExportedFile(archive) == null) {
+              throw const TaskCancelledException();
+            }
+          }
+          return result;
+        },
       );
       if (!context.mounted) {
         return;
@@ -431,13 +523,11 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
             : '已导出 ${result.imageCount} 张图片，$missing 张没有缓存',
         file: result.markdownFile,
       );
-    } catch (_) {
+    } on Object catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('导出失败')));
+      _showFileFailure(context, error);
     }
   }
 
@@ -477,10 +567,12 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _backupDatabase(BuildContext context, WidgetRef ref) async {
-    final targetPath = await ref
-        .read(filePickerServiceProvider)
-        .pickBackupZipExportPath();
-    if (targetPath == null) {
+    final picker = ref.read(filePickerServiceProvider);
+    final targetPath = picker.supportsExportPathSelection
+        ? await picker.pickBackupZipExportPath()
+        : null;
+    if ((picker.supportsExportPathSelection && targetPath == null) ||
+        !context.mounted) {
       return;
     }
     try {
@@ -501,17 +593,24 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         return;
       }
       _showFileResultSnackBar(context, ref, message: '已备份', file: file);
-    } catch (_) {
+    } on Object catch (error) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('备份失败')));
+      _showFileFailure(context, error, operation: '备份');
     }
   }
 
   Future<void> _restoreDatabase(BuildContext context, WidgetRef ref) async {
+    final tasks = await ref.read(taskRepositoryProvider).getTasks();
+    final registry = ref.read(taskCancellationRegistryProvider);
+    if (!context.mounted) return;
+    if (tasks.any((task) => registry.isLive(task.id))) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请等待当前任务结束，再恢复备份')));
+      return;
+    }
     final file = await ref.read(filePickerServiceProvider).pickBackupZipFile();
     if (file == null) {
       return;
@@ -539,21 +638,22 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         ],
       ),
     );
-    if (confirmed != true) {
+    if (confirmed != true || !context.mounted) {
       return;
     }
 
     try {
-      final restoreResult = await _runTrackedTask<RestoreBackupResult>(
-        ref,
-        type: PageSageTaskType.restore,
-        sourcePath: file.path,
-        runningMessage: '正在恢复数据库备份',
-        successMessage: '数据库已恢复',
-        action: (cancelToken) => ref
-            .read(exportServiceProvider)
-            .restoreDatabaseBackup(File(file.path), cancelToken: cancelToken),
-      );
+      final latestTasks = await ref.read(taskRepositoryProvider).getTasks();
+      if (!context.mounted) return;
+      if (latestTasks.any((task) => registry.isLive(task.id))) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('请等待当前任务结束，再恢复备份')));
+        return;
+      }
+      final restoreResult = await ref
+          .read(exportServiceProvider)
+          .restoreDatabaseBackup(File(file.path));
       ref.invalidate(appDatabaseProvider);
       if (!context.mounted) {
         return;
@@ -573,27 +673,29 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('知道了'),
             ),
-            FilledButton.icon(
-              onPressed: () async {
-                try {
-                  await ref
-                      .read(openFileLocationServiceProvider)
-                      .revealFile(restoreResult.databasePath);
-                } on Object catch (error) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('无法打开位置：${_shortError(error)}')),
-                    );
+            if (ref.read(openFileLocationServiceProvider).isSupported)
+              FilledButton.icon(
+                onPressed: () async {
+                  try {
+                    await ref
+                        .read(openFileLocationServiceProvider)
+                        .revealFile(restoreResult.databasePath);
+                  } on Object catch (error) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('无法打开位置：${_shortError(error)}')),
+                      );
+                    }
                   }
-                }
-              },
-              icon: const Icon(Icons.folder_open_outlined),
-              label: const Text('打开数据位置'),
-            ),
+                },
+                icon: const Icon(Icons.folder_open_outlined),
+                label: const Text('打开数据位置'),
+              ),
           ],
         ),
       );
     } catch (_) {
+      ref.invalidate(appDatabaseProvider);
       if (!context.mounted) {
         return;
       }
@@ -609,29 +711,50 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
     required String message,
     required File file,
   }) {
+    final locationService = ref.read(openFileLocationServiceProvider);
+    final externalSave = !ref
+        .read(filePickerServiceProvider)
+        .supportsExportPathSelection;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         showCloseIcon: true,
-        content: Text('$message：${file.path}'),
-        action: SnackBarAction(
-          label: '打开位置',
-          onPressed: () async {
-            try {
-              await ref
-                  .read(openFileLocationServiceProvider)
-                  .revealFile(file.path);
-            } on Object catch (error) {
-              if (!context.mounted) {
-                return;
-              }
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('无法打开位置：${_shortError(error)}')),
-              );
-            }
-          },
+        content: Text(
+          externalSave ? '$message，已保存到所选位置' : '$message：${file.path}',
         ),
+        action: !locationService.isSupported
+            ? null
+            : SnackBarAction(
+                label: '打开位置',
+                onPressed: () async {
+                  try {
+                    await locationService.revealFile(file.path);
+                  } on Object catch (error) {
+                    if (!context.mounted) {
+                      return;
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('无法打开位置：${_shortError(error)}')),
+                    );
+                  }
+                },
+              ),
       ),
     );
+  }
+
+  void _showFileFailure(
+    BuildContext context,
+    Object error, {
+    String operation = '导出',
+  }) {
+    final message = error is TaskCancelledException
+        ? '已取消$operation'
+        : error is FileSystemException
+        ? '$operation失败：请检查保存位置、写入权限和剩余空间'
+        : '$operation失败，请重试；详细信息可在任务中心查看';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<File> _runTrackedFileTask(
@@ -642,12 +765,22 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
     String? plannedTargetPath,
     required Future<File> Function(TaskCancelToken cancelToken) action,
   }) {
+    final picker = ref.read(filePickerServiceProvider);
     return _runTrackedTask<File>(
       ref,
       type: type,
       runningMessage: runningMessage,
       successMessage: successMessage,
-      action: action,
+      action: (cancelToken) async {
+        final file = await action(cancelToken);
+        if (!picker.supportsExportPathSelection) {
+          cancelToken.throwIfCancelled();
+          if (await picker.saveExportedFile(file) == null) {
+            throw const TaskCancelledException();
+          }
+        }
+        return file;
+      },
       plannedTargetPath: plannedTargetPath,
       targetPath: (file) => file.path,
     );
@@ -677,7 +810,6 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
     try {
       cancelToken.throwIfCancelled();
       final result = await action(cancelToken);
-      cancelToken.throwIfCancelled();
       await repository.updateStatus(
         id: task.id,
         status: PageSageTaskStatus.done,
@@ -688,19 +820,16 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         // it is cleared explicitly.
         clearError: true,
       );
-      cancelRegistry.complete(task.id);
       return result;
     } on TaskCancelledException {
       final tasks = await repository.getTasks();
       final latest = tasks.where((item) => item.id == task.id).firstOrNull;
-      await _deleteTrackedTarget(latest ?? task);
       await repository.updateStatus(
         id: task.id,
         status: PageSageTaskStatus.cancelled,
         progress: latest?.progress ?? task.progress,
         message: '已取消',
       );
-      cancelRegistry.complete(task.id);
       rethrow;
     } on Object catch (error) {
       await repository.updateStatus(
@@ -710,23 +839,9 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
         message: '$runningMessage失败',
         error: sanitizeTaskError(error),
       );
-      cancelRegistry.complete(task.id);
       rethrow;
-    }
-  }
-
-  Future<void> _deleteTrackedTarget(PageSageTask task) async {
-    final path = task.targetPath;
-    if (path == null || path.isEmpty) {
-      return;
-    }
-    final file = File(path);
-    if (await file.exists()) {
-      await file.delete();
-    }
-    final partial = File('$path.part');
-    if (await partial.exists()) {
-      await partial.delete();
+    } finally {
+      cancelRegistry.complete(task.id);
     }
   }
 
@@ -782,8 +897,18 @@ final class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 }
 
+String _readerSettingsSummary(AsyncValue<ReaderSettings> settings) {
+  return settings.when(
+    data: (value) =>
+        '${value.fontSize.round()} px · ${value.readerMode.label} · ${value.themePreset.label}\n'
+        '${ReaderFonts.resolve(value.fontFamily).label}',
+    loading: () => '正在读取阅读配置…',
+    error: (error, stackTrace) => '无法读取阅读配置',
+  );
+}
+
 enum _SettingsSection {
-  reader('阅读', '默认阅读模式、字体、排版和主题', Icons.menu_book_outlined),
+  reader('阅读', '所有书籍共用的阅读模式、字体、排版和主题', Icons.menu_book_outlined),
   ai('AI', 'Provider、模型、密钥和请求确认', Icons.auto_awesome_outlined),
   taxonomy('分类与标签', '维护书库分类和标签', Icons.category_outlined),
   data('隐私与数据', '本地导出、备份、任务和危险操作', Icons.storage_outlined),
@@ -797,8 +922,13 @@ enum _SettingsSection {
 }
 
 final class _SettingsNavigation extends StatelessWidget {
-  const _SettingsNavigation({required this.selected, required this.onSelected});
+  const _SettingsNavigation({
+    required this.readerSummary,
+    required this.selected,
+    required this.onSelected,
+  });
 
+  final String readerSummary;
   final _SettingsSection selected;
   final ValueChanged<_SettingsSection> onSelected;
 
@@ -819,6 +949,9 @@ final class _SettingsNavigation extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: AppSpacing.x2),
               child: _SettingsNavigationTile(
                 section: section,
+                description: section == _SettingsSection.reader
+                    ? readerSummary
+                    : section.description,
                 selected: selected == section,
                 onTap: () => onSelected(section),
               ),
@@ -832,11 +965,13 @@ final class _SettingsNavigation extends StatelessWidget {
 final class _SettingsNavigationTile extends StatelessWidget {
   const _SettingsNavigationTile({
     required this.section,
+    required this.description,
     required this.selected,
     required this.onTap,
   });
 
   final _SettingsSection section;
+  final String description;
   final bool selected;
   final VoidCallback onTap;
 
@@ -876,14 +1011,17 @@ final class _SettingsNavigationTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: AppSpacing.x1),
-                    Text(
-                      section.description,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: selected
-                            ? colorScheme.onSecondaryContainer
-                            : colorScheme.textSecondary,
+                    Tooltip(
+                      message: description,
+                      child: Text(
+                        description,
+                        maxLines: section == _SettingsSection.reader ? 4 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: selected
+                              ? colorScheme.onSecondaryContainer
+                              : colorScheme.textSecondary,
+                        ),
                       ),
                     ),
                   ],
@@ -898,9 +1036,14 @@ final class _SettingsNavigationTile extends StatelessWidget {
 }
 
 final class _SettingsSectionListTile extends StatelessWidget {
-  const _SettingsSectionListTile({required this.section, required this.onTap});
+  const _SettingsSectionListTile({
+    required this.section,
+    required this.description,
+    required this.onTap,
+  });
 
   final _SettingsSection section;
+  final String description;
   final VoidCallback onTap;
 
   @override
@@ -917,7 +1060,7 @@ final class _SettingsSectionListTile extends StatelessWidget {
         child: ListTile(
           leading: Icon(section.icon),
           title: Text(section.label),
-          subtitle: Text(section.description),
+          subtitle: Text(description),
           trailing: const Icon(Icons.chevron_right),
           onTap: onTap,
         ),
@@ -1018,7 +1161,7 @@ final class _PrivacyDataCard extends StatelessWidget {
                 _SettingsActionTile(
                   icon: Icons.download_outlined,
                   title: '导出全部笔记',
-                  subtitle: '导出 Markdown 到本地 exports 目录',
+                  subtitle: '选择保存位置，导出 Markdown 文件',
                   onTap: onExportNotes,
                 ),
                 _SettingsActionTile(
@@ -1036,7 +1179,7 @@ final class _PrivacyDataCard extends StatelessWidget {
                 _SettingsActionTile(
                   icon: Icons.bookmarks_outlined,
                   title: '导出书签 CSV',
-                  subtitle: '导出全部书签到本地 exports 目录',
+                  subtitle: '选择保存位置，导出书签 CSV 文件',
                   onTap: onExportBookmarks,
                 ),
                 _SettingsActionTile(
@@ -1149,7 +1292,7 @@ final class _AboutPageSageCard extends StatelessWidget {
               context: context,
               applicationName: 'PageSage',
               applicationVersion: '0.1.0+1',
-              applicationLegalese: '本应用默认本地优先，AI 仅在用户主动触发时使用。',
+              applicationLegalese: '本应用默认本地优先，AI 请求会展示上下文范围。',
             ),
           ),
         ],
@@ -1166,7 +1309,7 @@ final class _AboutPageSageCard extends StatelessWidget {
           child: Text(
             'PageSage 默认把书籍副本、阅读进度、书签、标注、笔记、全文索引、AI 对话记录和应用设置保存在本机。\n\n'
             '导入 EPUB/PDF/Markdown 时会复制到应用书库目录；从 PageSage 删除书籍不会删除用户原始路径文件。\n\n'
-            'AI 功能必须由用户主动触发，默认不会自动上传整本书。AI 面板会展示将发送的选中文本或上下文范围。API Key 存在系统安全存储中，不写入 SQLite，也不进入普通日志。\n\n'
+            'AI 请求会明确展示将发送的选中文本或上下文范围，默认不会自动上传整本书。API Key 存在系统安全存储中，不写入 SQLite，也不进入普通日志。\n\n'
             '默认日志不记录 API key、AI 请求正文、选中文本、完整上下文或大段书籍正文。备份和恢复仅处理本地文件，恢复前会创建回滚副本。',
           ),
         ),
@@ -1188,7 +1331,7 @@ final class _AboutPageSageCard extends StatelessWidget {
         content: const SingleChildScrollView(
           child: Text(
             '发布前应以 pubspec.lock 为准重新生成完整第三方许可清单。\n\n'
-            '主要依赖许可包括：Flutter SDK 使用 BSD-3-Clause；Riverpod、Drift、sqlite3_flutter_libs、file_picker 使用 MIT；go_router、flutter_secure_storage 和 url_launcher 使用 BSD-3-Clause；archive、dart_pdf_editor、pdf_document、pdf_graphics、pdf_cos 使用 Apache-2.0。\n\n'
+            '主要依赖许可包括：Flutter SDK 使用 BSD-3-Clause；Riverpod、Drift、file_picker 使用 MIT；go_router、flutter_secure_storage 和 url_launcher 使用 BSD-3-Clause；archive、dart_pdf_editor、pdf_document、pdf_graphics、pdf_cos 使用 Apache-2.0。\n\n'
             'Windows 与 Android 包内需要包含第三方许可文本。许可或诊断文件不得包含 API key、用户书籍正文、AI 请求正文或本地数据库内容。',
           ),
         ),
@@ -1242,23 +1385,29 @@ final class _ReaderDefaultsCard extends ConsumerStatefulWidget {
 final class _ReaderDefaultsCardState
     extends ConsumerState<_ReaderDefaultsCard> {
   late ReaderSettings _settings = widget.settings;
-  late final _fontController = TextEditingController(
-    text: _settings.fontFamily,
-  );
+  late final ReaderSettingsController _saveController;
+
+  @override
+  void initState() {
+    super.initState();
+    _saveController = ref.read(readerSettingsControllerProvider);
+    _settings = _saveController.unsavedSettings ?? widget.settings;
+  }
+
+  @override
+  void dispose() {
+    unawaited(_saveController.flush());
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(covariant _ReaderDefaultsCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.settings != widget.settings) {
-      _settings = widget.settings;
-      _fontController.text = _settings.fontFamily;
+      _settings =
+          ref.read(readerSettingsControllerProvider).unsavedSettings ??
+          widget.settings;
     }
-  }
-
-  @override
-  void dispose() {
-    _fontController.dispose();
-    super.dispose();
   }
 
   @override
@@ -1268,14 +1417,15 @@ final class _ReaderDefaultsCardState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const ReaderSettingsSaveStatus(),
           _SettingsGroup(
             icon: Icons.text_fields_outlined,
-            title: '排版默认值',
-            subtitle: '新建阅读会话时的默认字号、行距和边距。',
+            title: '阅读排版',
+            subtitle: '与阅读器内设置共用，对当前及后续打开的书籍生效。文字排版用于 EPUB 和 Markdown。',
             child: Column(
               children: [
                 _SettingsSlider(
-                  label: '默认字号',
+                  label: '字号',
                   value: _settings.fontSize,
                   min: 14,
                   max: 32,
@@ -1285,7 +1435,7 @@ final class _ReaderDefaultsCardState
                       _save(_settings.copyWith(fontSize: value)),
                 ),
                 _SettingsSlider(
-                  label: '默认行高',
+                  label: '行高',
                   value: _settings.lineHeight,
                   min: 1.2,
                   max: 2.2,
@@ -1325,22 +1475,10 @@ final class _ReaderDefaultsCardState
                       _save(_settings.copyWith(pdfScale: value)),
                 ),
                 const _SettingsFieldGap(),
-                _SettingsLabeledField(
-                  label: '默认字体',
-                  helper: '留空使用系统字体；阅读页也可单独切换内置字体。',
-                  child: TextField(
-                    controller: _fontController,
-                    decoration: const InputDecoration(
-                      hintText: '例如 LXGW WenKai Lite',
-                    ),
-                    onSubmitted: (value) =>
-                        _save(_settings.copyWith(fontFamily: value.trim())),
-                    onEditingComplete: () => _save(
-                      _settings.copyWith(
-                        fontFamily: _fontController.text.trim(),
-                      ),
-                    ),
-                  ),
+                ReaderFontPicker(
+                  fontFamily: _settings.fontFamily,
+                  onChanged: (value) =>
+                      _save(_settings.copyWith(fontFamily: value)),
                 ),
               ],
             ),
@@ -2151,36 +2289,54 @@ final class _AiSettingsCard extends ConsumerStatefulWidget {
 }
 
 final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
-  late AiSettings _settings = widget.settings;
-  late final _baseUrlController = TextEditingController(
-    text: _settings.baseUrl,
+  AiSettingsFormState get _form => ref.read(aiSettingsFormProvider);
+  AiSettingsFormController get _formController =>
+      ref.read(aiSettingsFormProvider.notifier);
+  AiSettings get _settings => (_form.saved ?? widget.settings).copyWith(
+    streaming: _form.streaming,
+    confirmBeforeRequest: _form.confirmBeforeRequest,
   );
-  late final _modelController = TextEditingController(text: _settings.model);
+  late final _baseUrlController = TextEditingController(
+    text: _form.value(AiSettingsField.baseUrl),
+  );
+  late final _modelController = TextEditingController(
+    text: _form.value(AiSettingsField.model),
+  );
   late final _temperatureController = TextEditingController(
-    text: '${_settings.temperature}',
+    text: _form.value(AiSettingsField.temperature),
   );
   late final _maxTokensController = TextEditingController(
-    text: '${_settings.maxTokens}',
+    text: _form.value(AiSettingsField.maxTokens),
   );
   late final _systemPromptController = TextEditingController(
-    text: _settings.systemPrompt,
+    text: _form.value(AiSettingsField.systemPrompt),
   );
-  final _apiKeyController = TextEditingController();
+  late final _apiKeyController = TextEditingController(
+    text: _form.value(AiSettingsField.apiKey),
+  );
+  final _advancedController = ExpansibleController();
   bool _showApiKey = false;
-  bool _testingConnection = false;
-  String? _connectionMessage;
+  bool _confirmingClear = false;
 
-  @override
-  void didUpdateWidget(covariant _AiSettingsCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.settings != widget.settings) {
-      _settings = widget.settings;
-      _baseUrlController.text = _settings.baseUrl;
-      _modelController.text = _settings.model;
-      _temperatureController.text = '${_settings.temperature}';
-      _maxTokensController.text = '${_settings.maxTokens}';
-      _systemPromptController.text = _settings.systemPrompt;
+  void _synchronizeControllers(AiSettingsFormState form) {
+    final controllers = {
+      AiSettingsField.baseUrl: _baseUrlController,
+      AiSettingsField.model: _modelController,
+      AiSettingsField.apiKey: _apiKeyController,
+      AiSettingsField.temperature: _temperatureController,
+      AiSettingsField.maxTokens: _maxTokensController,
+      AiSettingsField.systemPrompt: _systemPromptController,
+    };
+    for (final entry in controllers.entries) {
+      final value = form.value(entry.key);
+      if (entry.value.text != value) {
+        entry.value.value = TextEditingValue(
+          text: value,
+          selection: TextSelection.collapsed(offset: value.length),
+        );
+      }
     }
+    if (form.hasAdvancedErrors) _advancedController.expand();
   }
 
   @override
@@ -2191,66 +2347,100 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
     _maxTokensController.dispose();
     _systemPromptController.dispose();
     _apiKeyController.dispose();
+    _advancedController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final enabled = _settings.enabled;
+    final form = ref.watch(aiSettingsFormProvider);
+    ref.listen(aiSettingsFormProvider, (previous, next) {
+      _synchronizeControllers(next);
+    });
+    final enabled = !form.isBusy;
     return _SettingsPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _SettingsGroup(
+          _AiSettingsGroup(
             icon: Icons.power_settings_new_outlined,
             title: '启用状态',
-            subtitle: 'AI 仅在你主动发送时使用选定上下文，不会自动上传整本书。',
+            subtitle: 'AI 会使用选定上下文并展示发送范围，不会自动上传整本书。',
             child: SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('启用联网 AI'),
               subtitle: Text(
-                enabled ? '已开启，可在阅读器中对选中文本提问' : '关闭后不会发起联网 AI 请求',
+                _settings.enabled
+                    ? '已开启，可在阅读器中对选中文本提问'
+                    : '可先编辑并保存配置，开启后才能联网提问和测试',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colorScheme.textSecondary,
                 ),
               ),
-              value: enabled,
-              onChanged: (value) => setState(
-                () => _settings = _settings.copyWith(enabled: value),
-              ),
+              value: _settings.enabled,
+              onChanged: form.isBusy ? null : _formController.setEnabled,
             ),
           ),
           const _SettingsFieldGap(size: AppSpacing.x5),
-          _SettingsGroup(
+          _AiSettingsGroup(
+            icon: Icons.tune_outlined,
+            title: 'AI 配置组',
+            subtitle: '每组独立保存接口、模型和密钥；切换不会把草稿写入另一组。',
+            child: AiProfileSelector(settings: _settings),
+          ),
+          const _SettingsFieldGap(size: AppSpacing.x5),
+          _AiSettingsGroup(
             icon: Icons.dns_outlined,
             title: 'Provider 连接',
             subtitle: '填写 OpenAI 兼容接口的地址、模型和密钥。',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (_settings.credentialState == 'interrupted' ||
+                    _settings.credentialState == 'unavailable') ...[
+                  Text(
+                    _settings.credentialState == 'interrupted'
+                        ? '上次密钥保存中断，已清除无法确认的密钥。请重新输入并保存，其他配置已保留。'
+                        : '系统安全存储暂不可用，请解锁系统凭据服务后重新读取配置。',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: colorScheme.error),
+                  ),
+                  const _SettingsFieldGap(),
+                ],
                 _SettingsLabeledField(
                   label: 'Base URL',
-                  helper: '需包含 /v1，例如 https://api.example.com/v1',
+                  helper: '填写完整接口地址，例如 https://api.example.com/v1',
                   child: TextField(
+                    key: const ValueKey('ai-base-url'),
                     controller: _baseUrlController,
                     enabled: enabled,
-                    decoration: const InputDecoration(
-                      hintText: 'https://api.openai.com/v1',
+                    onChanged: (value) =>
+                        _formController.edit(AiSettingsField.baseUrl, value),
+                    decoration: InputDecoration(
+                      hintText: 'https://api.example.com/v1',
+                      errorText: form.errors[AiSettingsField.baseUrl],
                     ),
                   ),
                 ),
                 const _SettingsFieldGap(),
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    final wide = constraints.maxWidth >= 640;
+                    final wide =
+                        constraints.maxWidth >=
+                        640 * MediaQuery.textScalerOf(context).scale(1);
                     final modelField = _SettingsLabeledField(
                       label: '模型',
                       child: TextField(
+                        key: const ValueKey('ai-model'),
                         controller: _modelController,
                         enabled: enabled,
-                        decoration: const InputDecoration(
-                          hintText: '例如 grok-4.5',
+                        onChanged: (value) =>
+                            _formController.edit(AiSettingsField.model, value),
+                        decoration: InputDecoration(
+                          hintText: '服务商提供的模型名称',
+                          errorText: form.errors[AiSettingsField.model],
                         ),
                       ),
                     );
@@ -2260,7 +2450,10 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
                           ? '留空继续使用已保存密钥；输入新密钥会覆盖。'
                           : '密钥只保存在系统安全存储中，不会写入数据库。',
                       child: TextField(
+                        key: const ValueKey('ai-api-key'),
                         controller: _apiKeyController,
+                        onChanged: (value) =>
+                            _formController.edit(AiSettingsField.apiKey, value),
                         enabled: enabled,
                         obscureText: !_showApiKey,
                         decoration: InputDecoration(
@@ -2304,196 +2497,248 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
             ),
           ),
           const _SettingsFieldGap(size: AppSpacing.x5),
-          _SettingsGroup(
-            icon: Icons.tune_outlined,
-            title: '生成参数',
-            subtitle: '控制回答风格和长度。',
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final wide = constraints.maxWidth >= 640;
-                final temperature = _SettingsLabeledField(
-                  label: 'Temperature',
-                  helper: '建议 0 到 1，越高越发散',
-                  child: TextField(
-                    controller: _temperatureController,
-                    enabled: enabled,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(hintText: '0.2'),
-                  ),
-                );
-                final maxTokens = _SettingsLabeledField(
-                  label: 'Max tokens',
-                  helper: '限制单次回答长度',
-                  child: TextField(
-                    controller: _maxTokensController,
-                    enabled: enabled,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(hintText: '1200'),
-                  ),
-                );
-                if (!wide) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      temperature,
-                      const _SettingsFieldGap(),
-                      maxTokens,
-                    ],
-                  );
-                }
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          _buildActions(form),
+          const Divider(height: AppSpacing.x8),
+          ExpansionTile(
+            controller: _advancedController,
+            initiallyExpanded: form.hasAdvancedErrors,
+            maintainState: true,
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(top: AppSpacing.x4),
+            shape: const Border(),
+            collapsedShape: const Border(),
+            title: const Text('高级设置'),
+            subtitle: const Text('生成参数、请求行为和系统提示词'),
+            children: [
+              _AiSettingsGroup(
+                icon: Icons.tune_outlined,
+                title: '生成参数',
+                subtitle: '控制回答风格和长度。',
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide =
+                        constraints.maxWidth >=
+                        640 * MediaQuery.textScalerOf(context).scale(1);
+                    final temperature = _SettingsLabeledField(
+                      label: 'Temperature',
+                      helper: '建议 0 到 1，越高越发散',
+                      child: TextField(
+                        key: const ValueKey('ai-temperature'),
+                        controller: _temperatureController,
+                        enabled: enabled,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onChanged: (value) => _formController.edit(
+                          AiSettingsField.temperature,
+                          value,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: '0.2',
+                          errorText: form.errors[AiSettingsField.temperature],
+                        ),
+                      ),
+                    );
+                    final maxTokens = _SettingsLabeledField(
+                      label: 'Max tokens',
+                      helper: '限制单次回答长度',
+                      child: TextField(
+                        key: const ValueKey('ai-max-tokens'),
+                        controller: _maxTokensController,
+                        enabled: enabled,
+                        keyboardType: TextInputType.number,
+                        onChanged: (value) => _formController.edit(
+                          AiSettingsField.maxTokens,
+                          value,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: '1200',
+                          errorText: form.errors[AiSettingsField.maxTokens],
+                        ),
+                      ),
+                    );
+                    if (!wide) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          temperature,
+                          const _SettingsFieldGap(),
+                          maxTokens,
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: temperature),
+                        const SizedBox(width: AppSpacing.x4),
+                        Expanded(child: maxTokens),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              const _SettingsFieldGap(size: AppSpacing.x5),
+              _AiSettingsGroup(
+                icon: Icons.shield_outlined,
+                title: '请求行为',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(child: temperature),
-                    const SizedBox(width: AppSpacing.x4),
-                    Expanded(child: maxTokens),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('流式显示回答'),
+                      subtitle: Text(
+                        '边生成边显示，可随时取消',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.textSecondary,
+                        ),
+                      ),
+                      value: _settings.streaming,
+                      onChanged: enabled ? _formController.setStreaming : null,
+                    ),
+                    const Divider(height: AppSpacing.x6),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('每次请求前确认上下文'),
+                      subtitle: Text(
+                        '默认关闭；开启后每次发送前弹出确认框',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.textSecondary,
+                        ),
+                      ),
+                      value: _settings.confirmBeforeRequest,
+                      onChanged: enabled
+                          ? _formController.setConfirmBeforeRequest
+                          : null,
+                    ),
+                    const _SettingsFieldGap(),
+                    _SettingsLabeledField(
+                      label: '默认系统提示词',
+                      helper: '可留空；不会自动加入书籍正文',
+                      child: TextField(
+                        key: const ValueKey('ai-system-prompt'),
+                        controller: _systemPromptController,
+                        onChanged: (value) => _formController.edit(
+                          AiSettingsField.systemPrompt,
+                          value,
+                        ),
+                        enabled: enabled,
+                        minLines: 3,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          hintText: '你是一个克制、准确的阅读助手…',
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                    ),
                   ],
-                );
-              },
-            ),
-          ),
-          const _SettingsFieldGap(size: AppSpacing.x5),
-          _SettingsGroup(
-            icon: Icons.shield_outlined,
-            title: '请求行为',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('流式显示回答'),
-                  subtitle: Text(
-                    '边生成边显示，可随时取消',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.textSecondary,
-                    ),
-                  ),
-                  value: _settings.streaming,
-                  onChanged: enabled
-                      ? (value) => setState(
-                          () =>
-                              _settings = _settings.copyWith(streaming: value),
-                        )
-                      : null,
                 ),
-                const Divider(height: AppSpacing.x6),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('每次请求前确认上下文'),
-                  subtitle: Text(
-                    '默认关闭；开启后每次发送前弹出确认框',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.textSecondary,
-                    ),
-                  ),
-                  value: _settings.confirmBeforeRequest,
-                  onChanged: enabled
-                      ? (value) => setState(
-                          () => _settings = _settings.copyWith(
-                            confirmBeforeRequest: value,
-                          ),
-                        )
-                      : null,
-                ),
-                const _SettingsFieldGap(),
-                _SettingsLabeledField(
-                  label: '默认系统提示词',
-                  helper: '可留空；不会自动加入书籍正文',
-                  child: TextField(
-                    controller: _systemPromptController,
-                    enabled: enabled,
-                    minLines: 3,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      hintText: '你是一个克制、准确的阅读助手…',
-                      alignLabelWithHint: true,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_connectionMessage != null) ...[
-            const _SettingsFieldGap(size: AppSpacing.x4),
-            AppStatusBanner(
-              icon: _connectionMessage!.contains('成功')
-                  ? Icons.check_circle_outline
-                  : Icons.error_outline,
-              message: _connectionMessage!,
-              tone: _connectionMessage!.contains('成功')
-                  ? AppStatusTone.neutral
-                  : AppStatusTone.danger,
-            ),
-          ],
-          const _SettingsFieldGap(size: AppSpacing.x5),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Wrap(
-              spacing: AppSpacing.x2,
-              runSpacing: AppSpacing.x2,
-              alignment: WrapAlignment.end,
-              children: [
-                OutlinedButton(
-                  onPressed: _settings.hasApiKey ? _confirmClearApiKey : null,
-                  child: const Text('清除密钥'),
-                ),
-                OutlinedButton(
-                  onPressed: (!enabled || _testingConnection)
-                      ? null
-                      : _testConnection,
-                  child: _testingConnection
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('连接测试'),
-                ),
-                FilledButton(
-                  onPressed: enabled ? _save : null,
-                  child: const Text('保存 AI 设置'),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Future<void> _save() async {
-    final apiKey = _apiKeyController.text.trim();
-    await ref
-        .read(aiSettingsControllerProvider)
-        .save(
-          _settings.copyWith(
-            baseUrl: _baseUrlController.text.trim(),
-            model: _modelController.text.trim(),
-            temperature:
-                double.tryParse(_temperatureController.text.trim()) ??
-                _settings.temperature,
-            maxTokens:
-                int.tryParse(_maxTokensController.text.trim()) ??
-                _settings.maxTokens,
-            systemPrompt: _systemPromptController.text.trim(),
+  Widget _buildActions(AiSettingsFormState form) {
+    final feedback = form.feedback;
+    final status = switch (form.operation) {
+      AiSettingsOperation.saving => '正在保存配置…',
+      AiSettingsOperation.savingForTest => '正在保存配置，随后测试…',
+      AiSettingsOperation.testing => '配置已保存，正在测试连接…',
+      AiSettingsOperation.toggling => '正在更新 AI 开关…',
+      AiSettingsOperation.clearing => '正在清除密钥…',
+      AiSettingsOperation.idle when form.isDirty => '有未保存的更改',
+      AiSettingsOperation.idle when form.saved?.baseUrl.isEmpty ?? true =>
+        '填写连接信息后保存',
+      AiSettingsOperation.idle => '当前配置已保存',
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: AppSpacing.x3,
+          runSpacing: AppSpacing.x2,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(status, style: Theme.of(context).textTheme.bodyMedium),
+            if (form.isDirty)
+              TextButton(
+                onPressed: form.isBusy ? null : _formController.discardChanges,
+                child: const Text('放弃更改'),
+              ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.x3),
+        Wrap(
+          spacing: AppSpacing.x2,
+          runSpacing: AppSpacing.x2,
+          children: [
+            FilledButton(
+              onPressed: !form.isBusy && form.isDirty
+                  ? () => _formController.save()
+                  : null,
+              child: Text(
+                form.operation == AiSettingsOperation.saving
+                    ? '保存中…'
+                    : '保存 AI 设置',
+              ),
+            ),
+            OutlinedButton(
+              onPressed: form.enabled && !form.isBusy
+                  ? () => _formController.save(testConnection: true)
+                  : null,
+              child: Text(switch (form.operation) {
+                AiSettingsOperation.savingForTest => '正在保存配置…',
+                AiSettingsOperation.testing => '正在测试连接…',
+                _ => '保存并测试',
+              }),
+            ),
+            TextButton(
+              onPressed: _settings.hasApiKey && !form.isBusy
+                  ? _confirmClearApiKey
+                  : null,
+              child: const Text('清除密钥'),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.x2),
+        Text(
+          '连接测试会先保存当前配置，不会发送书籍正文。',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.textSecondary,
           ),
-          apiKey: apiKey.isEmpty ? null : apiKey,
-        );
-    _apiKeyController.clear();
-    if (apiKey.isNotEmpty) {
-      setState(() => _settings = _settings.copyWith(hasApiKey: true));
-    }
-    ref.invalidate(aiSettingsProvider);
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('AI 设置已保存')));
+        ),
+        if (form.isBusy) ...[
+          const SizedBox(height: AppSpacing.x3),
+          LinearProgressIndicator(semanticsLabel: status),
+        ],
+        if (feedback != null) ...[
+          const SizedBox(height: AppSpacing.x3),
+          Semantics(
+            liveRegion: true,
+            child: AppStatusBanner(
+              icon: switch (feedback.kind) {
+                AiSettingsFeedbackKind.success => Icons.check_circle_outline,
+                AiSettingsFeedbackKind.error => Icons.error_outline,
+                AiSettingsFeedbackKind.info => Icons.info_outline,
+              },
+              message: feedback.message,
+              tone: feedback.kind == AiSettingsFeedbackKind.error
+                  ? AppStatusTone.danger
+                  : AppStatusTone.neutral,
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   Future<void> _confirmClearApiKey() async {
+    if (_confirmingClear || _form.isBusy) return;
+    _confirmingClear = true;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2511,39 +2756,53 @@ final class _AiSettingsCardState extends ConsumerState<_AiSettingsCard> {
         ],
       ),
     );
-    if (confirmed != true) {
+    _confirmingClear = false;
+    if (confirmed != true || !mounted) {
       return;
     }
-    await ref.read(aiSettingsControllerProvider).clearApiKey();
-    _apiKeyController.clear();
-    setState(() => _settings = _settings.copyWith(hasApiKey: false));
-    ref.invalidate(aiSettingsProvider);
+    await _formController.clearApiKey();
   }
+}
 
-  Future<void> _testConnection() async {
-    await _save();
-    setState(() {
-      _testingConnection = true;
-      _connectionMessage = null;
-    });
-    try {
-      final status = await ref.read(aiChatServiceProvider).testConnection();
-      setState(
-        () => _connectionMessage = switch (status) {
-          AiProviderStatus.ready => '连接测试成功',
-          AiProviderStatus.missingConfiguration => '请先填写 Base URL 和模型',
-          AiProviderStatus.missingApiKey => '请先保存 API Key',
-          AiProviderStatus.unavailable => '连接测试失败，请检查 Provider 设置',
-        },
-      );
-    } on AiChatException catch (error) {
-      setState(() => _connectionMessage = error.message);
-    } catch (_) {
-      setState(() => _connectionMessage = '连接测试失败');
-    } finally {
-      if (mounted) {
-        setState(() => _testingConnection = false);
-      }
-    }
+final class _AiSettingsGroup extends StatelessWidget {
+  const _AiSettingsGroup({
+    required this.icon,
+    required this.title,
+    required this.child,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 18, color: theme.colorScheme.primary),
+            const SizedBox(width: AppSpacing.x2),
+            Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+          ],
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: AppSpacing.x2),
+          Text(
+            subtitle!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.textSecondary,
+            ),
+          ),
+        ],
+        const SizedBox(height: AppSpacing.x4),
+        child,
+      ],
+    );
   }
 }

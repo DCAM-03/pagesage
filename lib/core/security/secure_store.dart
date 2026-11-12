@@ -1,14 +1,22 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-final class SecureStore {
+class SecureStore {
   SecureStore({FlutterSecureStorage? storage})
-    : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage(),
+      _memory = null;
 
-  final FlutterSecureStorage _storage;
+  SecureStore.memory({Map<String, String>? seed})
+    : _storage = null,
+      _memory = {...?seed};
+
+  final FlutterSecureStorage? _storage;
+  final Map<String, String>? _memory;
 
   Future<String?> read(String key) async {
+    final memory = _memory;
+    if (memory != null) return memory[key];
     try {
-      return await _storage.read(key: key);
+      return await _storage!.read(key: key);
     } on Object catch (error) {
       throw SecureStoreException.read(error);
     }
@@ -20,16 +28,26 @@ final class SecureStore {
   }
 
   Future<void> write(String key, String value) async {
+    final memory = _memory;
+    if (memory != null) {
+      memory[key] = value;
+      return;
+    }
     try {
-      await _storage.write(key: key, value: value);
+      await _storage!.write(key: key, value: value);
     } on Object catch (error) {
       throw SecureStoreException.write(error);
     }
   }
 
   Future<void> delete(String key) async {
+    final memory = _memory;
+    if (memory != null) {
+      memory.remove(key);
+      return;
+    }
     try {
-      await _storage.delete(key: key);
+      await _storage!.delete(key: key);
     } on Object catch (error) {
       throw SecureStoreException.delete(error);
     }

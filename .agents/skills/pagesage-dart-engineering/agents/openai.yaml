@@ -1,0 +1,6 @@
+interface:
+  display_name: "PageSage Dart / Flutter"
+  short_description: "实施阅读器功能，核对 Dart 异步、状态、数据迁移及渲染边界"
+  default_prompt: "使用 $pagesage-dart-engineering 完成本次功能或修复，并验证受影响行为。"
+policy:
+  allow_implicit_invocation: true

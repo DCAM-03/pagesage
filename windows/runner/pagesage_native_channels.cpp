@@ -10,20 +10,22 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pdf_render_budget.h"
+
 // WinRT PDF raster + OCR. Requires Windows 10+ and linked WindowsApp.lib.
 // IMPORTANT: Flutter platform channels run on an STA UI thread. Blocking
 // WinRT .get() on that thread asserts (!is_sta_thread). All WinRT work is
 // dispatched to a dedicated MTA worker thread.
 #include <windows.h>
-#include <winrt/base.h>
 #include <winrt/Windows.Data.Pdf.h>
-#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Globalization.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Media.Ocr.h>
-#include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.Storage.h>
+#include <winrt/base.h>
 
 namespace {
 
@@ -35,8 +37,8 @@ std::wstring Utf8ToWide(const std::string& value) {
   if (value.empty()) {
     return std::wstring();
   }
-  const int size = MultiByteToWideChar(CP_UTF8, 0, value.c_str(),
-                                       static_cast<int>(value.size()), nullptr, 0);
+  const int size = MultiByteToWideChar(
+      CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0);
   std::wstring result(size, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
                       result.data(), size);
@@ -48,8 +50,8 @@ std::string WideToUtf8(const std::wstring& value) {
     return std::string();
   }
   const int size = WideCharToMultiByte(CP_UTF8, 0, value.c_str(),
-                                       static_cast<int>(value.size()), nullptr, 0,
-                                       nullptr, nullptr);
+                                       static_cast<int>(value.size()), nullptr,
+                                       0, nullptr, nullptr);
   std::string result(size, '\0');
   WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
                       result.data(), size, nullptr, nullptr);
@@ -64,7 +66,8 @@ const std::string* ReadString(const EncodableMap& map, const char* key) {
   return std::get_if<std::string>(&it->second);
 }
 
-const std::vector<uint8_t>* ReadBytes(const EncodableMap& map, const char* key) {
+const std::vector<uint8_t>* ReadBytes(const EncodableMap& map,
+                                      const char* key) {
   const auto it = map.find(EncodableValue(key));
   if (it == map.end()) {
     return nullptr;
@@ -96,10 +99,9 @@ std::mutex g_pdf_cache_mutex;
 std::unordered_map<std::string, std::shared_ptr<CachedPdfDocument>> g_pdf_cache;
 
 std::mutex g_ocr_engine_mutex;
-winrt::Windows::Media::Ocr::OcrEngine g_ocr_engine_zh{nullptr};
-winrt::Windows::Media::Ocr::OcrEngine g_ocr_engine_profile{nullptr};
-bool g_ocr_zh_tried = false;
-bool g_ocr_profile_tried = false;
+std::unordered_map<std::string, winrt::Windows::Media::Ocr::OcrEngine>
+    g_ocr_engines;
+std::mutex g_ocr_recognition_mutex;
 
 bool GetFileLastWrite(const std::wstring& path, FILETIME* out) {
   const HANDLE handle =
@@ -133,13 +135,15 @@ std::shared_ptr<CachedPdfDocument> GetOrOpenPdf(const std::string& path) {
   {
     std::lock_guard<std::mutex> lock(g_pdf_cache_mutex);
     const auto it = g_pdf_cache.find(path);
-    if (it != g_pdf_cache.end() && SameFileTime(it->second->last_write, write)) {
+    if (it != g_pdf_cache.end() &&
+        SameFileTime(it->second->last_write, write)) {
       return it->second;
     }
   }
 
   auto file =
-      winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(wide_path).get();
+      winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(wide_path)
+          .get();
   auto document =
       winrt::Windows::Data::Pdf::PdfDocument::LoadFromFileAsync(file).get();
   auto cached = std::make_shared<CachedPdfDocument>();
@@ -153,25 +157,10 @@ std::shared_ptr<CachedPdfDocument> GetOrOpenPdf(const std::string& path) {
   return cached;
 }
 
-void ComputeOutputSize(double page_width, double page_height, int32_t dpi,
-                       int32_t max_edge, uint32_t* out_width,
-                       uint32_t* out_height) {
-  const double scale = static_cast<double>(dpi) / 72.0;
-  double width = page_width * scale;
-  double height = page_height * scale;
-  const double longest = width > height ? width : height;
-  if (longest > static_cast<double>(max_edge) && longest > 0) {
-    const double factor = static_cast<double>(max_edge) / longest;
-    width *= factor;
-    height *= factor;
-  }
-  *out_width = static_cast<uint32_t>(width < 1.0 ? 1.0 : width);
-  *out_height = static_cast<uint32_t>(height < 1.0 ? 1.0 : height);
-}
-
 winrt::Windows::Graphics::Imaging::SoftwareBitmap RenderPageBitmap(
     const std::shared_ptr<CachedPdfDocument>& cached, int32_t page_number,
-    int32_t dpi, int32_t max_edge, uint32_t* out_width, uint32_t* out_height) {
+    int32_t dpi, int32_t max_edge, int32_t max_pixels, uint32_t* out_width,
+    uint32_t* out_height) {
   std::lock_guard<std::mutex> lock(cached->mutex);
   auto document = cached->document;
   if (page_number < 1 ||
@@ -181,8 +170,8 @@ winrt::Windows::Graphics::Imaging::SoftwareBitmap RenderPageBitmap(
 
   auto page = document.GetPage(static_cast<uint32_t>(page_number - 1));
   const auto size = page.Size();
-  ComputeOutputSize(size.Width, size.Height, dpi, max_edge, out_width,
-                    out_height);
+  pagesage::ComputeOutputSize(size.Width, size.Height, dpi, max_edge,
+                              max_pixels, out_width, out_height);
 
   winrt::Windows::Data::Pdf::PdfPageRenderOptions options;
   options.DestinationWidth(*out_width);
@@ -211,10 +200,9 @@ std::vector<uint8_t> EncodeBitmap(
   const auto encoder_id =
       jpeg ? winrt::Windows::Graphics::Imaging::BitmapEncoder::JpegEncoderId()
            : winrt::Windows::Graphics::Imaging::BitmapEncoder::PngEncoderId();
-  auto encoder =
-      winrt::Windows::Graphics::Imaging::BitmapEncoder::CreateAsync(
-          encoder_id, encoder_stream)
-          .get();
+  auto encoder = winrt::Windows::Graphics::Imaging::BitmapEncoder::CreateAsync(
+                     encoder_id, encoder_stream)
+                     .get();
   encoder.SetSoftwareBitmap(software_bitmap);
   if (jpeg) {
     // Quality 0-1 for BitmapPropertySet is not used here; Jpeg encoder uses
@@ -239,6 +227,7 @@ EncodableMap RenderPdfPage(const EncodableMap& args) {
   const int32_t page_number = ReadInt(args, "pageNumber", 0);
   const int32_t dpi = ReadInt(args, "dpi", 200);
   const int32_t max_edge = ReadInt(args, "maxEdge", 2200);
+  const int32_t max_pixels = ReadInt(args, "maxPixels", 5000000);
   const std::string* format_ptr = ReadString(args, "format");
   const bool jpeg =
       format_ptr == nullptr || format_ptr->empty() || *format_ptr == "jpeg";
@@ -250,8 +239,8 @@ EncodableMap RenderPdfPage(const EncodableMap& args) {
   auto cached = GetOrOpenPdf(*path);
   uint32_t out_width = 0;
   uint32_t out_height = 0;
-  auto software_bitmap =
-      RenderPageBitmap(cached, page_number, dpi, max_edge, &out_width, &out_height);
+  auto software_bitmap = RenderPageBitmap(cached, page_number, dpi, max_edge,
+                                          max_pixels, &out_width, &out_height);
   auto bytes = EncodeBitmap(software_bitmap, jpeg, quality);
 
   EncodableMap result;
@@ -263,53 +252,27 @@ EncodableMap RenderPdfPage(const EncodableMap& args) {
   return result;
 }
 
-bool PrefersChinese(const std::string& language_hint) {
-  std::string lower = language_hint;
-  for (char& ch : lower) {
-    ch = static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
-  }
-  return lower.rfind("zh", 0) == 0 || lower.find("hans") != std::string::npos ||
-         lower.find("hant") != std::string::npos ||
-         lower.find("chinese") != std::string::npos;
-}
-
-winrt::Windows::Media::Ocr::OcrEngine GetOcrEngine(bool prefer_chinese) {
+winrt::Windows::Media::Ocr::OcrEngine GetOcrEngine(
+    const std::string& language_hint) {
   std::lock_guard<std::mutex> lock(g_ocr_engine_mutex);
-  if (prefer_chinese) {
-    if (!g_ocr_zh_tried) {
-      g_ocr_zh_tried = true;
-      try {
-        winrt::Windows::Globalization::Language language(L"zh-Hans");
-        if (winrt::Windows::Media::Ocr::OcrEngine::IsLanguageSupported(
-                language)) {
-          g_ocr_engine_zh =
-              winrt::Windows::Media::Ocr::OcrEngine::TryCreateFromLanguage(
-                  language);
-        }
-      } catch (...) {
-        g_ocr_engine_zh = nullptr;
-      }
-    }
-    if (g_ocr_engine_zh) {
-      return g_ocr_engine_zh;
-    }
+  const auto found = g_ocr_engines.find(language_hint);
+  if (found != g_ocr_engines.end()) return found->second;
+  const winrt::Windows::Globalization::Language language(
+      winrt::to_hstring(language_hint));
+  if (!winrt::Windows::Media::Ocr::OcrEngine::IsLanguageSupported(language)) {
+    throw std::runtime_error("ocr_language_unavailable");
   }
-  if (!g_ocr_profile_tried) {
-    g_ocr_profile_tried = true;
-    try {
-      g_ocr_engine_profile = winrt::Windows::Media::Ocr::OcrEngine::
-          TryCreateFromUserProfileLanguages();
-    } catch (...) {
-      g_ocr_engine_profile = nullptr;
-    }
-  }
-  return g_ocr_engine_profile;
+  auto engine =
+      winrt::Windows::Media::Ocr::OcrEngine::TryCreateFromLanguage(language);
+  if (engine) g_ocr_engines.emplace(language_hint, engine);
+  return engine;
 }
 
 EncodableMap OcrSoftwareBitmap(
     const winrt::Windows::Graphics::Imaging::SoftwareBitmap& software_bitmap,
     const std::string& language_hint) {
-  auto engine = GetOcrEngine(PrefersChinese(language_hint));
+  std::lock_guard<std::mutex> lock(g_ocr_recognition_mutex);
+  auto engine = GetOcrEngine(language_hint);
   if (!engine) {
     throw std::runtime_error("ocr_unavailable");
   }
@@ -317,14 +280,10 @@ EncodableMap OcrSoftwareBitmap(
   const std::wstring text_wide = ocr_result.Text().c_str();
   const std::string text = WideToUtf8(text_wide);
 
-  const double image_width =
-      static_cast<double>(software_bitmap.PixelWidth() < 1
-                              ? 1
-                              : software_bitmap.PixelWidth());
-  const double image_height =
-      static_cast<double>(software_bitmap.PixelHeight() < 1
-                              ? 1
-                              : software_bitmap.PixelHeight());
+  const double image_width = static_cast<double>(
+      software_bitmap.PixelWidth() < 1 ? 1 : software_bitmap.PixelWidth());
+  const double image_height = static_cast<double>(
+      software_bitmap.PixelHeight() < 1 ? 1 : software_bitmap.PixelHeight());
 
   EncodableList blocks;
   try {
@@ -358,10 +317,8 @@ EncodableMap OcrSoftwareBitmap(
           any = true;
         }
         if (any && max_x > min_x && max_y > min_y) {
-          block[EncodableValue("left")] =
-              EncodableValue((min_x / image_width));
-          block[EncodableValue("top")] =
-              EncodableValue((min_y / image_height));
+          block[EncodableValue("left")] = EncodableValue((min_x / image_width));
+          block[EncodableValue("top")] = EncodableValue((min_y / image_height));
           block[EncodableValue("width")] =
               EncodableValue(((max_x - min_x) / image_width));
           block[EncodableValue("height")] =
@@ -379,7 +336,8 @@ EncodableMap OcrSoftwareBitmap(
   EncodableMap result;
   result[EncodableValue("text")] = EncodableValue(text);
   result[EncodableValue("engine")] = EncodableValue(std::string("winrt"));
-  result[EncodableValue("language")] = EncodableValue(language_hint);
+  result[EncodableValue("language")] = EncodableValue(
+      winrt::to_string(engine.RecognizerLanguage().LanguageTag()));
   result[EncodableValue("imageWidth")] =
       EncodableValue(static_cast<int32_t>(software_bitmap.PixelWidth()));
   result[EncodableValue("imageHeight")] =
@@ -395,7 +353,10 @@ EncodableMap RecognizePdfPage(const EncodableMap& args) {
   }
   const int32_t page_number = ReadInt(args, "pageNumber", 0);
   const int32_t dpi = ReadInt(args, "dpi", 200);
-  const int32_t max_edge = ReadInt(args, "maxEdge", 2200);
+  const int32_t max_edge =
+      (std::min)(ReadInt(args, "maxEdge", 2200),
+                 static_cast<int32_t>(winrt::Windows::Media::Ocr::OcrEngine::
+                                          MaxImageDimension()));
   const std::string* language_hint_ptr = ReadString(args, "languageHint");
   const std::string language_hint =
       language_hint_ptr == nullptr || language_hint_ptr->empty()
@@ -408,8 +369,8 @@ EncodableMap RecognizePdfPage(const EncodableMap& args) {
   auto cached = GetOrOpenPdf(*path);
   uint32_t out_width = 0;
   uint32_t out_height = 0;
-  auto software_bitmap =
-      RenderPageBitmap(cached, page_number, dpi, max_edge, &out_width, &out_height);
+  auto software_bitmap = RenderPageBitmap(cached, page_number, dpi, max_edge,
+                                          5000000, &out_width, &out_height);
   (void)out_width;
   (void)out_height;
   return OcrSoftwareBitmap(software_bitmap, language_hint);
@@ -426,8 +387,7 @@ EncodableMap RecognizeImage(const EncodableMap& args) {
           ? "zh-Hans"
           : *language_hint_ptr;
 
-  auto stream =
-      winrt::Windows::Storage::Streams::InMemoryRandomAccessStream();
+  auto stream = winrt::Windows::Storage::Streams::InMemoryRandomAccessStream();
   auto writer = winrt::Windows::Storage::Streams::DataWriter(stream);
   writer.WriteBytes(*image_bytes);
   writer.StoreAsync().get();
@@ -437,18 +397,32 @@ EncodableMap RecognizeImage(const EncodableMap& args) {
   auto decoder =
       winrt::Windows::Graphics::Imaging::BitmapDecoder::CreateAsync(stream)
           .get();
+  uint32_t width = 0;
+  uint32_t height = 0;
+  pagesage::ComputeOutputSize(
+      decoder.PixelWidth(), decoder.PixelHeight(), 72,
+      static_cast<int32_t>(
+          winrt::Windows::Media::Ocr::OcrEngine::MaxImageDimension()),
+      5000000, &width, &height);
+  winrt::Windows::Graphics::Imaging::BitmapTransform transform;
+  transform.ScaledWidth(width);
+  transform.ScaledHeight(height);
   auto software_bitmap =
       decoder
           .GetSoftwareBitmapAsync(
               winrt::Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8,
-              winrt::Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied)
+              winrt::Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied,
+              transform,
+              winrt::Windows::Graphics::Imaging::ExifOrientationMode::
+                  IgnoreExifOrientation,
+              winrt::Windows::Graphics::Imaging::ColorManagementMode::
+                  DoNotColorManage)
           .get();
   return OcrSoftwareBitmap(software_bitmap, language_hint);
 }
 
-void ReplySuccess(
-    std::shared_ptr<flutter::MethodResult<EncodableValue>> result,
-    EncodableValue value) {
+void ReplySuccess(std::shared_ptr<flutter::MethodResult<EncodableValue>> result,
+                  EncodableValue value) {
   result->Success(std::move(value));
 }
 
@@ -464,15 +438,17 @@ void HandleRasterCall(
     result->NotImplemented();
     return;
   }
-  const auto* args_ptr = std::get_if<EncodableMap>(call.arguments());
+  const auto* args_ptr = call.arguments() == nullptr
+                             ? nullptr
+                             : std::get_if<EncodableMap>(call.arguments());
   if (args_ptr == nullptr) {
     result->Error("render_failed", "missing arguments");
     return;
   }
   // Copy args so the worker thread owns them.
   const EncodableMap args = *args_ptr;
-  auto shared = std::shared_ptr<flutter::MethodResult<EncodableValue>>(
-      std::move(result));
+  auto shared =
+      std::shared_ptr<flutter::MethodResult<EncodableValue>>(std::move(result));
 
   std::thread([args, shared]() {
     try {
@@ -501,48 +477,47 @@ void HandleRasterCall(
 void HandleOcrCall(
     const flutter::MethodCall<EncodableValue>& call,
     std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
-  if (call.method_name() == "supportedLanguages") {
-    EncodableList languages;
-    languages.emplace_back(std::string("en"));
-    languages.emplace_back(std::string("zh-Hans"));
-    result->Success(EncodableValue(languages));
-    return;
-  }
-
-  auto shared = std::shared_ptr<flutter::MethodResult<EncodableValue>>(
-      std::move(result));
+  auto shared =
+      std::shared_ptr<flutter::MethodResult<EncodableValue>>(std::move(result));
   const std::string method = call.method_name();
   EncodableMap args;
-  if (const auto* args_ptr = std::get_if<EncodableMap>(call.arguments())) {
+  if (const auto* args_ptr =
+          call.arguments() == nullptr
+              ? nullptr
+              : std::get_if<EncodableMap>(call.arguments())) {
     args = *args_ptr;
   }
 
-  if (method == "isAvailable") {
-    std::thread([shared]() {
+  if (method == "isAvailable" || method == "supportedLanguages") {
+    std::thread([shared, method]() {
       try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
       } catch (...) {
       }
       try {
-        auto engine = GetOcrEngine(true);
-        if (!engine) {
-          engine = GetOcrEngine(false);
+        const auto installed = winrt::Windows::Media::Ocr::OcrEngine::
+            AvailableRecognizerLanguages();
+        if (method == "isAvailable") {
+          ReplySuccess(shared, EncodableValue(installed.Size() > 0));
+        } else {
+          EncodableList languages;
+          for (const auto& language : installed) {
+            languages.emplace_back(winrt::to_string(language.LanguageTag()));
+          }
+          ReplySuccess(shared, EncodableValue(languages));
         }
-        ReplySuccess(shared, EncodableValue(engine != nullptr));
       } catch (...) {
-        ReplySuccess(shared, EncodableValue(false));
+        ReplySuccess(shared, method == "isAvailable"
+                                 ? EncodableValue(false)
+                                 : EncodableValue(EncodableList{}));
       }
     }).detach();
     return;
   }
 
   if (method == "recognizePdfPage") {
-    if (!std::holds_alternative<EncodableMap>(*call.arguments()) &&
-        call.arguments() != nullptr) {
-      ReplyError(shared, "ocr_failed", "missing arguments");
-      return;
-    }
-    if (call.arguments() == nullptr) {
+    if (call.arguments() == nullptr ||
+        !std::holds_alternative<EncodableMap>(*call.arguments())) {
       ReplyError(shared, "ocr_failed", "missing arguments");
       return;
     }
@@ -556,7 +531,10 @@ void HandleOcrCall(
         ReplySuccess(shared, EncodableValue(payload));
       } catch (const std::exception& error) {
         const std::string message = error.what();
-        if (message == "ocr_unavailable") {
+        if (message == "ocr_language_unavailable") {
+          ReplyError(shared, "ocr_language_unavailable",
+                     "Install the requested OCR language in Windows Settings");
+        } else if (message == "ocr_unavailable") {
           ReplyError(shared, "ocr_unavailable",
                      "Windows OCR engine unavailable");
         } else if (message == "page_out_of_range") {
@@ -594,9 +572,11 @@ void HandleOcrCall(
       ReplySuccess(shared, EncodableValue(payload));
     } catch (const std::exception& error) {
       const std::string message = error.what();
-      if (message == "ocr_unavailable") {
-        ReplyError(shared, "ocr_unavailable",
-                   "Windows OCR engine unavailable");
+      if (message == "ocr_language_unavailable") {
+        ReplyError(shared, "ocr_language_unavailable",
+                   "Install the requested OCR language in Windows Settings");
+      } else if (message == "ocr_unavailable") {
+        ReplyError(shared, "ocr_unavailable", "Windows OCR engine unavailable");
       } else {
         ReplyError(shared, "ocr_failed", message);
       }

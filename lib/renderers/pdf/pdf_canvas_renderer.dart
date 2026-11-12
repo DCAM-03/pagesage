@@ -366,26 +366,46 @@ final class PdfCanvasRenderer {
   Future<Uint8List?> exportPageImage(
     int pageIndex, {
     double targetWidth = 1600,
+    int maxEdge = 2200,
+    int maxPixels = 5000000,
   }) async {
     if (_disposed) return null;
     if (pageIndex < 0 || pageIndex >= pageCount) return null;
     final size = displaySizeOf(pageIndex);
-    if (size.isEmpty) return null;
-    final ratio = (targetWidth / size.width).clamp(0.5, 6.0).toDouble();
+    if (size.isEmpty ||
+        !size.width.isFinite ||
+        !size.height.isFinite ||
+        !targetWidth.isFinite ||
+        targetWidth <= 0 ||
+        maxEdge <= 0 ||
+        maxPixels <= 0) {
+      return null;
+    }
+    final ratio = [
+      targetWidth / size.width,
+      maxEdge / size.width,
+      maxEdge / size.height,
+      math.sqrt(maxPixels / (size.width * size.height)),
+      6.0,
+    ].reduce(math.min);
+    final width = math.max(1, (size.width * ratio).floor());
+    final height = math.max(1, (size.height * ratio).floor());
+    if (width * height > maxPixels) return null;
     ui.Image? image;
     try {
       final page = await renderPage(pageIndex);
       if (page == null) return null;
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+        Paint()..color = Colors.white,
+      );
       canvas.scale(ratio);
       canvas.drawPicture(page.picture);
       page.dispose();
       final picture = recorder.endRecording();
-      image = await picture.toImage(
-        (size.width * ratio).round(),
-        (size.height * ratio).round(),
-      );
+      image = await picture.toImage(width, height);
       picture.dispose();
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       return data?.buffer.asUint8List();

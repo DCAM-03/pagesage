@@ -5,8 +5,11 @@ import 'package:markdown/markdown.dart' as md;
 import 'package:path/path.dart' as p;
 
 import '../../core/files/markdown_source.dart';
+import '../common/code_syntax.dart';
 import '../common/image_size.dart';
+import '../common/math_source.dart';
 import '../epub/epub_document.dart';
+import 'markdown_boundaries.dart';
 
 /// Turns a Markdown file into the document the reader already understands.
 ///
@@ -39,19 +42,21 @@ final class MarkdownParser {
     required String fallbackTitle,
   }) async {
     final source = MarkdownSource.parse(raw);
+    const boundaries = MarkdownBoundary();
+    final prepared = boundaries.prepare(source.body);
     final document = md.Document(
-      // GitHub-flavoured Markdown is what a README or a note is written in:
-      // tables, fenced code, strikethrough and task lists are all part of
-      // the language as people actually use it.
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
+      inlineSyntaxes: boundaries.inlineSyntaxes,
+      blockSyntaxes: <md.BlockSyntax>[boundaries.blockSyntax],
     );
     final nodes = document.parseLines(
-      _repairTableDelimiters(source.body).split('\n'),
+      _repairTableDelimiters(prepared).split('\n'),
     );
     final builder = _DocumentBuilder(
       fallbackTitle: source.title ?? fallbackTitle,
       parser: this,
+      boundaries: boundaries,
     );
     await builder.walk(nodes);
     return builder.finish();
@@ -183,13 +188,19 @@ final class MarkdownParser {
 
 /// Collects chapters, blocks and the table of contents while walking.
 final class _DocumentBuilder {
-  _DocumentBuilder({required this.fallbackTitle, required this.parser});
+  _DocumentBuilder({
+    required this.fallbackTitle,
+    required this.parser,
+    required this.boundaries,
+  });
 
   final String fallbackTitle;
   final MarkdownParser parser;
+  final MarkdownBoundary boundaries;
 
   final List<EpubChapter> _chapters = <EpubChapter>[];
   final List<_TocDraft> _toc = <_TocDraft>[];
+  final Map<String, int> _anchors = <String, int>{};
 
   StringBuffer _text = StringBuffer();
   int _textLength = 0;
@@ -205,9 +216,13 @@ final class _DocumentBuilder {
     }
   }
 
-  Future<void> _walkNode(md.Node node, EpubBlockType type) async {
+  Future<void> _walkNode(
+    md.Node node,
+    EpubBlockType type, {
+    int quoteDepth = 0,
+  }) async {
     if (node is md.Text) {
-      _addText(node.text, type);
+      _addText(node.text, type, quoteDepth: quoteDepth);
       return;
     }
     if (node is! md.Element) {
@@ -215,52 +230,121 @@ final class _DocumentBuilder {
     }
 
     switch (node.tag) {
+      case 'pagesage-safe-boundary':
+        _addBoundary(node);
       case 'h1':
-        final built = _draftFor(node).finish();
-        _startChapter(built.text.trim());
-        _addText(
-          built.text,
-          EpubBlockType.heading,
-          prepared: true,
-          runs: built.runs,
-          headingLevel: 1,
-        );
+        if (quoteDepth > 0) {
+          // A quoted heading is still a heading inside the quotation, but it
+          // must not split the book into a new chapter.
+          _addHeading(node, type, quoteDepth: quoteDepth);
+        } else {
+          final built = _draftFor(node).finish();
+          _startChapter(built.text.trim());
+          _addText(
+            built.text,
+            EpubBlockType.heading,
+            prepared: true,
+            runs: built.runs,
+            headingLevel: 1,
+            quoteDepth: quoteDepth,
+          );
+          _recordHeadingAnchor(built.text);
+        }
       case 'h2':
       case 'h3':
       case 'h4':
       case 'h5':
       case 'h6':
-        _addHeading(node, type);
+        _addHeading(node, type, quoteDepth: quoteDepth);
       case 'p':
-        await _addParagraph(node, type);
+        await _addParagraph(node, type, quoteDepth: quoteDepth);
       case 'ul':
-        await _addList(node, depth: 0, ordered: false, type: type);
+        await _addList(
+          node,
+          depth: 0,
+          ordered: false,
+          type: type,
+          quoteDepth: quoteDepth,
+        );
       case 'ol':
-        await _addList(node, depth: 0, ordered: true, type: type);
+        await _addList(
+          node,
+          depth: 0,
+          ordered: true,
+          type: type,
+          quoteDepth: quoteDepth,
+        );
       case 'blockquote':
         final children = node.children ?? const <md.Node>[];
         for (final child in children) {
-          await _walkNode(child, EpubBlockType.quote);
+          await _walkNode(
+            child,
+            EpubBlockType.quote,
+            quoteDepth: quoteDepth + 1,
+          );
         }
       case 'pre':
-        _addText(_codeText(node), EpubBlockType.code, code: true);
+        _addText(
+          _codeText(node),
+          EpubBlockType.code,
+          code: true,
+          codeLanguage: _codeLanguage(node),
+          quoteDepth: quoteDepth,
+        );
       case 'table':
-        _addTable(node);
+        _addTable(node, quoteDepth: quoteDepth);
       case 'hr':
         // A rule is a mark between two runs of text, and takes no characters
         // of its own, so offsets either side stay what they were.
-        _blocks.add(EpubDividerBlock(startOffset: _textLength));
+        _blocks.add(
+          EpubDividerBlock(startOffset: _textLength, quoteDepth: quoteDepth),
+        );
+      case 'section':
+        if (_classNames(node).contains('footnotes')) {
+          // A rule separates the notes from the prose, as it does in a
+          // printed book. The notes themselves stay ordinary searchable
+          // text, just set smaller.
+          _blocks.add(
+            EpubDividerBlock(startOffset: _textLength, quoteDepth: quoteDepth),
+          );
+          for (final child in node.children ?? const <md.Node>[]) {
+            if (child is md.Element &&
+                (child.tag == 'ol' || child.tag == 'ul')) {
+              await _addList(
+                child,
+                depth: 0,
+                ordered: child.tag == 'ol',
+                type: EpubBlockType.caption,
+                quoteDepth: quoteDepth,
+              );
+            } else {
+              await _walkNode(
+                child,
+                EpubBlockType.caption,
+                quoteDepth: quoteDepth,
+              );
+            }
+          }
+          break;
+        }
+        for (final child in node.children ?? const <md.Node>[]) {
+          await _walkNode(child, type, quoteDepth: quoteDepth);
+        }
       case 'img':
-        await _addImage(node);
+        await _addImage(node, quoteDepth: quoteDepth);
       default:
         final children = node.children ?? const <md.Node>[];
         for (final child in children) {
-          await _walkNode(child, type);
+          await _walkNode(child, type, quoteDepth: quoteDepth);
         }
     }
   }
 
-  void _addHeading(md.Element node, EpubBlockType type) {
+  void _addHeading(
+    md.Element node,
+    EpubBlockType type, {
+    required int quoteDepth,
+  }) {
     final built = _draftFor(node).finish();
     final text = built.text.trim();
     if (text.isEmpty) {
@@ -272,24 +356,92 @@ final class _DocumentBuilder {
       prepared: true,
       runs: built.runs,
       headingLevel: int.tryParse(node.tag.substring(1)),
+      quoteDepth: quoteDepth,
     );
+    _recordHeadingAnchor(text);
     // Level-two headings are the table of contents inside a chapter; deeper
     // ones are structure in the text, not places a reader jumps to.
-    if (node.tag == 'h2') {
+    if (node.tag == 'h2' && quoteDepth == 0) {
       _openToc?.children.add(_TocChild(title: text, offset: _lastBlockStart));
     }
   }
 
-  Future<void> _addParagraph(md.Element node, EpubBlockType type) async {
-    var draft = _InlineDraft();
+  /// Records the link target a heading gets, GitHub-style: lower case,
+  /// punctuation removed, spaces turned into hyphens, duplicates suffixed.
+  ///
+  /// The anchor is a separate map entry; it takes no chapter characters, so
+  /// search, selection and saved offsets stay on the heading's own text.
+  void _recordHeadingAnchor(String text) {
+    final base = _headingSlug(text);
+    var slug = base;
+    var suffix = 1;
+    while (_anchors.containsKey(slug)) {
+      slug = '$base-$suffix';
+      suffix += 1;
+    }
+    _anchors[slug] = _lastBlockStart;
+  }
+
+  void _addBoundary(md.Element node) {
+    final boundary = boundaries.read(node);
+    if (boundary == null) {
+      return;
+    }
+    final blockType = switch (boundary.type) {
+      'math' => EpubBlockType.math,
+      'diagram' || 'mermaid' => EpubBlockType.diagram,
+      _ => EpubBlockType.paragraph,
+    };
+    final label = switch (boundary.type) {
+      'math' => 'LaTeX',
+      'diagram' || 'mermaid' => 'Mermaid',
+      _ => 'HTML',
+    };
+    final text = boundaries.sourceText(node, label: label);
+    if (text.isEmpty) {
+      return;
+    }
+    final start = _appendText(text);
+    final mathSource = blockType == EpubBlockType.math
+        ? MathSource(boundaries.rawText(node)).expression
+        : null;
+    final diagramSource = boundary.type == 'mermaid'
+        ? boundaries.diagramSource(node)
+        : null;
+    _blocks.add(
+      EpubTextBlock(
+        startOffset: start,
+        endOffset: _textLength,
+        text: text,
+        type: blockType,
+        codeLanguage: blockType == EpubBlockType.paragraph ? null : label,
+        mathSource: mathSource,
+        diagramSource: diagramSource,
+      ),
+    );
+    _lastBlockStart = start;
+  }
+
+  Future<void> _addParagraph(
+    md.Element node,
+    EpubBlockType type, {
+    required int quoteDepth,
+  }) async {
+    var draft = _InlineDraft(boundaries: boundaries);
 
     Future<void> flush() async {
       final built = draft.finish();
-      draft = _InlineDraft();
+      draft = _InlineDraft(boundaries: boundaries);
       if (built.text.trim().isEmpty) {
         return;
       }
-      _addText(built.text, type, prepared: true, runs: built.runs);
+      _addText(
+        built.text,
+        type,
+        prepared: true,
+        runs: built.runs,
+        quoteDepth: quoteDepth,
+      );
     }
 
     for (final child in node.children ?? const <md.Node>[]) {
@@ -308,6 +460,7 @@ final class _DocumentBuilder {
     required int depth,
     required bool ordered,
     required EpubBlockType type,
+    required int quoteDepth,
   }) async {
     var index = 1;
     for (final child in list.children ?? const <md.Node>[]) {
@@ -316,11 +469,23 @@ final class _DocumentBuilder {
       }
       final marker = ordered ? '${index++}.' : '•';
       final indent = '  ' * depth;
-      final draft = _InlineDraft();
+      final draft = _InlineDraft(boundaries: boundaries);
       final nested = <md.Element>[];
+      final taskInput = _taskInput(child);
+      final taskChecked = taskInput == null
+          ? null
+          : taskInput.attributes['checked'] != null;
+      final itemMarker = taskChecked == null
+          ? marker
+          : (taskChecked ? '☑' : '☐');
       for (final item in child.children ?? const <md.Node>[]) {
         if (item is md.Element && (item.tag == 'ul' || item.tag == 'ol')) {
           nested.add(item);
+          continue;
+        }
+        if (identical(item, taskInput)) {
+          // The checkbox is drawn from taskChecked; writing its glyph again
+          // here is what used to produce "• ☑ item".
           continue;
         }
         draft.writeNode(item);
@@ -329,7 +494,7 @@ final class _DocumentBuilder {
       if (built.text.isNotEmpty) {
         // The indent is built after collapsing: a nested item's own leading
         // spaces are structure, and the paragraph rule would eat them.
-        final prefix = '$indent$marker ';
+        final prefix = '$indent$itemMarker ';
         _addText(
           '$prefix${built.text}',
           type,
@@ -340,9 +505,21 @@ final class _DocumentBuilder {
                 start: run.start + prefix.length,
                 end: run.end + prefix.length,
                 style: run.style,
+                target: run.target,
               ),
           ],
+          listMarker: '$indent$itemMarker ',
+          listIndent: depth,
+          taskChecked: taskChecked,
+          quoteDepth: quoteDepth,
         );
+        final anchor = child.attributes['id']?.trim();
+        if (anchor != null && anchor.startsWith('fn-')) {
+          // GFM puts the definition's id on its list item. Keeping the
+          // block start here is what lets a reference jump to the note
+          // without searching the rendered text again.
+          _anchors[anchor] = _lastBlockStart;
+        }
       }
       for (final sub in nested) {
         await _addList(
@@ -350,19 +527,26 @@ final class _DocumentBuilder {
           depth: depth + 1,
           ordered: sub.tag == 'ol',
           type: type,
+          quoteDepth: quoteDepth,
         );
       }
     }
   }
 
-  Future<void> _addImage(md.Element node) async {
+  Future<void> _addImage(md.Element node, {int quoteDepth = 0}) async {
     final alt = node.attributes['alt']?.trim();
     final src = node.attributes['src'] ?? '';
     final image = await parser.loadImage(
       src,
       (alt == null || alt.isEmpty) ? null : alt,
     );
-    _blocks.add(EpubImageBlock(startOffset: _textLength, image: image));
+    _blocks.add(
+      EpubImageBlock(
+        startOffset: _textLength,
+        image: image,
+        quoteDepth: quoteDepth,
+      ),
+    );
   }
 
   void _addText(
@@ -372,6 +556,11 @@ final class _DocumentBuilder {
     bool prepared = false,
     List<EpubInlineRun> runs = const <EpubInlineRun>[],
     int? headingLevel,
+    String? listMarker,
+    int listIndent = 0,
+    int quoteDepth = 0,
+    bool? taskChecked,
+    String? codeLanguage,
   }) {
     final text = prepared
         ? raw.trimRight()
@@ -383,6 +572,23 @@ final class _DocumentBuilder {
     // runs only ever arrive with text that was already built to match them.
     assert(prepared || runs.isEmpty, 'inline runs need prepared text');
     final start = _appendText(text);
+    final inlineRuns = <EpubInlineRun>[
+      for (final run in runs)
+        EpubInlineRun(
+          start: run.start + start,
+          end: run.end + start,
+          style: run.style,
+          target: run.target,
+          mathSource: run.mathSource,
+        ),
+    ];
+    final codeRuns = code && !prepared
+        ? const CodeSyntax().tokenize(
+            text,
+            language: codeLanguage,
+            chapterOffset: start,
+          )
+        : const <EpubCodeRun>[];
     _blocks.add(
       EpubTextBlock(
         startOffset: start,
@@ -390,16 +596,17 @@ final class _DocumentBuilder {
         text: text,
         type: type,
         headingLevel: headingLevel,
-        runs: runs.isEmpty
+        listMarker: listMarker,
+        listIndent: listIndent,
+        quoteDepth: quoteDepth,
+        taskChecked: taskChecked,
+        codeLanguage: codeLanguage,
+        runs: inlineRuns.isEmpty
             ? const <EpubInlineRun>[]
-            : <EpubInlineRun>[
-                for (final run in runs)
-                  EpubInlineRun(
-                    start: run.start + start,
-                    end: run.end + start,
-                    style: run.style,
-                  ),
-              ],
+            : List<EpubInlineRun>.unmodifiable(inlineRuns),
+        codeRuns: codeRuns.isEmpty
+            ? const <EpubCodeRun>[]
+            : List<EpubCodeRun>.unmodifiable(codeRuns),
       ),
     );
     _lastBlockStart = start;
@@ -407,7 +614,7 @@ final class _DocumentBuilder {
 
   /// The inline content of [node], with its styling runs.
   _InlineDraft _draftFor(md.Element node) {
-    final draft = _InlineDraft();
+    final draft = _InlineDraft(boundaries: boundaries);
     for (final child in node.children ?? const <md.Node>[]) {
       draft.writeNode(child);
     }
@@ -443,16 +650,21 @@ final class _DocumentBuilder {
   /// A table is drawn as a table, so its cells are kept apart rather than
   /// laid out as lines of text. The words still go into the chapter's text,
   /// which is what keeps search, progress and selection working on it.
-  void _addTable(md.Element node) {
-    final rows = <List<String>>[];
+  void _addTable(md.Element node, {int quoteDepth = 0}) {
+    final rows = <List<EpubTableCell>>[];
+    final alignments = <EpubTableAlignment>[];
     var hasHeader = false;
 
     void collect(md.Node node, {required bool inHead}) {
       if (node is md.Element && node.tag == 'tr') {
-        final cells = <String>[];
+        final cells = <EpubTableCell>[];
         for (final cell in node.children ?? const <md.Node>[]) {
           if (cell is md.Element && (cell.tag == 'th' || cell.tag == 'td')) {
-            cells.add(_collapse(_inlineText(cell)));
+            final built = _draftFor(cell).finish();
+            cells.add(EpubTableCell(text: built.text, runs: built.runs));
+            if (rows.isEmpty) {
+              alignments.add(_tableAlignment(cell.attributes['align']));
+            }
           }
         }
         if (cells.isEmpty) {
@@ -484,29 +696,69 @@ final class _DocumentBuilder {
       0,
       (max, row) => row.length > max ? row.length : max,
     );
-    final padded = <List<String>>[
+    final padded = <List<EpubTableCell>>[
       for (final row in rows)
-        List<String>.unmodifiable(<String>[
+        List<EpubTableCell>.unmodifiable(<EpubTableCell>[
           for (var column = 0; column < columns; column += 1)
-            column < row.length ? row[column] : '',
+            column < row.length ? row[column] : const EpubTableCell(text: ''),
         ]),
     ];
+    while (alignments.length < columns) {
+      alignments.add(EpubTableAlignment.none);
+    }
 
-    final text = padded.map((row) => row.join('   ')).join('\n');
+    final text = padded
+        .map((row) => row.map((cell) => cell.text).join('   '))
+        .join('\n');
     if (text.trim().isEmpty) {
       return;
     }
     final start = _appendText(text);
+    final placed = <List<EpubTableCell>>[];
+    var cursor = start;
+    for (var rowIndex = 0; rowIndex < padded.length; rowIndex += 1) {
+      final row = padded[rowIndex];
+      final placedRow = <EpubTableCell>[];
+      for (var column = 0; column < row.length; column += 1) {
+        final cell = row[column];
+        placedRow.add(
+          EpubTableCell(
+            text: cell.text,
+            runs: cell.runs,
+            chapterOffset: cursor,
+          ),
+        );
+        cursor += cell.text.length;
+        if (column + 1 < row.length) {
+          cursor += 3;
+        }
+      }
+      placed.add(List<EpubTableCell>.unmodifiable(placedRow));
+      if (rowIndex + 1 < padded.length) {
+        cursor += 1;
+      }
+    }
     _blocks.add(
       EpubTableBlock(
         startOffset: start,
         endOffset: _textLength,
         text: text,
-        rows: List<List<String>>.unmodifiable(padded),
+        cells: List<List<EpubTableCell>>.unmodifiable(placed),
         hasHeader: hasHeader,
+        alignments: List<EpubTableAlignment>.unmodifiable(alignments),
+        quoteDepth: quoteDepth,
       ),
     );
     _lastBlockStart = start;
+  }
+
+  EpubTableAlignment _tableAlignment(String? value) {
+    return switch (value) {
+      'left' => EpubTableAlignment.left,
+      'center' => EpubTableAlignment.center,
+      'right' => EpubTableAlignment.right,
+      _ => EpubTableAlignment.none,
+    };
   }
 
   int _lastBlockStart = 0;
@@ -533,6 +785,7 @@ final class _DocumentBuilder {
         title: _chapterTitle ?? fallbackTitle,
         text: _text.toString(),
         blocks: List<EpubBlock>.unmodifiable(_blocks),
+        anchors: Map<String, int>.unmodifiable(_anchors),
       ),
     );
     // A chapter's table-of-contents entry points at its heading, which is
@@ -546,6 +799,7 @@ final class _DocumentBuilder {
     _textLength = 0;
     _tail = '';
     _blocks = <EpubBlock>[];
+    _anchors.clear();
     _chapterTitle = null;
     _openToc = null;
   }
@@ -575,32 +829,43 @@ final class _DocumentBuilder {
     return pre.textContent.replaceAll(RegExp(r'\s+$'), '');
   }
 
-  String _inlineText(md.Node node) {
-    if (node is md.Text) {
-      return node.text;
+  md.Element? _taskInput(md.Element item) {
+    final classes = _classNames(item);
+    if (!classes.contains('task-list-item')) {
+      return null;
     }
-    if (node is! md.Element) {
-      return '';
+    for (final child in item.children ?? const <md.Node>[]) {
+      if (child is md.Element &&
+          child.tag == 'input' &&
+          child.attributes['type'] == 'checkbox') {
+        return child;
+      }
     }
-    switch (node.tag) {
-      case 'br':
-        return '\n';
-      case 'img':
-        // Pictures are placed by the paragraph walker, not inline in text.
-        return '';
-      case 'input':
-        if (node.attributes['type'] == 'checkbox') {
-          return node.attributes['checked'] != null ? '☑ ' : '☐ ';
-        }
-        return '';
-      default:
-        final children = node.children;
-        if (children == null) {
-          return '';
-        }
-        return children.map(_inlineText).join();
-    }
+    return null;
   }
+
+  String? _codeLanguage(md.Element pre) {
+    for (final child in pre.children ?? const <md.Node>[]) {
+      if (child is! md.Element || child.tag != 'code') {
+        continue;
+      }
+      for (final name in (child.attributes['class'] ?? '').split(
+        RegExp(r'\s+'),
+      )) {
+        if (name.startsWith('language-') && name.length > 'language-'.length) {
+          return name.substring('language-'.length);
+        }
+      }
+    }
+    return null;
+  }
+}
+
+Set<String> _classNames(md.Element node) {
+  return (node.attributes['class'] ?? '')
+      .split(RegExp(r'\s+'))
+      .where((name) => name.isNotEmpty)
+      .toSet();
 }
 
 /// Collapses whitespace the way a paragraph is read.
@@ -634,8 +899,11 @@ String _prepareCode(String raw) {
 /// character. Nothing is rewritten into the text itself, which is why search
 /// and progress keep working on the same characters the writer typed.
 final class _InlineDraft {
+  _InlineDraft({this.boundaries});
+
   final StringBuffer _buffer = StringBuffer();
   final List<EpubInlineRun> _runs = <EpubInlineRun>[];
+  final MarkdownBoundary? boundaries;
 
   void write(String text) {
     if (text.isEmpty) {
@@ -654,6 +922,11 @@ final class _InlineDraft {
       return;
     }
     switch (node.tag) {
+      case 'pagesage-math':
+      case 'pagesage-html':
+        _writeBoundary(node);
+      case 'pagesage-html-inline':
+        _writeInlineHtml(node);
       case 'br':
         write('\n');
       case 'img':
@@ -662,6 +935,16 @@ final class _InlineDraft {
       case 'input':
         if (node.attributes['type'] == 'checkbox') {
           write(node.attributes['checked'] != null ? '☑ ' : '☐ ');
+        }
+      case 'sup':
+        if (_classNames(node).contains('footnote-ref')) {
+          _styled(
+            node,
+            EpubInlineStyle.footnote,
+            target: _footnoteTarget(node),
+          );
+        } else {
+          _writeChildren(node);
         }
       case 'strong':
         _styled(node, EpubInlineStyle.strong);
@@ -672,7 +955,19 @@ final class _InlineDraft {
       case 'code':
         _styled(node, EpubInlineStyle.code);
       case 'a':
-        _styled(node, EpubInlineStyle.link);
+        if (_classNames(node).contains('footnote-backref')) {
+          break;
+        }
+        final href = node.attributes['href']?.trim() ?? '';
+        if (href.startsWith('#fn-')) {
+          _writeChildren(node);
+          break;
+        }
+        _styled(
+          node,
+          EpubInlineStyle.link,
+          target: href.startsWith('#') ? href : _externalTarget(href),
+        );
       default:
         _writeChildren(node);
     }
@@ -684,12 +979,102 @@ final class _InlineDraft {
     }
   }
 
-  void _styled(md.Element node, EpubInlineStyle style) {
+  void _writeBoundary(md.Element node) {
+    final boundaryHandler = boundaries;
+    if (boundaryHandler == null) {
+      write(node.textContent);
+      return;
+    }
+    final text = boundaryHandler.inlineText(node);
+    if (text.isEmpty) {
+      return;
+    }
+    final start = _buffer.length;
+    write(text);
+    if (node.tag == 'pagesage-math') {
+      final mathSource = MathSource(node.textContent);
+      _runs.add(
+        EpubInlineRun(
+          start: start,
+          end: _buffer.length,
+          style: EpubInlineStyle.math,
+          mathSource: mathSource.expression,
+        ),
+      );
+    }
+  }
+
+  void _writeInlineHtml(md.Element node) {
+    final boundaryHandler = boundaries;
+    if (boundaryHandler == null) {
+      write(node.textContent);
+      return;
+    }
+    final text = boundaryHandler.inlineText(node);
+    if (text.isEmpty) {
+      return;
+    }
+    final start = _buffer.length;
+    write(text);
+    final style = switch (boundaryHandler.inlineHtmlTag(node)) {
+      'b' || 'strong' => EpubInlineStyle.strong,
+      'i' || 'em' => EpubInlineStyle.emphasis,
+      's' || 'strike' || 'del' => EpubInlineStyle.strike,
+      'u' => EpubInlineStyle.underline,
+      'mark' => EpubInlineStyle.highlight,
+      'sup' => EpubInlineStyle.superscript,
+      'sub' => EpubInlineStyle.subscript,
+      'kbd' => EpubInlineStyle.code,
+      _ => null,
+    };
+    if (style != null) {
+      _runs.add(EpubInlineRun(start: start, end: _buffer.length, style: style));
+    }
+  }
+
+  void _styled(md.Element node, EpubInlineStyle style, {String? target}) {
     final start = _buffer.length;
     _writeChildren(node);
     if (_buffer.length > start) {
-      _runs.add(EpubInlineRun(start: start, end: _buffer.length, style: style));
+      _runs.add(
+        EpubInlineRun(
+          start: start,
+          end: _buffer.length,
+          style: style,
+          target: target,
+        ),
+      );
     }
+  }
+
+  String? _externalTarget(String? href) {
+    final value = href?.trim() ?? '';
+    if (value.isEmpty || value.startsWith('#')) {
+      return null;
+    }
+    final colon = value.indexOf(':');
+    final scheme = colon <= 0 ? '' : value.substring(0, colon).toLowerCase();
+    return const {'http', 'https', 'mailto'}.contains(scheme) ? value : null;
+  }
+
+  /// The `#fn-*` destination inside a GFM footnote reference.
+  String? _footnoteTarget(md.Element node) {
+    for (final child in node.children ?? const <md.Node>[]) {
+      if (child is! md.Element) {
+        continue;
+      }
+      if (child.tag == 'a') {
+        final href = child.attributes['href']?.trim() ?? '';
+        if (href.startsWith('#fn-')) {
+          return href;
+        }
+      }
+      final nested = _footnoteTarget(child);
+      if (nested != null) {
+        return nested;
+      }
+    }
+    return null;
   }
 
   /// The block's text with its ends trimmed, and the runs moved to match.
@@ -705,7 +1090,15 @@ final class _InlineDraft {
       final start = (run.start - leading).clamp(0, text.length);
       final end = (run.end - leading).clamp(0, text.length);
       if (start < end) {
-        runs.add(EpubInlineRun(start: start, end: end, style: run.style));
+        runs.add(
+          EpubInlineRun(
+            start: start,
+            end: end,
+            style: run.style,
+            target: run.target,
+            mathSource: run.mathSource,
+          ),
+        );
       }
     }
     return _BuiltInline(
@@ -902,4 +1295,87 @@ List<String> _rowCells(String line) {
     cells.add(buffer.toString().trim());
   }
   return cells;
+}
+
+const _headingSlugPunctuation = {
+  '!',
+  '"',
+  '#',
+  r'$',
+  '%',
+  '&',
+  "'",
+  '(',
+  ')',
+  '*',
+  '+',
+  ',',
+  '.',
+  '/',
+  ':',
+  ';',
+  '<',
+  '=',
+  '>',
+  '?',
+  '@',
+  '[',
+  r'\',
+  ']',
+  '^',
+  '`',
+  '{',
+  '|',
+  '}',
+  '~',
+  '，',
+  '。',
+  '！',
+  '？',
+  '；',
+  '：',
+  '、',
+  '“',
+  '”',
+  '‘',
+  '’',
+  '（',
+  '）',
+  '【',
+  '】',
+  '《',
+  '》',
+  '〈',
+  '〉',
+  '…',
+  '—',
+  '·',
+};
+
+String _headingSlug(String text) {
+  final buffer = StringBuffer();
+  var lastWasDash = false;
+  for (final rune in text.trim().toLowerCase().runes) {
+    final char = String.fromCharCode(rune);
+    if (char.trim().isEmpty) {
+      if (buffer.isNotEmpty && !lastWasDash) {
+        buffer.write('-');
+        lastWasDash = true;
+      }
+      continue;
+    }
+    if (_headingSlugPunctuation.contains(char)) {
+      continue;
+    }
+    buffer.write(char);
+    lastWasDash = char == '-';
+  }
+  var slug = buffer.toString();
+  while (slug.startsWith('-')) {
+    slug = slug.substring(1);
+  }
+  while (slug.endsWith('-')) {
+    slug = slug.substring(0, slug.length - 1);
+  }
+  return slug.isEmpty ? 'section' : slug;
 }

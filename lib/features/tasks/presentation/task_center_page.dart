@@ -45,7 +45,7 @@ final class _TaskCenterPageState extends ConsumerState<TaskCenterPage> {
           children: [
             AppPageHeader(
               title: '任务中心',
-              subtitle: '查看导入、索引、导出和备份任务',
+              subtitle: '查看导入、文字识别、索引、导出和备份任务',
               showThemeMode: true,
               actions: [
                 IconButton(
@@ -66,7 +66,7 @@ final class _TaskCenterPageState extends ConsumerState<TaskCenterPage> {
                     return const AppEmptyState(
                       icon: Icons.task_alt_outlined,
                       title: '没有后台任务',
-                      message: '导入、索引、导出和备份会在这里显示。',
+                      message: '导入、文字识别、索引、导出和备份会在这里显示。',
                     );
                   }
                   return ListView(
@@ -116,6 +116,12 @@ final class _TaskSummary extends StatelessWidget {
     final done = tasks
         .where((task) => task.status == PageSageTaskStatus.done)
         .length;
+    final paused = tasks
+        .where((task) => task.status == PageSageTaskStatus.paused)
+        .length;
+    final partial = tasks
+        .where((task) => task.status == PageSageTaskStatus.partial)
+        .length;
     return Wrap(
       spacing: AppSpacing.x2,
       runSpacing: AppSpacing.x2,
@@ -123,6 +129,13 @@ final class _TaskSummary extends StatelessWidget {
         _SummaryChip(icon: Icons.sync, label: '进行中 $active'),
         _SummaryChip(icon: Icons.check_circle_outline, label: '完成 $done'),
         _SummaryChip(icon: Icons.error_outline, label: '失败 $failed'),
+        if (paused > 0)
+          _SummaryChip(icon: Icons.pause_circle_outline, label: '已暂停 $paused'),
+        if (partial > 0)
+          _SummaryChip(
+            icon: Icons.warning_amber_outlined,
+            label: '部分完成 $partial',
+          ),
       ],
     );
   }
@@ -212,6 +225,8 @@ final class _TaskTile extends ConsumerWidget {
               borderRadius: BorderRadius.circular(999),
               child: LinearProgressIndicator(
                 value: task.progress.clamp(0, 1).toDouble(),
+                color: _statusColor(context, task.status),
+                semanticsLabel: '已处理进度',
                 minHeight: 5,
               ),
             ),
@@ -222,7 +237,7 @@ final class _TaskTile extends ConsumerWidget {
               children: [
                 _MetaChip(
                   icon: Icons.percent,
-                  label: '${(task.progress * 100).round()}%',
+                  label: '已处理 ${(task.progress.clamp(0, 1) * 100).round()}%',
                 ),
                 if (task.sourcePath?.isNotEmpty == true)
                   _MetaChip(
@@ -259,7 +274,11 @@ final class _TaskStatusChip extends StatelessWidget {
           ? colorScheme.errorContainer
           : colorScheme.surfaceContainerHighest,
       labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: failed ? colorScheme.onErrorContainer : null,
+        color: failed
+            ? colorScheme.onErrorContainer
+            : status == PageSageTaskStatus.partial
+            ? colorScheme.statusWarning
+            : null,
       ),
     );
   }
@@ -273,19 +292,52 @@ final class _TaskActionsButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final failed = task.status == PageSageTaskStatus.failed;
+    final isOcr = task.type == PageSageTaskType.ocrPages;
+    final canRetryFailedPages =
+        isOcr &&
+        (task.status == PageSageTaskStatus.failed ||
+            task.status == PageSageTaskStatus.partial);
+    final canClearOcr = isOcr && !_isActive(task.status);
     return PopupMenuButton<_TaskAction>(
       tooltip: '任务操作',
       onSelected: (action) => _handleTaskAction(context, ref, task, action),
       itemBuilder: (context) => [
-        if (failed)
+        if (failed && !isOcr)
           const PopupMenuItem(
             value: _TaskAction.retry,
             child: ListTile(leading: Icon(Icons.refresh), title: Text('重试')),
+          ),
+        if (canRetryFailedPages)
+          const PopupMenuItem(
+            value: _TaskAction.retryFailedPages,
+            child: ListTile(leading: Icon(Icons.refresh), title: Text('重试失败页')),
           ),
         if (_isCancellable(task))
           const PopupMenuItem(
             value: _TaskAction.cancel,
             child: ListTile(leading: Icon(Icons.close), title: Text('取消')),
+          ),
+        if (task.type == PageSageTaskType.ocrPages && _isActive(task.status))
+          const PopupMenuItem(
+            value: _TaskAction.pause,
+            child: ListTile(leading: Icon(Icons.pause), title: Text('暂停识别')),
+          ),
+        if (task.type == PageSageTaskType.ocrPages &&
+            task.status == PageSageTaskStatus.paused)
+          const PopupMenuItem(
+            value: _TaskAction.resume,
+            child: ListTile(
+              leading: Icon(Icons.play_arrow),
+              title: Text('继续识别'),
+            ),
+          ),
+        if (canClearOcr)
+          const PopupMenuItem(
+            value: _TaskAction.clearOcr,
+            child: ListTile(
+              leading: Icon(Icons.delete_sweep_outlined),
+              title: Text('清除 OCR 结果'),
+            ),
           ),
         const PopupMenuItem(
           value: _TaskAction.details,
@@ -310,6 +362,64 @@ final class _TaskActionsButton extends ConsumerWidget {
         await controller.retryTask(task);
       case _TaskAction.cancel:
         await controller.cancelTask(task);
+      case _TaskAction.pause:
+        await controller.pauseTask(task);
+      case _TaskAction.resume:
+        await controller.resumeTask(task);
+      case _TaskAction.retryFailedPages:
+        try {
+          final retried = await controller.retryFailedOcrPages(task);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  retried == 0 ? '没有失败页可重试' : '已重新排队 $retried 个失败页',
+                ),
+              ),
+            );
+          }
+        } on Object {
+          if (context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('重试失败页失败')));
+          }
+        }
+      case _TaskAction.clearOcr:
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('清除 OCR 结果？'),
+            content: const Text('将删除这次任务保存的文字、页面记录和搜索索引；原 PDF、原生文字、笔记与批注不会删除。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('清除'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) {
+          return;
+        }
+        try {
+          await controller.clearOcrResults(task);
+          if (context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('OCR 结果已清除')));
+          }
+        } on Object {
+          if (context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('清除 OCR 结果失败')));
+          }
+        }
       case _TaskAction.details:
         if (context.mounted) {
           await _showTaskDetails(context, task);
@@ -423,7 +533,15 @@ final class _DetailRow extends StatelessWidget {
   }
 }
 
-enum _TaskAction { retry, cancel, details }
+enum _TaskAction {
+  retry,
+  retryFailedPages,
+  cancel,
+  pause,
+  resume,
+  clearOcr,
+  details,
+}
 
 String _taskTitle(PageSageTask task) {
   final path = task.sourcePath ?? task.targetPath;
@@ -439,9 +557,11 @@ String _typeLabel(PageSageTaskType type) {
     PageSageTaskType.metadata => '提取元数据',
     PageSageTaskType.indexBook => '建立索引',
     PageSageTaskType.rebuildIndex => '重建索引',
+    PageSageTaskType.ocrPages => '识别页面文字',
     PageSageTaskType.exportNotes => '导出笔记',
     PageSageTaskType.backup => '备份',
     PageSageTaskType.restore => '恢复',
+    PageSageTaskType.unknown => '不支持的任务',
   };
 }
 
@@ -450,6 +570,8 @@ String _statusLabel(PageSageTaskStatus status) {
     PageSageTaskStatus.queued => '等待中',
     PageSageTaskStatus.running => '进行中',
     PageSageTaskStatus.indexing => '索引中',
+    PageSageTaskStatus.paused => '已暂停',
+    PageSageTaskStatus.partial => '部分完成',
     PageSageTaskStatus.done => '完成',
     PageSageTaskStatus.failed => '失败',
     PageSageTaskStatus.cancelled => '已取消',
@@ -462,9 +584,11 @@ IconData _taskIcon(PageSageTask task) {
     PageSageTaskType.metadata => Icons.description_outlined,
     PageSageTaskType.indexBook ||
     PageSageTaskType.rebuildIndex => Icons.manage_search,
+    PageSageTaskType.ocrPages => Icons.text_snippet_outlined,
     PageSageTaskType.exportNotes => Icons.download_outlined,
     PageSageTaskType.backup => Icons.backup_outlined,
     PageSageTaskType.restore => Icons.restore_outlined,
+    PageSageTaskType.unknown => Icons.help_outline,
   };
 }
 
@@ -472,6 +596,7 @@ Color _statusColor(BuildContext context, PageSageTaskStatus status) {
   final colorScheme = Theme.of(context).colorScheme;
   return switch (status) {
     PageSageTaskStatus.failed => colorScheme.error,
+    PageSageTaskStatus.partial => colorScheme.statusWarning,
     PageSageTaskStatus.done => colorScheme.primary,
     PageSageTaskStatus.cancelled => colorScheme.outline,
     _ => colorScheme.secondary,
@@ -483,6 +608,7 @@ bool _isActive(PageSageTaskStatus status) {
     PageSageTaskStatus.queued ||
     PageSageTaskStatus.running ||
     PageSageTaskStatus.indexing => true,
+    PageSageTaskStatus.paused || PageSageTaskStatus.partial => false,
     PageSageTaskStatus.done ||
     PageSageTaskStatus.failed ||
     PageSageTaskStatus.cancelled => false,
@@ -497,9 +623,12 @@ bool _isCancellable(PageSageTask task) {
     PageSageTaskType.importBook ||
     PageSageTaskType.indexBook ||
     PageSageTaskType.rebuildIndex ||
+    PageSageTaskType.ocrPages ||
     PageSageTaskType.exportNotes ||
     PageSageTaskType.backup => true,
-    PageSageTaskType.metadata || PageSageTaskType.restore => false,
+    PageSageTaskType.metadata ||
+    PageSageTaskType.restore ||
+    PageSageTaskType.unknown => false,
   };
 }
 

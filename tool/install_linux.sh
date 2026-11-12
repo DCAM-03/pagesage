@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds PageSage for Linux and installs it for the current user.
 #
-# Linux is not a release target for PageSage (Android and Windows are), but a
-# local install is how the app gets used on this machine. The bundle goes to a
+# This installs the current development build. Distributable archives are
+# produced separately by tool/build_linux_release.sh. The bundle goes to a
 # stable directory instead of staying in build/: the launcher entry must keep
 # working after a `flutter clean` or a rebuild, and a debug bundle in build/
 # does not.
@@ -31,7 +31,7 @@ cp -a build/linux/x64/release/bundle/. "$INSTALL_DIR"/
 echo "==> Installing icons"
 for icon in linux/icons/*.png; do
   name="$(basename "$icon")"
-  size="${name#${APP_ID}-}"
+  size="${name#"${APP_ID}"-}"
   size="${size%.png}"
   dest="${ICONS}/${size}x${size}/apps"
   mkdir -p "$dest"

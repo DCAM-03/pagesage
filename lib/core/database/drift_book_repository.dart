@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import '../../domain/books/book.dart' as domain;
 import '../../domain/books/book_repository.dart';
 import '../../domain/books/reading_position.dart';
+import '../../domain/ocr/ocr_jobs.dart';
 import 'app_database.dart' as db;
 
 final class DriftBookRepository implements BookRepository {
@@ -16,6 +17,7 @@ final class DriftBookRepository implements BookRepository {
     db.AiConversationDao? aiConversationDao,
     db.SearchDao? searchDao,
     db.OcrPageDao? ocrPageDao,
+    OcrJobRepository? ocrJobRepository,
   }) : this._(
          bookDao,
          progressDao,
@@ -25,6 +27,7 @@ final class DriftBookRepository implements BookRepository {
          aiConversationDao,
          searchDao,
          ocrPageDao,
+         ocrJobRepository,
        );
 
   const DriftBookRepository._(
@@ -36,6 +39,7 @@ final class DriftBookRepository implements BookRepository {
     this._aiConversationDao,
     this._searchDao,
     this._ocrPageDao,
+    this._ocrJobRepository,
   );
 
   final db.BookDao _bookDao;
@@ -46,6 +50,7 @@ final class DriftBookRepository implements BookRepository {
   final db.AiConversationDao? _aiConversationDao;
   final db.SearchDao? _searchDao;
   final db.OcrPageDao? _ocrPageDao;
+  final OcrJobRepository? _ocrJobRepository;
 
   @override
   Stream<List<LibraryBook>> watchLibrary() {
@@ -266,6 +271,7 @@ final class DriftBookRepository implements BookRepository {
     await _aiConversationDao?.deleteByBook(bookId);
     await _searchDao?.deleteByBook(bookId);
     await _ocrPageDao?.deleteByBook(bookId);
+    await _ocrJobRepository?.deleteByBook(bookId);
     await _bookDao.deleteBook(bookId);
   }
 

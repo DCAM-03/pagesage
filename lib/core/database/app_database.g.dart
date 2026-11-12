@@ -122,6 +122,10 @@ class AiConversationDaoManager {
 
 mixin _$SearchDaoMixin on DatabaseAccessor<AppDatabase> {
   $SearchChunksTable get searchChunks => attachedDatabase.searchChunks;
+  $SearchParentChunksTable get searchParentChunks =>
+      attachedDatabase.searchParentChunks;
+  $SearchTermDocumentsTable get searchTermDocuments =>
+      attachedDatabase.searchTermDocuments;
   $BooksTable get books => attachedDatabase.books;
   $BookTagsTable get bookTags => attachedDatabase.bookTags;
   SearchDaoManager get managers => SearchDaoManager(this);
@@ -132,6 +136,16 @@ class SearchDaoManager {
   SearchDaoManager(this._db);
   $$SearchChunksTableTableManager get searchChunks =>
       $$SearchChunksTableTableManager(_db.attachedDatabase, _db.searchChunks);
+  $$SearchParentChunksTableTableManager get searchParentChunks =>
+      $$SearchParentChunksTableTableManager(
+        _db.attachedDatabase,
+        _db.searchParentChunks,
+      );
+  $$SearchTermDocumentsTableTableManager get searchTermDocuments =>
+      $$SearchTermDocumentsTableTableManager(
+        _db.attachedDatabase,
+        _db.searchTermDocuments,
+      );
   $$BooksTableTableManager get books =>
       $$BooksTableTableManager(_db.attachedDatabase, _db.books);
   $$BookTagsTableTableManager get bookTags =>
@@ -148,6 +162,25 @@ class SettingsDaoManager {
   SettingsDaoManager(this._db);
   $$AppSettingsTableTableManager get appSettings =>
       $$AppSettingsTableTableManager(_db.attachedDatabase, _db.appSettings);
+}
+
+mixin _$AiProfileDaoMixin on DatabaseAccessor<AppDatabase> {
+  $AiProfilesTable get aiProfiles => attachedDatabase.aiProfiles;
+  $AiCredentialOperationsTable get aiCredentialOperations =>
+      attachedDatabase.aiCredentialOperations;
+  AiProfileDaoManager get managers => AiProfileDaoManager(this);
+}
+
+class AiProfileDaoManager {
+  final _$AiProfileDaoMixin _db;
+  AiProfileDaoManager(this._db);
+  $$AiProfilesTableTableManager get aiProfiles =>
+      $$AiProfilesTableTableManager(_db.attachedDatabase, _db.aiProfiles);
+  $$AiCredentialOperationsTableTableManager get aiCredentialOperations =>
+      $$AiCredentialOperationsTableTableManager(
+        _db.attachedDatabase,
+        _db.aiCredentialOperations,
+      );
 }
 
 mixin _$OcrPageDaoMixin on DatabaseAccessor<AppDatabase> {
@@ -4864,6 +4897,50 @@ class $AiConversationsTable extends AiConversations
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _contextSnapshotMeta = const VerificationMeta(
+    'contextSnapshot',
+  );
+  @override
+  late final GeneratedColumn<String> contextSnapshot = GeneratedColumn<String>(
+    'context_snapshot',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _profileIdMeta = const VerificationMeta(
+    'profileId',
+  );
+  @override
+  late final GeneratedColumn<String> profileId = GeneratedColumn<String>(
+    'profile_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _profileSnapshotMeta = const VerificationMeta(
+    'profileSnapshot',
+  );
+  @override
+  late final GeneratedColumn<String> profileSnapshot = GeneratedColumn<String>(
+    'profile_snapshot',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _answerMetaMeta = const VerificationMeta(
+    'answerMeta',
+  );
+  @override
+  late final GeneratedColumn<String> answerMeta = GeneratedColumn<String>(
+    'answer_meta',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -4878,6 +4955,10 @@ class $AiConversationsTable extends AiConversations
     noteId,
     createdAt,
     threadId,
+    contextSnapshot,
+    profileId,
+    profileSnapshot,
+    answerMeta,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4975,6 +5056,36 @@ class $AiConversationsTable extends AiConversations
         threadId.isAcceptableOrUnknown(data['thread_id']!, _threadIdMeta),
       );
     }
+    if (data.containsKey('context_snapshot')) {
+      context.handle(
+        _contextSnapshotMeta,
+        contextSnapshot.isAcceptableOrUnknown(
+          data['context_snapshot']!,
+          _contextSnapshotMeta,
+        ),
+      );
+    }
+    if (data.containsKey('profile_id')) {
+      context.handle(
+        _profileIdMeta,
+        profileId.isAcceptableOrUnknown(data['profile_id']!, _profileIdMeta),
+      );
+    }
+    if (data.containsKey('profile_snapshot')) {
+      context.handle(
+        _profileSnapshotMeta,
+        profileSnapshot.isAcceptableOrUnknown(
+          data['profile_snapshot']!,
+          _profileSnapshotMeta,
+        ),
+      );
+    }
+    if (data.containsKey('answer_meta')) {
+      context.handle(
+        _answerMetaMeta,
+        answerMeta.isAcceptableOrUnknown(data['answer_meta']!, _answerMetaMeta),
+      );
+    }
     return context;
   }
 
@@ -5032,6 +5143,22 @@ class $AiConversationsTable extends AiConversations
         DriftSqlType.string,
         data['${effectivePrefix}thread_id'],
       ),
+      contextSnapshot: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}context_snapshot'],
+      ),
+      profileId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}profile_id'],
+      ),
+      profileSnapshot: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}profile_snapshot'],
+      ),
+      answerMeta: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}answer_meta'],
+      ),
     );
   }
 
@@ -5061,6 +5188,10 @@ class AiConversationRow extends DataClass
   /// and the history view shows them as such rather than inventing a thread.
   /// Their `id` is a usable thread key of its own if it is ever needed.
   final String? threadId;
+  final String? contextSnapshot;
+  final String? profileId;
+  final String? profileSnapshot;
+  final String? answerMeta;
   const AiConversationRow({
     required this.id,
     this.bookId,
@@ -5074,6 +5205,10 @@ class AiConversationRow extends DataClass
     this.noteId,
     required this.createdAt,
     this.threadId,
+    this.contextSnapshot,
+    this.profileId,
+    this.profileSnapshot,
+    this.answerMeta,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -5101,6 +5236,18 @@ class AiConversationRow extends DataClass
     map['created_at'] = Variable<int>(createdAt);
     if (!nullToAbsent || threadId != null) {
       map['thread_id'] = Variable<String>(threadId);
+    }
+    if (!nullToAbsent || contextSnapshot != null) {
+      map['context_snapshot'] = Variable<String>(contextSnapshot);
+    }
+    if (!nullToAbsent || profileId != null) {
+      map['profile_id'] = Variable<String>(profileId);
+    }
+    if (!nullToAbsent || profileSnapshot != null) {
+      map['profile_snapshot'] = Variable<String>(profileSnapshot);
+    }
+    if (!nullToAbsent || answerMeta != null) {
+      map['answer_meta'] = Variable<String>(answerMeta);
     }
     return map;
   }
@@ -5131,6 +5278,18 @@ class AiConversationRow extends DataClass
       threadId: threadId == null && nullToAbsent
           ? const Value.absent()
           : Value(threadId),
+      contextSnapshot: contextSnapshot == null && nullToAbsent
+          ? const Value.absent()
+          : Value(contextSnapshot),
+      profileId: profileId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(profileId),
+      profileSnapshot: profileSnapshot == null && nullToAbsent
+          ? const Value.absent()
+          : Value(profileSnapshot),
+      answerMeta: answerMeta == null && nullToAbsent
+          ? const Value.absent()
+          : Value(answerMeta),
     );
   }
 
@@ -5152,6 +5311,10 @@ class AiConversationRow extends DataClass
       noteId: serializer.fromJson<String?>(json['noteId']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       threadId: serializer.fromJson<String?>(json['threadId']),
+      contextSnapshot: serializer.fromJson<String?>(json['contextSnapshot']),
+      profileId: serializer.fromJson<String?>(json['profileId']),
+      profileSnapshot: serializer.fromJson<String?>(json['profileSnapshot']),
+      answerMeta: serializer.fromJson<String?>(json['answerMeta']),
     );
   }
   @override
@@ -5170,6 +5333,10 @@ class AiConversationRow extends DataClass
       'noteId': serializer.toJson<String?>(noteId),
       'createdAt': serializer.toJson<int>(createdAt),
       'threadId': serializer.toJson<String?>(threadId),
+      'contextSnapshot': serializer.toJson<String?>(contextSnapshot),
+      'profileId': serializer.toJson<String?>(profileId),
+      'profileSnapshot': serializer.toJson<String?>(profileSnapshot),
+      'answerMeta': serializer.toJson<String?>(answerMeta),
     };
   }
 
@@ -5186,6 +5353,10 @@ class AiConversationRow extends DataClass
     Value<String?> noteId = const Value.absent(),
     int? createdAt,
     Value<String?> threadId = const Value.absent(),
+    Value<String?> contextSnapshot = const Value.absent(),
+    Value<String?> profileId = const Value.absent(),
+    Value<String?> profileSnapshot = const Value.absent(),
+    Value<String?> answerMeta = const Value.absent(),
   }) => AiConversationRow(
     id: id ?? this.id,
     bookId: bookId.present ? bookId.value : this.bookId,
@@ -5199,6 +5370,14 @@ class AiConversationRow extends DataClass
     noteId: noteId.present ? noteId.value : this.noteId,
     createdAt: createdAt ?? this.createdAt,
     threadId: threadId.present ? threadId.value : this.threadId,
+    contextSnapshot: contextSnapshot.present
+        ? contextSnapshot.value
+        : this.contextSnapshot,
+    profileId: profileId.present ? profileId.value : this.profileId,
+    profileSnapshot: profileSnapshot.present
+        ? profileSnapshot.value
+        : this.profileSnapshot,
+    answerMeta: answerMeta.present ? answerMeta.value : this.answerMeta,
   );
   AiConversationRow copyWithCompanion(AiConversationsCompanion data) {
     return AiConversationRow(
@@ -5218,6 +5397,16 @@ class AiConversationRow extends DataClass
       noteId: data.noteId.present ? data.noteId.value : this.noteId,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       threadId: data.threadId.present ? data.threadId.value : this.threadId,
+      contextSnapshot: data.contextSnapshot.present
+          ? data.contextSnapshot.value
+          : this.contextSnapshot,
+      profileId: data.profileId.present ? data.profileId.value : this.profileId,
+      profileSnapshot: data.profileSnapshot.present
+          ? data.profileSnapshot.value
+          : this.profileSnapshot,
+      answerMeta: data.answerMeta.present
+          ? data.answerMeta.value
+          : this.answerMeta,
     );
   }
 
@@ -5235,7 +5424,11 @@ class AiConversationRow extends DataClass
           ..write('sourceText: $sourceText, ')
           ..write('noteId: $noteId, ')
           ..write('createdAt: $createdAt, ')
-          ..write('threadId: $threadId')
+          ..write('threadId: $threadId, ')
+          ..write('contextSnapshot: $contextSnapshot, ')
+          ..write('profileId: $profileId, ')
+          ..write('profileSnapshot: $profileSnapshot, ')
+          ..write('answerMeta: $answerMeta')
           ..write(')'))
         .toString();
   }
@@ -5254,6 +5447,10 @@ class AiConversationRow extends DataClass
     noteId,
     createdAt,
     threadId,
+    contextSnapshot,
+    profileId,
+    profileSnapshot,
+    answerMeta,
   );
   @override
   bool operator ==(Object other) =>
@@ -5270,7 +5467,11 @@ class AiConversationRow extends DataClass
           other.sourceText == this.sourceText &&
           other.noteId == this.noteId &&
           other.createdAt == this.createdAt &&
-          other.threadId == this.threadId);
+          other.threadId == this.threadId &&
+          other.contextSnapshot == this.contextSnapshot &&
+          other.profileId == this.profileId &&
+          other.profileSnapshot == this.profileSnapshot &&
+          other.answerMeta == this.answerMeta);
 }
 
 class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
@@ -5286,6 +5487,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
   final Value<String?> noteId;
   final Value<int> createdAt;
   final Value<String?> threadId;
+  final Value<String?> contextSnapshot;
+  final Value<String?> profileId;
+  final Value<String?> profileSnapshot;
+  final Value<String?> answerMeta;
   final Value<int> rowid;
   const AiConversationsCompanion({
     this.id = const Value.absent(),
@@ -5300,6 +5505,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     this.noteId = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.threadId = const Value.absent(),
+    this.contextSnapshot = const Value.absent(),
+    this.profileId = const Value.absent(),
+    this.profileSnapshot = const Value.absent(),
+    this.answerMeta = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AiConversationsCompanion.insert({
@@ -5315,6 +5524,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     this.noteId = const Value.absent(),
     required int createdAt,
     this.threadId = const Value.absent(),
+    this.contextSnapshot = const Value.absent(),
+    this.profileId = const Value.absent(),
+    this.profileSnapshot = const Value.absent(),
+    this.answerMeta = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        provider = Value(provider),
@@ -5335,6 +5548,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     Expression<String>? noteId,
     Expression<int>? createdAt,
     Expression<String>? threadId,
+    Expression<String>? contextSnapshot,
+    Expression<String>? profileId,
+    Expression<String>? profileSnapshot,
+    Expression<String>? answerMeta,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -5350,6 +5567,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
       if (noteId != null) 'note_id': noteId,
       if (createdAt != null) 'created_at': createdAt,
       if (threadId != null) 'thread_id': threadId,
+      if (contextSnapshot != null) 'context_snapshot': contextSnapshot,
+      if (profileId != null) 'profile_id': profileId,
+      if (profileSnapshot != null) 'profile_snapshot': profileSnapshot,
+      if (answerMeta != null) 'answer_meta': answerMeta,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -5367,6 +5588,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     Value<String?>? noteId,
     Value<int>? createdAt,
     Value<String?>? threadId,
+    Value<String?>? contextSnapshot,
+    Value<String?>? profileId,
+    Value<String?>? profileSnapshot,
+    Value<String?>? answerMeta,
     Value<int>? rowid,
   }) {
     return AiConversationsCompanion(
@@ -5382,6 +5607,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
       noteId: noteId ?? this.noteId,
       createdAt: createdAt ?? this.createdAt,
       threadId: threadId ?? this.threadId,
+      contextSnapshot: contextSnapshot ?? this.contextSnapshot,
+      profileId: profileId ?? this.profileId,
+      profileSnapshot: profileSnapshot ?? this.profileSnapshot,
+      answerMeta: answerMeta ?? this.answerMeta,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -5425,6 +5654,18 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
     if (threadId.present) {
       map['thread_id'] = Variable<String>(threadId.value);
     }
+    if (contextSnapshot.present) {
+      map['context_snapshot'] = Variable<String>(contextSnapshot.value);
+    }
+    if (profileId.present) {
+      map['profile_id'] = Variable<String>(profileId.value);
+    }
+    if (profileSnapshot.present) {
+      map['profile_snapshot'] = Variable<String>(profileSnapshot.value);
+    }
+    if (answerMeta.present) {
+      map['answer_meta'] = Variable<String>(answerMeta.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -5446,6 +5687,10 @@ class AiConversationsCompanion extends UpdateCompanion<AiConversationRow> {
           ..write('noteId: $noteId, ')
           ..write('createdAt: $createdAt, ')
           ..write('threadId: $threadId, ')
+          ..write('contextSnapshot: $contextSnapshot, ')
+          ..write('profileId: $profileId, ')
+          ..write('profileSnapshot: $profileSnapshot, ')
+          ..write('answerMeta: $answerMeta, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5458,6 +5703,1032 @@ class $SearchChunksTable extends SearchChunks
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $SearchChunksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bookIdMeta = const VerificationMeta('bookId');
+  @override
+  late final GeneratedColumn<String> bookId = GeneratedColumn<String>(
+    'book_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _parentIdMeta = const VerificationMeta(
+    'parentId',
+  );
+  @override
+  late final GeneratedColumn<String> parentId = GeneratedColumn<String>(
+    'parent_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sourceTypeMeta = const VerificationMeta(
+    'sourceType',
+  );
+  @override
+  late final GeneratedColumn<String> sourceType = GeneratedColumn<String>(
+    'source_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceIdMeta = const VerificationMeta(
+    'sourceId',
+  );
+  @override
+  late final GeneratedColumn<String> sourceId = GeneratedColumn<String>(
+    'source_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _locatorMeta = const VerificationMeta(
+    'locator',
+  );
+  @override
+  late final GeneratedColumn<String> locator = GeneratedColumn<String>(
+    'locator',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _bodyMeta = const VerificationMeta('body');
+  @override
+  late final GeneratedColumn<String> body = GeneratedColumn<String>(
+    'text',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sortOrderMeta = const VerificationMeta(
+    'sortOrder',
+  );
+  @override
+  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
+    'sort_order',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _generationIdMeta = const VerificationMeta(
+    'generationId',
+  );
+  @override
+  late final GeneratedColumn<String> generationId = GeneratedColumn<String>(
+    'generation_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _documentSourceIdMeta = const VerificationMeta(
+    'documentSourceId',
+  );
+  @override
+  late final GeneratedColumn<String> documentSourceId = GeneratedColumn<String>(
+    'document_source_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sourceRevisionMeta = const VerificationMeta(
+    'sourceRevision',
+  );
+  @override
+  late final GeneratedColumn<String> sourceRevision = GeneratedColumn<String>(
+    'source_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _textRevisionMeta = const VerificationMeta(
+    'textRevision',
+  );
+  @override
+  late final GeneratedColumn<String> textRevision = GeneratedColumn<String>(
+    'text_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _startOffsetMeta = const VerificationMeta(
+    'startOffset',
+  );
+  @override
+  late final GeneratedColumn<int> startOffset = GeneratedColumn<int>(
+    'start_offset',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _endOffsetMeta = const VerificationMeta(
+    'endOffset',
+  );
+  @override
+  late final GeneratedColumn<int> endOffset = GeneratedColumn<int>(
+    'end_offset',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _textOriginMeta = const VerificationMeta(
+    'textOrigin',
+  );
+  @override
+  late final GeneratedColumn<String> textOrigin = GeneratedColumn<String>(
+    'text_origin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('native'),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    bookId,
+    parentId,
+    sourceType,
+    sourceId,
+    locator,
+    title,
+    body,
+    sortOrder,
+    createdAt,
+    updatedAt,
+    generationId,
+    documentSourceId,
+    sourceRevision,
+    textRevision,
+    startOffset,
+    endOffset,
+    textOrigin,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'search_chunks';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SearchChunkRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('book_id')) {
+      context.handle(
+        _bookIdMeta,
+        bookId.isAcceptableOrUnknown(data['book_id']!, _bookIdMeta),
+      );
+    }
+    if (data.containsKey('parent_id')) {
+      context.handle(
+        _parentIdMeta,
+        parentId.isAcceptableOrUnknown(data['parent_id']!, _parentIdMeta),
+      );
+    }
+    if (data.containsKey('source_type')) {
+      context.handle(
+        _sourceTypeMeta,
+        sourceType.isAcceptableOrUnknown(data['source_type']!, _sourceTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sourceTypeMeta);
+    }
+    if (data.containsKey('source_id')) {
+      context.handle(
+        _sourceIdMeta,
+        sourceId.isAcceptableOrUnknown(data['source_id']!, _sourceIdMeta),
+      );
+    }
+    if (data.containsKey('locator')) {
+      context.handle(
+        _locatorMeta,
+        locator.isAcceptableOrUnknown(data['locator']!, _locatorMeta),
+      );
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    }
+    if (data.containsKey('text')) {
+      context.handle(
+        _bodyMeta,
+        body.isAcceptableOrUnknown(data['text']!, _bodyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bodyMeta);
+    }
+    if (data.containsKey('sort_order')) {
+      context.handle(
+        _sortOrderMeta,
+        sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('generation_id')) {
+      context.handle(
+        _generationIdMeta,
+        generationId.isAcceptableOrUnknown(
+          data['generation_id']!,
+          _generationIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('document_source_id')) {
+      context.handle(
+        _documentSourceIdMeta,
+        documentSourceId.isAcceptableOrUnknown(
+          data['document_source_id']!,
+          _documentSourceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('source_revision')) {
+      context.handle(
+        _sourceRevisionMeta,
+        sourceRevision.isAcceptableOrUnknown(
+          data['source_revision']!,
+          _sourceRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('text_revision')) {
+      context.handle(
+        _textRevisionMeta,
+        textRevision.isAcceptableOrUnknown(
+          data['text_revision']!,
+          _textRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('start_offset')) {
+      context.handle(
+        _startOffsetMeta,
+        startOffset.isAcceptableOrUnknown(
+          data['start_offset']!,
+          _startOffsetMeta,
+        ),
+      );
+    }
+    if (data.containsKey('end_offset')) {
+      context.handle(
+        _endOffsetMeta,
+        endOffset.isAcceptableOrUnknown(data['end_offset']!, _endOffsetMeta),
+      );
+    }
+    if (data.containsKey('text_origin')) {
+      context.handle(
+        _textOriginMeta,
+        textOrigin.isAcceptableOrUnknown(data['text_origin']!, _textOriginMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SearchChunkRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SearchChunkRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      bookId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}book_id'],
+      ),
+      parentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}parent_id'],
+      ),
+      sourceType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_type'],
+      )!,
+      sourceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_id'],
+      ),
+      locator: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}locator'],
+      ),
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      ),
+      body: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text'],
+      )!,
+      sortOrder: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_order'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      generationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}generation_id'],
+      ),
+      documentSourceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}document_source_id'],
+      ),
+      sourceRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_revision'],
+      ),
+      textRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_revision'],
+      ),
+      startOffset: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}start_offset'],
+      ),
+      endOffset: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}end_offset'],
+      ),
+      textOrigin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_origin'],
+      )!,
+    );
+  }
+
+  @override
+  $SearchChunksTable createAlias(String alias) {
+    return $SearchChunksTable(attachedDatabase, alias);
+  }
+}
+
+class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
+  final String id;
+  final String? bookId;
+  final String? parentId;
+  final String sourceType;
+  final String? sourceId;
+  final String? locator;
+  final String? title;
+  final String body;
+  final int sortOrder;
+  final int createdAt;
+  final int updatedAt;
+  final String? generationId;
+  final String? documentSourceId;
+  final String? sourceRevision;
+  final String? textRevision;
+  final int? startOffset;
+  final int? endOffset;
+  final String textOrigin;
+  const SearchChunkRow({
+    required this.id,
+    this.bookId,
+    this.parentId,
+    required this.sourceType,
+    this.sourceId,
+    this.locator,
+    this.title,
+    required this.body,
+    required this.sortOrder,
+    required this.createdAt,
+    required this.updatedAt,
+    this.generationId,
+    this.documentSourceId,
+    this.sourceRevision,
+    this.textRevision,
+    this.startOffset,
+    this.endOffset,
+    required this.textOrigin,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    if (!nullToAbsent || bookId != null) {
+      map['book_id'] = Variable<String>(bookId);
+    }
+    if (!nullToAbsent || parentId != null) {
+      map['parent_id'] = Variable<String>(parentId);
+    }
+    map['source_type'] = Variable<String>(sourceType);
+    if (!nullToAbsent || sourceId != null) {
+      map['source_id'] = Variable<String>(sourceId);
+    }
+    if (!nullToAbsent || locator != null) {
+      map['locator'] = Variable<String>(locator);
+    }
+    if (!nullToAbsent || title != null) {
+      map['title'] = Variable<String>(title);
+    }
+    map['text'] = Variable<String>(body);
+    map['sort_order'] = Variable<int>(sortOrder);
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || generationId != null) {
+      map['generation_id'] = Variable<String>(generationId);
+    }
+    if (!nullToAbsent || documentSourceId != null) {
+      map['document_source_id'] = Variable<String>(documentSourceId);
+    }
+    if (!nullToAbsent || sourceRevision != null) {
+      map['source_revision'] = Variable<String>(sourceRevision);
+    }
+    if (!nullToAbsent || textRevision != null) {
+      map['text_revision'] = Variable<String>(textRevision);
+    }
+    if (!nullToAbsent || startOffset != null) {
+      map['start_offset'] = Variable<int>(startOffset);
+    }
+    if (!nullToAbsent || endOffset != null) {
+      map['end_offset'] = Variable<int>(endOffset);
+    }
+    map['text_origin'] = Variable<String>(textOrigin);
+    return map;
+  }
+
+  SearchChunksCompanion toCompanion(bool nullToAbsent) {
+    return SearchChunksCompanion(
+      id: Value(id),
+      bookId: bookId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(bookId),
+      parentId: parentId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(parentId),
+      sourceType: Value(sourceType),
+      sourceId: sourceId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceId),
+      locator: locator == null && nullToAbsent
+          ? const Value.absent()
+          : Value(locator),
+      title: title == null && nullToAbsent
+          ? const Value.absent()
+          : Value(title),
+      body: Value(body),
+      sortOrder: Value(sortOrder),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      generationId: generationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(generationId),
+      documentSourceId: documentSourceId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(documentSourceId),
+      sourceRevision: sourceRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceRevision),
+      textRevision: textRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(textRevision),
+      startOffset: startOffset == null && nullToAbsent
+          ? const Value.absent()
+          : Value(startOffset),
+      endOffset: endOffset == null && nullToAbsent
+          ? const Value.absent()
+          : Value(endOffset),
+      textOrigin: Value(textOrigin),
+    );
+  }
+
+  factory SearchChunkRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SearchChunkRow(
+      id: serializer.fromJson<String>(json['id']),
+      bookId: serializer.fromJson<String?>(json['bookId']),
+      parentId: serializer.fromJson<String?>(json['parentId']),
+      sourceType: serializer.fromJson<String>(json['sourceType']),
+      sourceId: serializer.fromJson<String?>(json['sourceId']),
+      locator: serializer.fromJson<String?>(json['locator']),
+      title: serializer.fromJson<String?>(json['title']),
+      body: serializer.fromJson<String>(json['body']),
+      sortOrder: serializer.fromJson<int>(json['sortOrder']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      generationId: serializer.fromJson<String?>(json['generationId']),
+      documentSourceId: serializer.fromJson<String?>(json['documentSourceId']),
+      sourceRevision: serializer.fromJson<String?>(json['sourceRevision']),
+      textRevision: serializer.fromJson<String?>(json['textRevision']),
+      startOffset: serializer.fromJson<int?>(json['startOffset']),
+      endOffset: serializer.fromJson<int?>(json['endOffset']),
+      textOrigin: serializer.fromJson<String>(json['textOrigin']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'bookId': serializer.toJson<String?>(bookId),
+      'parentId': serializer.toJson<String?>(parentId),
+      'sourceType': serializer.toJson<String>(sourceType),
+      'sourceId': serializer.toJson<String?>(sourceId),
+      'locator': serializer.toJson<String?>(locator),
+      'title': serializer.toJson<String?>(title),
+      'body': serializer.toJson<String>(body),
+      'sortOrder': serializer.toJson<int>(sortOrder),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+      'generationId': serializer.toJson<String?>(generationId),
+      'documentSourceId': serializer.toJson<String?>(documentSourceId),
+      'sourceRevision': serializer.toJson<String?>(sourceRevision),
+      'textRevision': serializer.toJson<String?>(textRevision),
+      'startOffset': serializer.toJson<int?>(startOffset),
+      'endOffset': serializer.toJson<int?>(endOffset),
+      'textOrigin': serializer.toJson<String>(textOrigin),
+    };
+  }
+
+  SearchChunkRow copyWith({
+    String? id,
+    Value<String?> bookId = const Value.absent(),
+    Value<String?> parentId = const Value.absent(),
+    String? sourceType,
+    Value<String?> sourceId = const Value.absent(),
+    Value<String?> locator = const Value.absent(),
+    Value<String?> title = const Value.absent(),
+    String? body,
+    int? sortOrder,
+    int? createdAt,
+    int? updatedAt,
+    Value<String?> generationId = const Value.absent(),
+    Value<String?> documentSourceId = const Value.absent(),
+    Value<String?> sourceRevision = const Value.absent(),
+    Value<String?> textRevision = const Value.absent(),
+    Value<int?> startOffset = const Value.absent(),
+    Value<int?> endOffset = const Value.absent(),
+    String? textOrigin,
+  }) => SearchChunkRow(
+    id: id ?? this.id,
+    bookId: bookId.present ? bookId.value : this.bookId,
+    parentId: parentId.present ? parentId.value : this.parentId,
+    sourceType: sourceType ?? this.sourceType,
+    sourceId: sourceId.present ? sourceId.value : this.sourceId,
+    locator: locator.present ? locator.value : this.locator,
+    title: title.present ? title.value : this.title,
+    body: body ?? this.body,
+    sortOrder: sortOrder ?? this.sortOrder,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    generationId: generationId.present ? generationId.value : this.generationId,
+    documentSourceId: documentSourceId.present
+        ? documentSourceId.value
+        : this.documentSourceId,
+    sourceRevision: sourceRevision.present
+        ? sourceRevision.value
+        : this.sourceRevision,
+    textRevision: textRevision.present ? textRevision.value : this.textRevision,
+    startOffset: startOffset.present ? startOffset.value : this.startOffset,
+    endOffset: endOffset.present ? endOffset.value : this.endOffset,
+    textOrigin: textOrigin ?? this.textOrigin,
+  );
+  SearchChunkRow copyWithCompanion(SearchChunksCompanion data) {
+    return SearchChunkRow(
+      id: data.id.present ? data.id.value : this.id,
+      bookId: data.bookId.present ? data.bookId.value : this.bookId,
+      parentId: data.parentId.present ? data.parentId.value : this.parentId,
+      sourceType: data.sourceType.present
+          ? data.sourceType.value
+          : this.sourceType,
+      sourceId: data.sourceId.present ? data.sourceId.value : this.sourceId,
+      locator: data.locator.present ? data.locator.value : this.locator,
+      title: data.title.present ? data.title.value : this.title,
+      body: data.body.present ? data.body.value : this.body,
+      sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      generationId: data.generationId.present
+          ? data.generationId.value
+          : this.generationId,
+      documentSourceId: data.documentSourceId.present
+          ? data.documentSourceId.value
+          : this.documentSourceId,
+      sourceRevision: data.sourceRevision.present
+          ? data.sourceRevision.value
+          : this.sourceRevision,
+      textRevision: data.textRevision.present
+          ? data.textRevision.value
+          : this.textRevision,
+      startOffset: data.startOffset.present
+          ? data.startOffset.value
+          : this.startOffset,
+      endOffset: data.endOffset.present ? data.endOffset.value : this.endOffset,
+      textOrigin: data.textOrigin.present
+          ? data.textOrigin.value
+          : this.textOrigin,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchChunkRow(')
+          ..write('id: $id, ')
+          ..write('bookId: $bookId, ')
+          ..write('parentId: $parentId, ')
+          ..write('sourceType: $sourceType, ')
+          ..write('sourceId: $sourceId, ')
+          ..write('locator: $locator, ')
+          ..write('title: $title, ')
+          ..write('body: $body, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('generationId: $generationId, ')
+          ..write('documentSourceId: $documentSourceId, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('startOffset: $startOffset, ')
+          ..write('endOffset: $endOffset, ')
+          ..write('textOrigin: $textOrigin')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    bookId,
+    parentId,
+    sourceType,
+    sourceId,
+    locator,
+    title,
+    body,
+    sortOrder,
+    createdAt,
+    updatedAt,
+    generationId,
+    documentSourceId,
+    sourceRevision,
+    textRevision,
+    startOffset,
+    endOffset,
+    textOrigin,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SearchChunkRow &&
+          other.id == this.id &&
+          other.bookId == this.bookId &&
+          other.parentId == this.parentId &&
+          other.sourceType == this.sourceType &&
+          other.sourceId == this.sourceId &&
+          other.locator == this.locator &&
+          other.title == this.title &&
+          other.body == this.body &&
+          other.sortOrder == this.sortOrder &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.generationId == this.generationId &&
+          other.documentSourceId == this.documentSourceId &&
+          other.sourceRevision == this.sourceRevision &&
+          other.textRevision == this.textRevision &&
+          other.startOffset == this.startOffset &&
+          other.endOffset == this.endOffset &&
+          other.textOrigin == this.textOrigin);
+}
+
+class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
+  final Value<String> id;
+  final Value<String?> bookId;
+  final Value<String?> parentId;
+  final Value<String> sourceType;
+  final Value<String?> sourceId;
+  final Value<String?> locator;
+  final Value<String?> title;
+  final Value<String> body;
+  final Value<int> sortOrder;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<String?> generationId;
+  final Value<String?> documentSourceId;
+  final Value<String?> sourceRevision;
+  final Value<String?> textRevision;
+  final Value<int?> startOffset;
+  final Value<int?> endOffset;
+  final Value<String> textOrigin;
+  final Value<int> rowid;
+  const SearchChunksCompanion({
+    this.id = const Value.absent(),
+    this.bookId = const Value.absent(),
+    this.parentId = const Value.absent(),
+    this.sourceType = const Value.absent(),
+    this.sourceId = const Value.absent(),
+    this.locator = const Value.absent(),
+    this.title = const Value.absent(),
+    this.body = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.generationId = const Value.absent(),
+    this.documentSourceId = const Value.absent(),
+    this.sourceRevision = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.startOffset = const Value.absent(),
+    this.endOffset = const Value.absent(),
+    this.textOrigin = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SearchChunksCompanion.insert({
+    required String id,
+    this.bookId = const Value.absent(),
+    this.parentId = const Value.absent(),
+    required String sourceType,
+    this.sourceId = const Value.absent(),
+    this.locator = const Value.absent(),
+    this.title = const Value.absent(),
+    required String body,
+    this.sortOrder = const Value.absent(),
+    required int createdAt,
+    required int updatedAt,
+    this.generationId = const Value.absent(),
+    this.documentSourceId = const Value.absent(),
+    this.sourceRevision = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.startOffset = const Value.absent(),
+    this.endOffset = const Value.absent(),
+    this.textOrigin = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       sourceType = Value(sourceType),
+       body = Value(body),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<SearchChunkRow> custom({
+    Expression<String>? id,
+    Expression<String>? bookId,
+    Expression<String>? parentId,
+    Expression<String>? sourceType,
+    Expression<String>? sourceId,
+    Expression<String>? locator,
+    Expression<String>? title,
+    Expression<String>? body,
+    Expression<int>? sortOrder,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<String>? generationId,
+    Expression<String>? documentSourceId,
+    Expression<String>? sourceRevision,
+    Expression<String>? textRevision,
+    Expression<int>? startOffset,
+    Expression<int>? endOffset,
+    Expression<String>? textOrigin,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (bookId != null) 'book_id': bookId,
+      if (parentId != null) 'parent_id': parentId,
+      if (sourceType != null) 'source_type': sourceType,
+      if (sourceId != null) 'source_id': sourceId,
+      if (locator != null) 'locator': locator,
+      if (title != null) 'title': title,
+      if (body != null) 'text': body,
+      if (sortOrder != null) 'sort_order': sortOrder,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (generationId != null) 'generation_id': generationId,
+      if (documentSourceId != null) 'document_source_id': documentSourceId,
+      if (sourceRevision != null) 'source_revision': sourceRevision,
+      if (textRevision != null) 'text_revision': textRevision,
+      if (startOffset != null) 'start_offset': startOffset,
+      if (endOffset != null) 'end_offset': endOffset,
+      if (textOrigin != null) 'text_origin': textOrigin,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SearchChunksCompanion copyWith({
+    Value<String>? id,
+    Value<String?>? bookId,
+    Value<String?>? parentId,
+    Value<String>? sourceType,
+    Value<String?>? sourceId,
+    Value<String?>? locator,
+    Value<String?>? title,
+    Value<String>? body,
+    Value<int>? sortOrder,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<String?>? generationId,
+    Value<String?>? documentSourceId,
+    Value<String?>? sourceRevision,
+    Value<String?>? textRevision,
+    Value<int?>? startOffset,
+    Value<int?>? endOffset,
+    Value<String>? textOrigin,
+    Value<int>? rowid,
+  }) {
+    return SearchChunksCompanion(
+      id: id ?? this.id,
+      bookId: bookId ?? this.bookId,
+      parentId: parentId ?? this.parentId,
+      sourceType: sourceType ?? this.sourceType,
+      sourceId: sourceId ?? this.sourceId,
+      locator: locator ?? this.locator,
+      title: title ?? this.title,
+      body: body ?? this.body,
+      sortOrder: sortOrder ?? this.sortOrder,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      generationId: generationId ?? this.generationId,
+      documentSourceId: documentSourceId ?? this.documentSourceId,
+      sourceRevision: sourceRevision ?? this.sourceRevision,
+      textRevision: textRevision ?? this.textRevision,
+      startOffset: startOffset ?? this.startOffset,
+      endOffset: endOffset ?? this.endOffset,
+      textOrigin: textOrigin ?? this.textOrigin,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (bookId.present) {
+      map['book_id'] = Variable<String>(bookId.value);
+    }
+    if (parentId.present) {
+      map['parent_id'] = Variable<String>(parentId.value);
+    }
+    if (sourceType.present) {
+      map['source_type'] = Variable<String>(sourceType.value);
+    }
+    if (sourceId.present) {
+      map['source_id'] = Variable<String>(sourceId.value);
+    }
+    if (locator.present) {
+      map['locator'] = Variable<String>(locator.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (body.present) {
+      map['text'] = Variable<String>(body.value);
+    }
+    if (sortOrder.present) {
+      map['sort_order'] = Variable<int>(sortOrder.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (generationId.present) {
+      map['generation_id'] = Variable<String>(generationId.value);
+    }
+    if (documentSourceId.present) {
+      map['document_source_id'] = Variable<String>(documentSourceId.value);
+    }
+    if (sourceRevision.present) {
+      map['source_revision'] = Variable<String>(sourceRevision.value);
+    }
+    if (textRevision.present) {
+      map['text_revision'] = Variable<String>(textRevision.value);
+    }
+    if (startOffset.present) {
+      map['start_offset'] = Variable<int>(startOffset.value);
+    }
+    if (endOffset.present) {
+      map['end_offset'] = Variable<int>(endOffset.value);
+    }
+    if (textOrigin.present) {
+      map['text_origin'] = Variable<String>(textOrigin.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchChunksCompanion(')
+          ..write('id: $id, ')
+          ..write('bookId: $bookId, ')
+          ..write('parentId: $parentId, ')
+          ..write('sourceType: $sourceType, ')
+          ..write('sourceId: $sourceId, ')
+          ..write('locator: $locator, ')
+          ..write('title: $title, ')
+          ..write('body: $body, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('generationId: $generationId, ')
+          ..write('documentSourceId: $documentSourceId, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('startOffset: $startOffset, ')
+          ..write('endOffset: $endOffset, ')
+          ..write('textOrigin: $textOrigin, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SearchParentChunksTable extends SearchParentChunks
+    with TableInfo<$SearchParentChunksTable, SearchParentChunkRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SearchParentChunksTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
@@ -5561,6 +6832,62 @@ class $SearchChunksTable extends SearchChunks
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _generationIdMeta = const VerificationMeta(
+    'generationId',
+  );
+  @override
+  late final GeneratedColumn<String> generationId = GeneratedColumn<String>(
+    'generation_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _documentSourceIdMeta = const VerificationMeta(
+    'documentSourceId',
+  );
+  @override
+  late final GeneratedColumn<String> documentSourceId = GeneratedColumn<String>(
+    'document_source_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sourceRevisionMeta = const VerificationMeta(
+    'sourceRevision',
+  );
+  @override
+  late final GeneratedColumn<String> sourceRevision = GeneratedColumn<String>(
+    'source_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _textRevisionMeta = const VerificationMeta(
+    'textRevision',
+  );
+  @override
+  late final GeneratedColumn<String> textRevision = GeneratedColumn<String>(
+    'text_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _textOriginMeta = const VerificationMeta(
+    'textOrigin',
+  );
+  @override
+  late final GeneratedColumn<String> textOrigin = GeneratedColumn<String>(
+    'text_origin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('native'),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -5573,15 +6900,20 @@ class $SearchChunksTable extends SearchChunks
     sortOrder,
     createdAt,
     updatedAt,
+    generationId,
+    documentSourceId,
+    sourceRevision,
+    textRevision,
+    textOrigin,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
   String get actualTableName => $name;
-  static const String $name = 'search_chunks';
+  static const String $name = 'search_parent_chunks';
   @override
   VerificationContext validateIntegrity(
-    Insertable<SearchChunkRow> instance, {
+    Insertable<SearchParentChunkRow> instance, {
     bool isInserting = false,
   }) {
     final context = VerificationContext();
@@ -5653,15 +6985,57 @@ class $SearchChunksTable extends SearchChunks
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('generation_id')) {
+      context.handle(
+        _generationIdMeta,
+        generationId.isAcceptableOrUnknown(
+          data['generation_id']!,
+          _generationIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('document_source_id')) {
+      context.handle(
+        _documentSourceIdMeta,
+        documentSourceId.isAcceptableOrUnknown(
+          data['document_source_id']!,
+          _documentSourceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('source_revision')) {
+      context.handle(
+        _sourceRevisionMeta,
+        sourceRevision.isAcceptableOrUnknown(
+          data['source_revision']!,
+          _sourceRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('text_revision')) {
+      context.handle(
+        _textRevisionMeta,
+        textRevision.isAcceptableOrUnknown(
+          data['text_revision']!,
+          _textRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('text_origin')) {
+      context.handle(
+        _textOriginMeta,
+        textOrigin.isAcceptableOrUnknown(data['text_origin']!, _textOriginMeta),
+      );
+    }
     return context;
   }
 
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
   @override
-  SearchChunkRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+  SearchParentChunkRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return SearchChunkRow(
+    return SearchParentChunkRow(
       id: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}id'],
@@ -5702,16 +7076,37 @@ class $SearchChunksTable extends SearchChunks
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
       )!,
+      generationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}generation_id'],
+      ),
+      documentSourceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}document_source_id'],
+      ),
+      sourceRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_revision'],
+      ),
+      textRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_revision'],
+      ),
+      textOrigin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_origin'],
+      )!,
     );
   }
 
   @override
-  $SearchChunksTable createAlias(String alias) {
-    return $SearchChunksTable(attachedDatabase, alias);
+  $SearchParentChunksTable createAlias(String alias) {
+    return $SearchParentChunksTable(attachedDatabase, alias);
   }
 }
 
-class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
+class SearchParentChunkRow extends DataClass
+    implements Insertable<SearchParentChunkRow> {
   final String id;
   final String? bookId;
   final String sourceType;
@@ -5722,7 +7117,12 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
   final int sortOrder;
   final int createdAt;
   final int updatedAt;
-  const SearchChunkRow({
+  final String? generationId;
+  final String? documentSourceId;
+  final String? sourceRevision;
+  final String? textRevision;
+  final String textOrigin;
+  const SearchParentChunkRow({
     required this.id,
     this.bookId,
     required this.sourceType,
@@ -5733,6 +7133,11 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
     required this.sortOrder,
     required this.createdAt,
     required this.updatedAt,
+    this.generationId,
+    this.documentSourceId,
+    this.sourceRevision,
+    this.textRevision,
+    required this.textOrigin,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -5755,11 +7160,24 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
     map['sort_order'] = Variable<int>(sortOrder);
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || generationId != null) {
+      map['generation_id'] = Variable<String>(generationId);
+    }
+    if (!nullToAbsent || documentSourceId != null) {
+      map['document_source_id'] = Variable<String>(documentSourceId);
+    }
+    if (!nullToAbsent || sourceRevision != null) {
+      map['source_revision'] = Variable<String>(sourceRevision);
+    }
+    if (!nullToAbsent || textRevision != null) {
+      map['text_revision'] = Variable<String>(textRevision);
+    }
+    map['text_origin'] = Variable<String>(textOrigin);
     return map;
   }
 
-  SearchChunksCompanion toCompanion(bool nullToAbsent) {
-    return SearchChunksCompanion(
+  SearchParentChunksCompanion toCompanion(bool nullToAbsent) {
+    return SearchParentChunksCompanion(
       id: Value(id),
       bookId: bookId == null && nullToAbsent
           ? const Value.absent()
@@ -5778,15 +7196,28 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
       sortOrder: Value(sortOrder),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      generationId: generationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(generationId),
+      documentSourceId: documentSourceId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(documentSourceId),
+      sourceRevision: sourceRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceRevision),
+      textRevision: textRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(textRevision),
+      textOrigin: Value(textOrigin),
     );
   }
 
-  factory SearchChunkRow.fromJson(
+  factory SearchParentChunkRow.fromJson(
     Map<String, dynamic> json, {
     ValueSerializer? serializer,
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return SearchChunkRow(
+    return SearchParentChunkRow(
       id: serializer.fromJson<String>(json['id']),
       bookId: serializer.fromJson<String?>(json['bookId']),
       sourceType: serializer.fromJson<String>(json['sourceType']),
@@ -5797,6 +7228,11 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      generationId: serializer.fromJson<String?>(json['generationId']),
+      documentSourceId: serializer.fromJson<String?>(json['documentSourceId']),
+      sourceRevision: serializer.fromJson<String?>(json['sourceRevision']),
+      textRevision: serializer.fromJson<String?>(json['textRevision']),
+      textOrigin: serializer.fromJson<String>(json['textOrigin']),
     );
   }
   @override
@@ -5813,10 +7249,15 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
       'sortOrder': serializer.toJson<int>(sortOrder),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
+      'generationId': serializer.toJson<String?>(generationId),
+      'documentSourceId': serializer.toJson<String?>(documentSourceId),
+      'sourceRevision': serializer.toJson<String?>(sourceRevision),
+      'textRevision': serializer.toJson<String?>(textRevision),
+      'textOrigin': serializer.toJson<String>(textOrigin),
     };
   }
 
-  SearchChunkRow copyWith({
+  SearchParentChunkRow copyWith({
     String? id,
     Value<String?> bookId = const Value.absent(),
     String? sourceType,
@@ -5827,7 +7268,12 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
     int? sortOrder,
     int? createdAt,
     int? updatedAt,
-  }) => SearchChunkRow(
+    Value<String?> generationId = const Value.absent(),
+    Value<String?> documentSourceId = const Value.absent(),
+    Value<String?> sourceRevision = const Value.absent(),
+    Value<String?> textRevision = const Value.absent(),
+    String? textOrigin,
+  }) => SearchParentChunkRow(
     id: id ?? this.id,
     bookId: bookId.present ? bookId.value : this.bookId,
     sourceType: sourceType ?? this.sourceType,
@@ -5838,9 +7284,18 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
     sortOrder: sortOrder ?? this.sortOrder,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    generationId: generationId.present ? generationId.value : this.generationId,
+    documentSourceId: documentSourceId.present
+        ? documentSourceId.value
+        : this.documentSourceId,
+    sourceRevision: sourceRevision.present
+        ? sourceRevision.value
+        : this.sourceRevision,
+    textRevision: textRevision.present ? textRevision.value : this.textRevision,
+    textOrigin: textOrigin ?? this.textOrigin,
   );
-  SearchChunkRow copyWithCompanion(SearchChunksCompanion data) {
-    return SearchChunkRow(
+  SearchParentChunkRow copyWithCompanion(SearchParentChunksCompanion data) {
+    return SearchParentChunkRow(
       id: data.id.present ? data.id.value : this.id,
       bookId: data.bookId.present ? data.bookId.value : this.bookId,
       sourceType: data.sourceType.present
@@ -5853,12 +7308,27 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      generationId: data.generationId.present
+          ? data.generationId.value
+          : this.generationId,
+      documentSourceId: data.documentSourceId.present
+          ? data.documentSourceId.value
+          : this.documentSourceId,
+      sourceRevision: data.sourceRevision.present
+          ? data.sourceRevision.value
+          : this.sourceRevision,
+      textRevision: data.textRevision.present
+          ? data.textRevision.value
+          : this.textRevision,
+      textOrigin: data.textOrigin.present
+          ? data.textOrigin.value
+          : this.textOrigin,
     );
   }
 
   @override
   String toString() {
-    return (StringBuffer('SearchChunkRow(')
+    return (StringBuffer('SearchParentChunkRow(')
           ..write('id: $id, ')
           ..write('bookId: $bookId, ')
           ..write('sourceType: $sourceType, ')
@@ -5868,7 +7338,12 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
           ..write('body: $body, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('generationId: $generationId, ')
+          ..write('documentSourceId: $documentSourceId, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('textOrigin: $textOrigin')
           ..write(')'))
         .toString();
   }
@@ -5885,11 +7360,16 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
     sortOrder,
     createdAt,
     updatedAt,
+    generationId,
+    documentSourceId,
+    sourceRevision,
+    textRevision,
+    textOrigin,
   );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is SearchChunkRow &&
+      (other is SearchParentChunkRow &&
           other.id == this.id &&
           other.bookId == this.bookId &&
           other.sourceType == this.sourceType &&
@@ -5899,10 +7379,16 @@ class SearchChunkRow extends DataClass implements Insertable<SearchChunkRow> {
           other.body == this.body &&
           other.sortOrder == this.sortOrder &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.generationId == this.generationId &&
+          other.documentSourceId == this.documentSourceId &&
+          other.sourceRevision == this.sourceRevision &&
+          other.textRevision == this.textRevision &&
+          other.textOrigin == this.textOrigin);
 }
 
-class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
+class SearchParentChunksCompanion
+    extends UpdateCompanion<SearchParentChunkRow> {
   final Value<String> id;
   final Value<String?> bookId;
   final Value<String> sourceType;
@@ -5913,8 +7399,13 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
   final Value<int> sortOrder;
   final Value<int> createdAt;
   final Value<int> updatedAt;
+  final Value<String?> generationId;
+  final Value<String?> documentSourceId;
+  final Value<String?> sourceRevision;
+  final Value<String?> textRevision;
+  final Value<String> textOrigin;
   final Value<int> rowid;
-  const SearchChunksCompanion({
+  const SearchParentChunksCompanion({
     this.id = const Value.absent(),
     this.bookId = const Value.absent(),
     this.sourceType = const Value.absent(),
@@ -5925,9 +7416,14 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
     this.sortOrder = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.generationId = const Value.absent(),
+    this.documentSourceId = const Value.absent(),
+    this.sourceRevision = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.textOrigin = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  SearchChunksCompanion.insert({
+  SearchParentChunksCompanion.insert({
     required String id,
     this.bookId = const Value.absent(),
     required String sourceType,
@@ -5938,13 +7434,18 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
     this.sortOrder = const Value.absent(),
     required int createdAt,
     required int updatedAt,
+    this.generationId = const Value.absent(),
+    this.documentSourceId = const Value.absent(),
+    this.sourceRevision = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.textOrigin = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        sourceType = Value(sourceType),
        body = Value(body),
        createdAt = Value(createdAt),
        updatedAt = Value(updatedAt);
-  static Insertable<SearchChunkRow> custom({
+  static Insertable<SearchParentChunkRow> custom({
     Expression<String>? id,
     Expression<String>? bookId,
     Expression<String>? sourceType,
@@ -5955,6 +7456,11 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
     Expression<int>? sortOrder,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
+    Expression<String>? generationId,
+    Expression<String>? documentSourceId,
+    Expression<String>? sourceRevision,
+    Expression<String>? textRevision,
+    Expression<String>? textOrigin,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -5968,11 +7474,16 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
       if (sortOrder != null) 'sort_order': sortOrder,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (generationId != null) 'generation_id': generationId,
+      if (documentSourceId != null) 'document_source_id': documentSourceId,
+      if (sourceRevision != null) 'source_revision': sourceRevision,
+      if (textRevision != null) 'text_revision': textRevision,
+      if (textOrigin != null) 'text_origin': textOrigin,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
-  SearchChunksCompanion copyWith({
+  SearchParentChunksCompanion copyWith({
     Value<String>? id,
     Value<String?>? bookId,
     Value<String>? sourceType,
@@ -5983,9 +7494,14 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
     Value<int>? sortOrder,
     Value<int>? createdAt,
     Value<int>? updatedAt,
+    Value<String?>? generationId,
+    Value<String?>? documentSourceId,
+    Value<String?>? sourceRevision,
+    Value<String?>? textRevision,
+    Value<String>? textOrigin,
     Value<int>? rowid,
   }) {
-    return SearchChunksCompanion(
+    return SearchParentChunksCompanion(
       id: id ?? this.id,
       bookId: bookId ?? this.bookId,
       sourceType: sourceType ?? this.sourceType,
@@ -5996,6 +7512,11 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
       sortOrder: sortOrder ?? this.sortOrder,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      generationId: generationId ?? this.generationId,
+      documentSourceId: documentSourceId ?? this.documentSourceId,
+      sourceRevision: sourceRevision ?? this.sourceRevision,
+      textRevision: textRevision ?? this.textRevision,
+      textOrigin: textOrigin ?? this.textOrigin,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -6033,6 +7554,21 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
+    if (generationId.present) {
+      map['generation_id'] = Variable<String>(generationId.value);
+    }
+    if (documentSourceId.present) {
+      map['document_source_id'] = Variable<String>(documentSourceId.value);
+    }
+    if (sourceRevision.present) {
+      map['source_revision'] = Variable<String>(sourceRevision.value);
+    }
+    if (textRevision.present) {
+      map['text_revision'] = Variable<String>(textRevision.value);
+    }
+    if (textOrigin.present) {
+      map['text_origin'] = Variable<String>(textOrigin.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -6041,7 +7577,7 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
 
   @override
   String toString() {
-    return (StringBuffer('SearchChunksCompanion(')
+    return (StringBuffer('SearchParentChunksCompanion(')
           ..write('id: $id, ')
           ..write('bookId: $bookId, ')
           ..write('sourceType: $sourceType, ')
@@ -6052,6 +7588,11 @@ class SearchChunksCompanion extends UpdateCompanion<SearchChunkRow> {
           ..write('sortOrder: $sortOrder, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('generationId: $generationId, ')
+          ..write('documentSourceId: $documentSourceId, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('textOrigin: $textOrigin, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -7105,6 +8646,85 @@ class $OcrPagesTable extends OcrPages
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _sourceRevisionMeta = const VerificationMeta(
+    'sourceRevision',
+  );
+  @override
+  late final GeneratedColumn<String> sourceRevision = GeneratedColumn<String>(
+    'source_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _cacheSignatureMeta = const VerificationMeta(
+    'cacheSignature',
+  );
+  @override
+  late final GeneratedColumn<String> cacheSignature = GeneratedColumn<String>(
+    'cache_signature',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _textRevisionMeta = const VerificationMeta(
+    'textRevision',
+  );
+  @override
+  late final GeneratedColumn<String> textRevision = GeneratedColumn<String>(
+    'text_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _engineVersionMeta = const VerificationMeta(
+    'engineVersion',
+  );
+  @override
+  late final GeneratedColumn<String> engineVersion = GeneratedColumn<String>(
+    'engine_version',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _pipelineVersionMeta = const VerificationMeta(
+    'pipelineVersion',
+  );
+  @override
+  late final GeneratedColumn<String> pipelineVersion = GeneratedColumn<String>(
+    'pipeline_version',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _resultStateMeta = const VerificationMeta(
+    'resultState',
+  );
+  @override
+  late final GeneratedColumn<String> resultState = GeneratedColumn<String>(
+    'result_state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('legacy'),
+  );
+  static const VerificationMeta _indexStateMeta = const VerificationMeta(
+    'indexState',
+  );
+  @override
+  late final GeneratedColumn<String> indexState = GeneratedColumn<String>(
+    'index_state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('notApplicable'),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -7119,6 +8739,13 @@ class $OcrPagesTable extends OcrPages
     imageHeight,
     createdAt,
     updatedAt,
+    sourceRevision,
+    cacheSignature,
+    textRevision,
+    engineVersion,
+    pipelineVersion,
+    resultState,
+    indexState,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -7218,6 +8845,66 @@ class $OcrPagesTable extends OcrPages
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('source_revision')) {
+      context.handle(
+        _sourceRevisionMeta,
+        sourceRevision.isAcceptableOrUnknown(
+          data['source_revision']!,
+          _sourceRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('cache_signature')) {
+      context.handle(
+        _cacheSignatureMeta,
+        cacheSignature.isAcceptableOrUnknown(
+          data['cache_signature']!,
+          _cacheSignatureMeta,
+        ),
+      );
+    }
+    if (data.containsKey('text_revision')) {
+      context.handle(
+        _textRevisionMeta,
+        textRevision.isAcceptableOrUnknown(
+          data['text_revision']!,
+          _textRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('engine_version')) {
+      context.handle(
+        _engineVersionMeta,
+        engineVersion.isAcceptableOrUnknown(
+          data['engine_version']!,
+          _engineVersionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('pipeline_version')) {
+      context.handle(
+        _pipelineVersionMeta,
+        pipelineVersion.isAcceptableOrUnknown(
+          data['pipeline_version']!,
+          _pipelineVersionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('result_state')) {
+      context.handle(
+        _resultStateMeta,
+        resultState.isAcceptableOrUnknown(
+          data['result_state']!,
+          _resultStateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('index_state')) {
+      context.handle(
+        _indexStateMeta,
+        indexState.isAcceptableOrUnknown(data['index_state']!, _indexStateMeta),
+      );
+    }
     return context;
   }
 
@@ -7275,6 +8962,34 @@ class $OcrPagesTable extends OcrPages
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
       )!,
+      sourceRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_revision'],
+      ),
+      cacheSignature: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cache_signature'],
+      ),
+      textRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_revision'],
+      ),
+      engineVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}engine_version'],
+      ),
+      pipelineVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pipeline_version'],
+      ),
+      resultState: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}result_state'],
+      )!,
+      indexState: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}index_state'],
+      )!,
     );
   }
 
@@ -7299,6 +9014,13 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
   final int? imageHeight;
   final int createdAt;
   final int updatedAt;
+  final String? sourceRevision;
+  final String? cacheSignature;
+  final String? textRevision;
+  final String? engineVersion;
+  final String? pipelineVersion;
+  final String resultState;
+  final String indexState;
   const OcrPageRow({
     required this.id,
     required this.bookId,
@@ -7312,6 +9034,13 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
     this.imageHeight,
     required this.createdAt,
     required this.updatedAt,
+    this.sourceRevision,
+    this.cacheSignature,
+    this.textRevision,
+    this.engineVersion,
+    this.pipelineVersion,
+    required this.resultState,
+    required this.indexState,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -7338,6 +9067,23 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
     }
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || sourceRevision != null) {
+      map['source_revision'] = Variable<String>(sourceRevision);
+    }
+    if (!nullToAbsent || cacheSignature != null) {
+      map['cache_signature'] = Variable<String>(cacheSignature);
+    }
+    if (!nullToAbsent || textRevision != null) {
+      map['text_revision'] = Variable<String>(textRevision);
+    }
+    if (!nullToAbsent || engineVersion != null) {
+      map['engine_version'] = Variable<String>(engineVersion);
+    }
+    if (!nullToAbsent || pipelineVersion != null) {
+      map['pipeline_version'] = Variable<String>(pipelineVersion);
+    }
+    map['result_state'] = Variable<String>(resultState);
+    map['index_state'] = Variable<String>(indexState);
     return map;
   }
 
@@ -7365,6 +9111,23 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
           : Value(imageHeight),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      sourceRevision: sourceRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceRevision),
+      cacheSignature: cacheSignature == null && nullToAbsent
+          ? const Value.absent()
+          : Value(cacheSignature),
+      textRevision: textRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(textRevision),
+      engineVersion: engineVersion == null && nullToAbsent
+          ? const Value.absent()
+          : Value(engineVersion),
+      pipelineVersion: pipelineVersion == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pipelineVersion),
+      resultState: Value(resultState),
+      indexState: Value(indexState),
     );
   }
 
@@ -7386,6 +9149,13 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
       imageHeight: serializer.fromJson<int?>(json['imageHeight']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      sourceRevision: serializer.fromJson<String?>(json['sourceRevision']),
+      cacheSignature: serializer.fromJson<String?>(json['cacheSignature']),
+      textRevision: serializer.fromJson<String?>(json['textRevision']),
+      engineVersion: serializer.fromJson<String?>(json['engineVersion']),
+      pipelineVersion: serializer.fromJson<String?>(json['pipelineVersion']),
+      resultState: serializer.fromJson<String>(json['resultState']),
+      indexState: serializer.fromJson<String>(json['indexState']),
     );
   }
   @override
@@ -7404,6 +9174,13 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
       'imageHeight': serializer.toJson<int?>(imageHeight),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
+      'sourceRevision': serializer.toJson<String?>(sourceRevision),
+      'cacheSignature': serializer.toJson<String?>(cacheSignature),
+      'textRevision': serializer.toJson<String?>(textRevision),
+      'engineVersion': serializer.toJson<String?>(engineVersion),
+      'pipelineVersion': serializer.toJson<String?>(pipelineVersion),
+      'resultState': serializer.toJson<String>(resultState),
+      'indexState': serializer.toJson<String>(indexState),
     };
   }
 
@@ -7420,6 +9197,13 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
     Value<int?> imageHeight = const Value.absent(),
     int? createdAt,
     int? updatedAt,
+    Value<String?> sourceRevision = const Value.absent(),
+    Value<String?> cacheSignature = const Value.absent(),
+    Value<String?> textRevision = const Value.absent(),
+    Value<String?> engineVersion = const Value.absent(),
+    Value<String?> pipelineVersion = const Value.absent(),
+    String? resultState,
+    String? indexState,
   }) => OcrPageRow(
     id: id ?? this.id,
     bookId: bookId ?? this.bookId,
@@ -7433,6 +9217,21 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
     imageHeight: imageHeight.present ? imageHeight.value : this.imageHeight,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    sourceRevision: sourceRevision.present
+        ? sourceRevision.value
+        : this.sourceRevision,
+    cacheSignature: cacheSignature.present
+        ? cacheSignature.value
+        : this.cacheSignature,
+    textRevision: textRevision.present ? textRevision.value : this.textRevision,
+    engineVersion: engineVersion.present
+        ? engineVersion.value
+        : this.engineVersion,
+    pipelineVersion: pipelineVersion.present
+        ? pipelineVersion.value
+        : this.pipelineVersion,
+    resultState: resultState ?? this.resultState,
+    indexState: indexState ?? this.indexState,
   );
   OcrPageRow copyWithCompanion(OcrPagesCompanion data) {
     return OcrPageRow(
@@ -7458,6 +9257,27 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
           : this.imageHeight,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      sourceRevision: data.sourceRevision.present
+          ? data.sourceRevision.value
+          : this.sourceRevision,
+      cacheSignature: data.cacheSignature.present
+          ? data.cacheSignature.value
+          : this.cacheSignature,
+      textRevision: data.textRevision.present
+          ? data.textRevision.value
+          : this.textRevision,
+      engineVersion: data.engineVersion.present
+          ? data.engineVersion.value
+          : this.engineVersion,
+      pipelineVersion: data.pipelineVersion.present
+          ? data.pipelineVersion.value
+          : this.pipelineVersion,
+      resultState: data.resultState.present
+          ? data.resultState.value
+          : this.resultState,
+      indexState: data.indexState.present
+          ? data.indexState.value
+          : this.indexState,
     );
   }
 
@@ -7475,7 +9295,14 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
           ..write('imageWidth: $imageWidth, ')
           ..write('imageHeight: $imageHeight, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('cacheSignature: $cacheSignature, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('engineVersion: $engineVersion, ')
+          ..write('pipelineVersion: $pipelineVersion, ')
+          ..write('resultState: $resultState, ')
+          ..write('indexState: $indexState')
           ..write(')'))
         .toString();
   }
@@ -7494,6 +9321,13 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
     imageHeight,
     createdAt,
     updatedAt,
+    sourceRevision,
+    cacheSignature,
+    textRevision,
+    engineVersion,
+    pipelineVersion,
+    resultState,
+    indexState,
   );
   @override
   bool operator ==(Object other) =>
@@ -7510,7 +9344,14 @@ class OcrPageRow extends DataClass implements Insertable<OcrPageRow> {
           other.imageWidth == this.imageWidth &&
           other.imageHeight == this.imageHeight &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.sourceRevision == this.sourceRevision &&
+          other.cacheSignature == this.cacheSignature &&
+          other.textRevision == this.textRevision &&
+          other.engineVersion == this.engineVersion &&
+          other.pipelineVersion == this.pipelineVersion &&
+          other.resultState == this.resultState &&
+          other.indexState == this.indexState);
 }
 
 class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
@@ -7526,6 +9367,13 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
   final Value<int?> imageHeight;
   final Value<int> createdAt;
   final Value<int> updatedAt;
+  final Value<String?> sourceRevision;
+  final Value<String?> cacheSignature;
+  final Value<String?> textRevision;
+  final Value<String?> engineVersion;
+  final Value<String?> pipelineVersion;
+  final Value<String> resultState;
+  final Value<String> indexState;
   final Value<int> rowid;
   const OcrPagesCompanion({
     this.id = const Value.absent(),
@@ -7540,6 +9388,13 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
     this.imageHeight = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.sourceRevision = const Value.absent(),
+    this.cacheSignature = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.engineVersion = const Value.absent(),
+    this.pipelineVersion = const Value.absent(),
+    this.resultState = const Value.absent(),
+    this.indexState = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   OcrPagesCompanion.insert({
@@ -7555,6 +9410,13 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
     this.imageHeight = const Value.absent(),
     required int createdAt,
     required int updatedAt,
+    this.sourceRevision = const Value.absent(),
+    this.cacheSignature = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.engineVersion = const Value.absent(),
+    this.pipelineVersion = const Value.absent(),
+    this.resultState = const Value.absent(),
+    this.indexState = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        bookId = Value(bookId),
@@ -7576,6 +9438,13 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
     Expression<int>? imageHeight,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
+    Expression<String>? sourceRevision,
+    Expression<String>? cacheSignature,
+    Expression<String>? textRevision,
+    Expression<String>? engineVersion,
+    Expression<String>? pipelineVersion,
+    Expression<String>? resultState,
+    Expression<String>? indexState,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -7591,6 +9460,13 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
       if (imageHeight != null) 'image_height': imageHeight,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (sourceRevision != null) 'source_revision': sourceRevision,
+      if (cacheSignature != null) 'cache_signature': cacheSignature,
+      if (textRevision != null) 'text_revision': textRevision,
+      if (engineVersion != null) 'engine_version': engineVersion,
+      if (pipelineVersion != null) 'pipeline_version': pipelineVersion,
+      if (resultState != null) 'result_state': resultState,
+      if (indexState != null) 'index_state': indexState,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -7608,6 +9484,13 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
     Value<int?>? imageHeight,
     Value<int>? createdAt,
     Value<int>? updatedAt,
+    Value<String?>? sourceRevision,
+    Value<String?>? cacheSignature,
+    Value<String?>? textRevision,
+    Value<String?>? engineVersion,
+    Value<String?>? pipelineVersion,
+    Value<String>? resultState,
+    Value<String>? indexState,
     Value<int>? rowid,
   }) {
     return OcrPagesCompanion(
@@ -7623,6 +9506,13 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
       imageHeight: imageHeight ?? this.imageHeight,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      sourceRevision: sourceRevision ?? this.sourceRevision,
+      cacheSignature: cacheSignature ?? this.cacheSignature,
+      textRevision: textRevision ?? this.textRevision,
+      engineVersion: engineVersion ?? this.engineVersion,
+      pipelineVersion: pipelineVersion ?? this.pipelineVersion,
+      resultState: resultState ?? this.resultState,
+      indexState: indexState ?? this.indexState,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -7666,6 +9556,27 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
+    if (sourceRevision.present) {
+      map['source_revision'] = Variable<String>(sourceRevision.value);
+    }
+    if (cacheSignature.present) {
+      map['cache_signature'] = Variable<String>(cacheSignature.value);
+    }
+    if (textRevision.present) {
+      map['text_revision'] = Variable<String>(textRevision.value);
+    }
+    if (engineVersion.present) {
+      map['engine_version'] = Variable<String>(engineVersion.value);
+    }
+    if (pipelineVersion.present) {
+      map['pipeline_version'] = Variable<String>(pipelineVersion.value);
+    }
+    if (resultState.present) {
+      map['result_state'] = Variable<String>(resultState.value);
+    }
+    if (indexState.present) {
+      map['index_state'] = Variable<String>(indexState.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -7686,6 +9597,4921 @@ class OcrPagesCompanion extends UpdateCompanion<OcrPageRow> {
           ..write('imageWidth: $imageWidth, ')
           ..write('imageHeight: $imageHeight, ')
           ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('cacheSignature: $cacheSignature, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('engineVersion: $engineVersion, ')
+          ..write('pipelineVersion: $pipelineVersion, ')
+          ..write('resultState: $resultState, ')
+          ..write('indexState: $indexState, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $DocumentSourcesTable extends DocumentSources
+    with TableInfo<$DocumentSourcesTable, DocumentSourceRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DocumentSourcesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _bookIdMeta = const VerificationMeta('bookId');
+  @override
+  late final GeneratedColumn<String> bookId = GeneratedColumn<String>(
+    'book_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _addressMeta = const VerificationMeta(
+    'address',
+  );
+  @override
+  late final GeneratedColumn<String> address = GeneratedColumn<String>(
+    'address',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _currentSourceRevisionMeta =
+      const VerificationMeta('currentSourceRevision');
+  @override
+  late final GeneratedColumn<String> currentSourceRevision =
+      GeneratedColumn<String>(
+        'current_source_revision',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _stateMeta = const VerificationMeta('state');
+  @override
+  late final GeneratedColumn<String> state = GeneratedColumn<String>(
+    'state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('present'),
+  );
+  static const VerificationMeta _observedSizeMeta = const VerificationMeta(
+    'observedSize',
+  );
+  @override
+  late final GeneratedColumn<int> observedSize = GeneratedColumn<int>(
+    'observed_size',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _observedMtimeMeta = const VerificationMeta(
+    'observedMtime',
+  );
+  @override
+  late final GeneratedColumn<int> observedMtime = GeneratedColumn<int>(
+    'observed_mtime',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _observedAtMeta = const VerificationMeta(
+    'observedAt',
+  );
+  @override
+  late final GeneratedColumn<int> observedAt = GeneratedColumn<int>(
+    'observed_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    bookId,
+    kind,
+    address,
+    currentSourceRevision,
+    state,
+    observedSize,
+    observedMtime,
+    observedAt,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'document_sources';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DocumentSourceRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('book_id')) {
+      context.handle(
+        _bookIdMeta,
+        bookId.isAcceptableOrUnknown(data['book_id']!, _bookIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bookIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('address')) {
+      context.handle(
+        _addressMeta,
+        address.isAcceptableOrUnknown(data['address']!, _addressMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_addressMeta);
+    }
+    if (data.containsKey('current_source_revision')) {
+      context.handle(
+        _currentSourceRevisionMeta,
+        currentSourceRevision.isAcceptableOrUnknown(
+          data['current_source_revision']!,
+          _currentSourceRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('state')) {
+      context.handle(
+        _stateMeta,
+        state.isAcceptableOrUnknown(data['state']!, _stateMeta),
+      );
+    }
+    if (data.containsKey('observed_size')) {
+      context.handle(
+        _observedSizeMeta,
+        observedSize.isAcceptableOrUnknown(
+          data['observed_size']!,
+          _observedSizeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('observed_mtime')) {
+      context.handle(
+        _observedMtimeMeta,
+        observedMtime.isAcceptableOrUnknown(
+          data['observed_mtime']!,
+          _observedMtimeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('observed_at')) {
+      context.handle(
+        _observedAtMeta,
+        observedAt.isAcceptableOrUnknown(data['observed_at']!, _observedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_observedAtMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  DocumentSourceRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DocumentSourceRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      bookId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}book_id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      address: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}address'],
+      )!,
+      currentSourceRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}current_source_revision'],
+      ),
+      state: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}state'],
+      )!,
+      observedSize: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}observed_size'],
+      ),
+      observedMtime: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}observed_mtime'],
+      ),
+      observedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}observed_at'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $DocumentSourcesTable createAlias(String alias) {
+    return $DocumentSourcesTable(attachedDatabase, alias);
+  }
+}
+
+class DocumentSourceRow extends DataClass
+    implements Insertable<DocumentSourceRow> {
+  final String id;
+  final String bookId;
+  final String kind;
+  final String address;
+  final String? currentSourceRevision;
+  final String state;
+  final int? observedSize;
+  final int? observedMtime;
+  final int observedAt;
+  final int createdAt;
+  final int updatedAt;
+  const DocumentSourceRow({
+    required this.id,
+    required this.bookId,
+    required this.kind,
+    required this.address,
+    this.currentSourceRevision,
+    required this.state,
+    this.observedSize,
+    this.observedMtime,
+    required this.observedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['book_id'] = Variable<String>(bookId);
+    map['kind'] = Variable<String>(kind);
+    map['address'] = Variable<String>(address);
+    if (!nullToAbsent || currentSourceRevision != null) {
+      map['current_source_revision'] = Variable<String>(currentSourceRevision);
+    }
+    map['state'] = Variable<String>(state);
+    if (!nullToAbsent || observedSize != null) {
+      map['observed_size'] = Variable<int>(observedSize);
+    }
+    if (!nullToAbsent || observedMtime != null) {
+      map['observed_mtime'] = Variable<int>(observedMtime);
+    }
+    map['observed_at'] = Variable<int>(observedAt);
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  DocumentSourcesCompanion toCompanion(bool nullToAbsent) {
+    return DocumentSourcesCompanion(
+      id: Value(id),
+      bookId: Value(bookId),
+      kind: Value(kind),
+      address: Value(address),
+      currentSourceRevision: currentSourceRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(currentSourceRevision),
+      state: Value(state),
+      observedSize: observedSize == null && nullToAbsent
+          ? const Value.absent()
+          : Value(observedSize),
+      observedMtime: observedMtime == null && nullToAbsent
+          ? const Value.absent()
+          : Value(observedMtime),
+      observedAt: Value(observedAt),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory DocumentSourceRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DocumentSourceRow(
+      id: serializer.fromJson<String>(json['id']),
+      bookId: serializer.fromJson<String>(json['bookId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      address: serializer.fromJson<String>(json['address']),
+      currentSourceRevision: serializer.fromJson<String?>(
+        json['currentSourceRevision'],
+      ),
+      state: serializer.fromJson<String>(json['state']),
+      observedSize: serializer.fromJson<int?>(json['observedSize']),
+      observedMtime: serializer.fromJson<int?>(json['observedMtime']),
+      observedAt: serializer.fromJson<int>(json['observedAt']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'bookId': serializer.toJson<String>(bookId),
+      'kind': serializer.toJson<String>(kind),
+      'address': serializer.toJson<String>(address),
+      'currentSourceRevision': serializer.toJson<String?>(
+        currentSourceRevision,
+      ),
+      'state': serializer.toJson<String>(state),
+      'observedSize': serializer.toJson<int?>(observedSize),
+      'observedMtime': serializer.toJson<int?>(observedMtime),
+      'observedAt': serializer.toJson<int>(observedAt),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  DocumentSourceRow copyWith({
+    String? id,
+    String? bookId,
+    String? kind,
+    String? address,
+    Value<String?> currentSourceRevision = const Value.absent(),
+    String? state,
+    Value<int?> observedSize = const Value.absent(),
+    Value<int?> observedMtime = const Value.absent(),
+    int? observedAt,
+    int? createdAt,
+    int? updatedAt,
+  }) => DocumentSourceRow(
+    id: id ?? this.id,
+    bookId: bookId ?? this.bookId,
+    kind: kind ?? this.kind,
+    address: address ?? this.address,
+    currentSourceRevision: currentSourceRevision.present
+        ? currentSourceRevision.value
+        : this.currentSourceRevision,
+    state: state ?? this.state,
+    observedSize: observedSize.present ? observedSize.value : this.observedSize,
+    observedMtime: observedMtime.present
+        ? observedMtime.value
+        : this.observedMtime,
+    observedAt: observedAt ?? this.observedAt,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  DocumentSourceRow copyWithCompanion(DocumentSourcesCompanion data) {
+    return DocumentSourceRow(
+      id: data.id.present ? data.id.value : this.id,
+      bookId: data.bookId.present ? data.bookId.value : this.bookId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      address: data.address.present ? data.address.value : this.address,
+      currentSourceRevision: data.currentSourceRevision.present
+          ? data.currentSourceRevision.value
+          : this.currentSourceRevision,
+      state: data.state.present ? data.state.value : this.state,
+      observedSize: data.observedSize.present
+          ? data.observedSize.value
+          : this.observedSize,
+      observedMtime: data.observedMtime.present
+          ? data.observedMtime.value
+          : this.observedMtime,
+      observedAt: data.observedAt.present
+          ? data.observedAt.value
+          : this.observedAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DocumentSourceRow(')
+          ..write('id: $id, ')
+          ..write('bookId: $bookId, ')
+          ..write('kind: $kind, ')
+          ..write('address: $address, ')
+          ..write('currentSourceRevision: $currentSourceRevision, ')
+          ..write('state: $state, ')
+          ..write('observedSize: $observedSize, ')
+          ..write('observedMtime: $observedMtime, ')
+          ..write('observedAt: $observedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    bookId,
+    kind,
+    address,
+    currentSourceRevision,
+    state,
+    observedSize,
+    observedMtime,
+    observedAt,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DocumentSourceRow &&
+          other.id == this.id &&
+          other.bookId == this.bookId &&
+          other.kind == this.kind &&
+          other.address == this.address &&
+          other.currentSourceRevision == this.currentSourceRevision &&
+          other.state == this.state &&
+          other.observedSize == this.observedSize &&
+          other.observedMtime == this.observedMtime &&
+          other.observedAt == this.observedAt &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class DocumentSourcesCompanion extends UpdateCompanion<DocumentSourceRow> {
+  final Value<String> id;
+  final Value<String> bookId;
+  final Value<String> kind;
+  final Value<String> address;
+  final Value<String?> currentSourceRevision;
+  final Value<String> state;
+  final Value<int?> observedSize;
+  final Value<int?> observedMtime;
+  final Value<int> observedAt;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const DocumentSourcesCompanion({
+    this.id = const Value.absent(),
+    this.bookId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.address = const Value.absent(),
+    this.currentSourceRevision = const Value.absent(),
+    this.state = const Value.absent(),
+    this.observedSize = const Value.absent(),
+    this.observedMtime = const Value.absent(),
+    this.observedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  DocumentSourcesCompanion.insert({
+    required String id,
+    required String bookId,
+    required String kind,
+    required String address,
+    this.currentSourceRevision = const Value.absent(),
+    this.state = const Value.absent(),
+    this.observedSize = const Value.absent(),
+    this.observedMtime = const Value.absent(),
+    required int observedAt,
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       bookId = Value(bookId),
+       kind = Value(kind),
+       address = Value(address),
+       observedAt = Value(observedAt),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<DocumentSourceRow> custom({
+    Expression<String>? id,
+    Expression<String>? bookId,
+    Expression<String>? kind,
+    Expression<String>? address,
+    Expression<String>? currentSourceRevision,
+    Expression<String>? state,
+    Expression<int>? observedSize,
+    Expression<int>? observedMtime,
+    Expression<int>? observedAt,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (bookId != null) 'book_id': bookId,
+      if (kind != null) 'kind': kind,
+      if (address != null) 'address': address,
+      if (currentSourceRevision != null)
+        'current_source_revision': currentSourceRevision,
+      if (state != null) 'state': state,
+      if (observedSize != null) 'observed_size': observedSize,
+      if (observedMtime != null) 'observed_mtime': observedMtime,
+      if (observedAt != null) 'observed_at': observedAt,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  DocumentSourcesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? bookId,
+    Value<String>? kind,
+    Value<String>? address,
+    Value<String?>? currentSourceRevision,
+    Value<String>? state,
+    Value<int?>? observedSize,
+    Value<int?>? observedMtime,
+    Value<int>? observedAt,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return DocumentSourcesCompanion(
+      id: id ?? this.id,
+      bookId: bookId ?? this.bookId,
+      kind: kind ?? this.kind,
+      address: address ?? this.address,
+      currentSourceRevision:
+          currentSourceRevision ?? this.currentSourceRevision,
+      state: state ?? this.state,
+      observedSize: observedSize ?? this.observedSize,
+      observedMtime: observedMtime ?? this.observedMtime,
+      observedAt: observedAt ?? this.observedAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (bookId.present) {
+      map['book_id'] = Variable<String>(bookId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (address.present) {
+      map['address'] = Variable<String>(address.value);
+    }
+    if (currentSourceRevision.present) {
+      map['current_source_revision'] = Variable<String>(
+        currentSourceRevision.value,
+      );
+    }
+    if (state.present) {
+      map['state'] = Variable<String>(state.value);
+    }
+    if (observedSize.present) {
+      map['observed_size'] = Variable<int>(observedSize.value);
+    }
+    if (observedMtime.present) {
+      map['observed_mtime'] = Variable<int>(observedMtime.value);
+    }
+    if (observedAt.present) {
+      map['observed_at'] = Variable<int>(observedAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DocumentSourcesCompanion(')
+          ..write('id: $id, ')
+          ..write('bookId: $bookId, ')
+          ..write('kind: $kind, ')
+          ..write('address: $address, ')
+          ..write('currentSourceRevision: $currentSourceRevision, ')
+          ..write('state: $state, ')
+          ..write('observedSize: $observedSize, ')
+          ..write('observedMtime: $observedMtime, ')
+          ..write('observedAt: $observedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SearchIndexUnitsTable extends SearchIndexUnits
+    with TableInfo<$SearchIndexUnitsTable, SearchIndexUnitRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SearchIndexUnitsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _unitKeyMeta = const VerificationMeta(
+    'unitKey',
+  );
+  @override
+  late final GeneratedColumn<String> unitKey = GeneratedColumn<String>(
+    'unit_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _bookIdMeta = const VerificationMeta('bookId');
+  @override
+  late final GeneratedColumn<String> bookId = GeneratedColumn<String>(
+    'book_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _documentSourceIdMeta = const VerificationMeta(
+    'documentSourceId',
+  );
+  @override
+  late final GeneratedColumn<String> documentSourceId = GeneratedColumn<String>(
+    'document_source_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _requestedInputRevisionMeta =
+      const VerificationMeta('requestedInputRevision');
+  @override
+  late final GeneratedColumn<String> requestedInputRevision =
+      GeneratedColumn<String>(
+        'requested_input_revision',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _activeGenerationIdMeta =
+      const VerificationMeta('activeGenerationId');
+  @override
+  late final GeneratedColumn<String> activeGenerationId =
+      GeneratedColumn<String>(
+        'active_generation_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _stateMeta = const VerificationMeta('state');
+  @override
+  late final GeneratedColumn<String> state = GeneratedColumn<String>(
+    'state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    unitKey,
+    bookId,
+    documentSourceId,
+    requestedInputRevision,
+    activeGenerationId,
+    state,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'search_index_units';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SearchIndexUnitRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('unit_key')) {
+      context.handle(
+        _unitKeyMeta,
+        unitKey.isAcceptableOrUnknown(data['unit_key']!, _unitKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_unitKeyMeta);
+    }
+    if (data.containsKey('book_id')) {
+      context.handle(
+        _bookIdMeta,
+        bookId.isAcceptableOrUnknown(data['book_id']!, _bookIdMeta),
+      );
+    }
+    if (data.containsKey('document_source_id')) {
+      context.handle(
+        _documentSourceIdMeta,
+        documentSourceId.isAcceptableOrUnknown(
+          data['document_source_id']!,
+          _documentSourceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('requested_input_revision')) {
+      context.handle(
+        _requestedInputRevisionMeta,
+        requestedInputRevision.isAcceptableOrUnknown(
+          data['requested_input_revision']!,
+          _requestedInputRevisionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_requestedInputRevisionMeta);
+    }
+    if (data.containsKey('active_generation_id')) {
+      context.handle(
+        _activeGenerationIdMeta,
+        activeGenerationId.isAcceptableOrUnknown(
+          data['active_generation_id']!,
+          _activeGenerationIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('state')) {
+      context.handle(
+        _stateMeta,
+        state.isAcceptableOrUnknown(data['state']!, _stateMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SearchIndexUnitRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SearchIndexUnitRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      unitKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unit_key'],
+      )!,
+      bookId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}book_id'],
+      ),
+      documentSourceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}document_source_id'],
+      ),
+      requestedInputRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}requested_input_revision'],
+      )!,
+      activeGenerationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}active_generation_id'],
+      ),
+      state: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}state'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $SearchIndexUnitsTable createAlias(String alias) {
+    return $SearchIndexUnitsTable(attachedDatabase, alias);
+  }
+}
+
+class SearchIndexUnitRow extends DataClass
+    implements Insertable<SearchIndexUnitRow> {
+  final String id;
+  final String unitKey;
+  final String? bookId;
+  final String? documentSourceId;
+  final String requestedInputRevision;
+  final String? activeGenerationId;
+  final String state;
+  final int updatedAt;
+  const SearchIndexUnitRow({
+    required this.id,
+    required this.unitKey,
+    this.bookId,
+    this.documentSourceId,
+    required this.requestedInputRevision,
+    this.activeGenerationId,
+    required this.state,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['unit_key'] = Variable<String>(unitKey);
+    if (!nullToAbsent || bookId != null) {
+      map['book_id'] = Variable<String>(bookId);
+    }
+    if (!nullToAbsent || documentSourceId != null) {
+      map['document_source_id'] = Variable<String>(documentSourceId);
+    }
+    map['requested_input_revision'] = Variable<String>(requestedInputRevision);
+    if (!nullToAbsent || activeGenerationId != null) {
+      map['active_generation_id'] = Variable<String>(activeGenerationId);
+    }
+    map['state'] = Variable<String>(state);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  SearchIndexUnitsCompanion toCompanion(bool nullToAbsent) {
+    return SearchIndexUnitsCompanion(
+      id: Value(id),
+      unitKey: Value(unitKey),
+      bookId: bookId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(bookId),
+      documentSourceId: documentSourceId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(documentSourceId),
+      requestedInputRevision: Value(requestedInputRevision),
+      activeGenerationId: activeGenerationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(activeGenerationId),
+      state: Value(state),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory SearchIndexUnitRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SearchIndexUnitRow(
+      id: serializer.fromJson<String>(json['id']),
+      unitKey: serializer.fromJson<String>(json['unitKey']),
+      bookId: serializer.fromJson<String?>(json['bookId']),
+      documentSourceId: serializer.fromJson<String?>(json['documentSourceId']),
+      requestedInputRevision: serializer.fromJson<String>(
+        json['requestedInputRevision'],
+      ),
+      activeGenerationId: serializer.fromJson<String?>(
+        json['activeGenerationId'],
+      ),
+      state: serializer.fromJson<String>(json['state']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'unitKey': serializer.toJson<String>(unitKey),
+      'bookId': serializer.toJson<String?>(bookId),
+      'documentSourceId': serializer.toJson<String?>(documentSourceId),
+      'requestedInputRevision': serializer.toJson<String>(
+        requestedInputRevision,
+      ),
+      'activeGenerationId': serializer.toJson<String?>(activeGenerationId),
+      'state': serializer.toJson<String>(state),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  SearchIndexUnitRow copyWith({
+    String? id,
+    String? unitKey,
+    Value<String?> bookId = const Value.absent(),
+    Value<String?> documentSourceId = const Value.absent(),
+    String? requestedInputRevision,
+    Value<String?> activeGenerationId = const Value.absent(),
+    String? state,
+    int? updatedAt,
+  }) => SearchIndexUnitRow(
+    id: id ?? this.id,
+    unitKey: unitKey ?? this.unitKey,
+    bookId: bookId.present ? bookId.value : this.bookId,
+    documentSourceId: documentSourceId.present
+        ? documentSourceId.value
+        : this.documentSourceId,
+    requestedInputRevision:
+        requestedInputRevision ?? this.requestedInputRevision,
+    activeGenerationId: activeGenerationId.present
+        ? activeGenerationId.value
+        : this.activeGenerationId,
+    state: state ?? this.state,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  SearchIndexUnitRow copyWithCompanion(SearchIndexUnitsCompanion data) {
+    return SearchIndexUnitRow(
+      id: data.id.present ? data.id.value : this.id,
+      unitKey: data.unitKey.present ? data.unitKey.value : this.unitKey,
+      bookId: data.bookId.present ? data.bookId.value : this.bookId,
+      documentSourceId: data.documentSourceId.present
+          ? data.documentSourceId.value
+          : this.documentSourceId,
+      requestedInputRevision: data.requestedInputRevision.present
+          ? data.requestedInputRevision.value
+          : this.requestedInputRevision,
+      activeGenerationId: data.activeGenerationId.present
+          ? data.activeGenerationId.value
+          : this.activeGenerationId,
+      state: data.state.present ? data.state.value : this.state,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchIndexUnitRow(')
+          ..write('id: $id, ')
+          ..write('unitKey: $unitKey, ')
+          ..write('bookId: $bookId, ')
+          ..write('documentSourceId: $documentSourceId, ')
+          ..write('requestedInputRevision: $requestedInputRevision, ')
+          ..write('activeGenerationId: $activeGenerationId, ')
+          ..write('state: $state, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    unitKey,
+    bookId,
+    documentSourceId,
+    requestedInputRevision,
+    activeGenerationId,
+    state,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SearchIndexUnitRow &&
+          other.id == this.id &&
+          other.unitKey == this.unitKey &&
+          other.bookId == this.bookId &&
+          other.documentSourceId == this.documentSourceId &&
+          other.requestedInputRevision == this.requestedInputRevision &&
+          other.activeGenerationId == this.activeGenerationId &&
+          other.state == this.state &&
+          other.updatedAt == this.updatedAt);
+}
+
+class SearchIndexUnitsCompanion extends UpdateCompanion<SearchIndexUnitRow> {
+  final Value<String> id;
+  final Value<String> unitKey;
+  final Value<String?> bookId;
+  final Value<String?> documentSourceId;
+  final Value<String> requestedInputRevision;
+  final Value<String?> activeGenerationId;
+  final Value<String> state;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const SearchIndexUnitsCompanion({
+    this.id = const Value.absent(),
+    this.unitKey = const Value.absent(),
+    this.bookId = const Value.absent(),
+    this.documentSourceId = const Value.absent(),
+    this.requestedInputRevision = const Value.absent(),
+    this.activeGenerationId = const Value.absent(),
+    this.state = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SearchIndexUnitsCompanion.insert({
+    required String id,
+    required String unitKey,
+    this.bookId = const Value.absent(),
+    this.documentSourceId = const Value.absent(),
+    required String requestedInputRevision,
+    this.activeGenerationId = const Value.absent(),
+    this.state = const Value.absent(),
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       unitKey = Value(unitKey),
+       requestedInputRevision = Value(requestedInputRevision),
+       updatedAt = Value(updatedAt);
+  static Insertable<SearchIndexUnitRow> custom({
+    Expression<String>? id,
+    Expression<String>? unitKey,
+    Expression<String>? bookId,
+    Expression<String>? documentSourceId,
+    Expression<String>? requestedInputRevision,
+    Expression<String>? activeGenerationId,
+    Expression<String>? state,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (unitKey != null) 'unit_key': unitKey,
+      if (bookId != null) 'book_id': bookId,
+      if (documentSourceId != null) 'document_source_id': documentSourceId,
+      if (requestedInputRevision != null)
+        'requested_input_revision': requestedInputRevision,
+      if (activeGenerationId != null)
+        'active_generation_id': activeGenerationId,
+      if (state != null) 'state': state,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SearchIndexUnitsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? unitKey,
+    Value<String?>? bookId,
+    Value<String?>? documentSourceId,
+    Value<String>? requestedInputRevision,
+    Value<String?>? activeGenerationId,
+    Value<String>? state,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return SearchIndexUnitsCompanion(
+      id: id ?? this.id,
+      unitKey: unitKey ?? this.unitKey,
+      bookId: bookId ?? this.bookId,
+      documentSourceId: documentSourceId ?? this.documentSourceId,
+      requestedInputRevision:
+          requestedInputRevision ?? this.requestedInputRevision,
+      activeGenerationId: activeGenerationId ?? this.activeGenerationId,
+      state: state ?? this.state,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (unitKey.present) {
+      map['unit_key'] = Variable<String>(unitKey.value);
+    }
+    if (bookId.present) {
+      map['book_id'] = Variable<String>(bookId.value);
+    }
+    if (documentSourceId.present) {
+      map['document_source_id'] = Variable<String>(documentSourceId.value);
+    }
+    if (requestedInputRevision.present) {
+      map['requested_input_revision'] = Variable<String>(
+        requestedInputRevision.value,
+      );
+    }
+    if (activeGenerationId.present) {
+      map['active_generation_id'] = Variable<String>(activeGenerationId.value);
+    }
+    if (state.present) {
+      map['state'] = Variable<String>(state.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchIndexUnitsCompanion(')
+          ..write('id: $id, ')
+          ..write('unitKey: $unitKey, ')
+          ..write('bookId: $bookId, ')
+          ..write('documentSourceId: $documentSourceId, ')
+          ..write('requestedInputRevision: $requestedInputRevision, ')
+          ..write('activeGenerationId: $activeGenerationId, ')
+          ..write('state: $state, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SearchIndexGenerationsTable extends SearchIndexGenerations
+    with TableInfo<$SearchIndexGenerationsTable, SearchIndexGenerationRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SearchIndexGenerationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _unitIdMeta = const VerificationMeta('unitId');
+  @override
+  late final GeneratedColumn<String> unitId = GeneratedColumn<String>(
+    'unit_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _inputRevisionMeta = const VerificationMeta(
+    'inputRevision',
+  );
+  @override
+  late final GeneratedColumn<String> inputRevision = GeneratedColumn<String>(
+    'input_revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceRevisionMeta = const VerificationMeta(
+    'sourceRevision',
+  );
+  @override
+  late final GeneratedColumn<String> sourceRevision = GeneratedColumn<String>(
+    'source_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _textRevisionMeta = const VerificationMeta(
+    'textRevision',
+  );
+  @override
+  late final GeneratedColumn<String> textRevision = GeneratedColumn<String>(
+    'text_revision',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _textOriginMeta = const VerificationMeta(
+    'textOrigin',
+  );
+  @override
+  late final GeneratedColumn<String> textOrigin = GeneratedColumn<String>(
+    'text_origin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('native'),
+  );
+  static const VerificationMeta _extractorVersionMeta = const VerificationMeta(
+    'extractorVersion',
+  );
+  @override
+  late final GeneratedColumn<String> extractorVersion = GeneratedColumn<String>(
+    'extractor_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _tokenizerVersionMeta = const VerificationMeta(
+    'tokenizerVersion',
+  );
+  @override
+  late final GeneratedColumn<String> tokenizerVersion = GeneratedColumn<String>(
+    'tokenizer_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _stateMeta = const VerificationMeta('state');
+  @override
+  late final GeneratedColumn<String> state = GeneratedColumn<String>(
+    'state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('building'),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _publishedAtMeta = const VerificationMeta(
+    'publishedAt',
+  );
+  @override
+  late final GeneratedColumn<int> publishedAt = GeneratedColumn<int>(
+    'published_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    unitId,
+    inputRevision,
+    sourceRevision,
+    textRevision,
+    textOrigin,
+    extractorVersion,
+    tokenizerVersion,
+    state,
+    createdAt,
+    publishedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'search_index_generations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SearchIndexGenerationRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('unit_id')) {
+      context.handle(
+        _unitIdMeta,
+        unitId.isAcceptableOrUnknown(data['unit_id']!, _unitIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_unitIdMeta);
+    }
+    if (data.containsKey('input_revision')) {
+      context.handle(
+        _inputRevisionMeta,
+        inputRevision.isAcceptableOrUnknown(
+          data['input_revision']!,
+          _inputRevisionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_inputRevisionMeta);
+    }
+    if (data.containsKey('source_revision')) {
+      context.handle(
+        _sourceRevisionMeta,
+        sourceRevision.isAcceptableOrUnknown(
+          data['source_revision']!,
+          _sourceRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('text_revision')) {
+      context.handle(
+        _textRevisionMeta,
+        textRevision.isAcceptableOrUnknown(
+          data['text_revision']!,
+          _textRevisionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('text_origin')) {
+      context.handle(
+        _textOriginMeta,
+        textOrigin.isAcceptableOrUnknown(data['text_origin']!, _textOriginMeta),
+      );
+    }
+    if (data.containsKey('extractor_version')) {
+      context.handle(
+        _extractorVersionMeta,
+        extractorVersion.isAcceptableOrUnknown(
+          data['extractor_version']!,
+          _extractorVersionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_extractorVersionMeta);
+    }
+    if (data.containsKey('tokenizer_version')) {
+      context.handle(
+        _tokenizerVersionMeta,
+        tokenizerVersion.isAcceptableOrUnknown(
+          data['tokenizer_version']!,
+          _tokenizerVersionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_tokenizerVersionMeta);
+    }
+    if (data.containsKey('state')) {
+      context.handle(
+        _stateMeta,
+        state.isAcceptableOrUnknown(data['state']!, _stateMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('published_at')) {
+      context.handle(
+        _publishedAtMeta,
+        publishedAt.isAcceptableOrUnknown(
+          data['published_at']!,
+          _publishedAtMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SearchIndexGenerationRow map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SearchIndexGenerationRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      unitId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unit_id'],
+      )!,
+      inputRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}input_revision'],
+      )!,
+      sourceRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_revision'],
+      ),
+      textRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_revision'],
+      ),
+      textOrigin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_origin'],
+      )!,
+      extractorVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}extractor_version'],
+      )!,
+      tokenizerVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tokenizer_version'],
+      )!,
+      state: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}state'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      publishedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}published_at'],
+      ),
+    );
+  }
+
+  @override
+  $SearchIndexGenerationsTable createAlias(String alias) {
+    return $SearchIndexGenerationsTable(attachedDatabase, alias);
+  }
+}
+
+class SearchIndexGenerationRow extends DataClass
+    implements Insertable<SearchIndexGenerationRow> {
+  final String id;
+  final String unitId;
+  final String inputRevision;
+  final String? sourceRevision;
+  final String? textRevision;
+  final String textOrigin;
+  final String extractorVersion;
+  final String tokenizerVersion;
+  final String state;
+  final int createdAt;
+  final int? publishedAt;
+  const SearchIndexGenerationRow({
+    required this.id,
+    required this.unitId,
+    required this.inputRevision,
+    this.sourceRevision,
+    this.textRevision,
+    required this.textOrigin,
+    required this.extractorVersion,
+    required this.tokenizerVersion,
+    required this.state,
+    required this.createdAt,
+    this.publishedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['unit_id'] = Variable<String>(unitId);
+    map['input_revision'] = Variable<String>(inputRevision);
+    if (!nullToAbsent || sourceRevision != null) {
+      map['source_revision'] = Variable<String>(sourceRevision);
+    }
+    if (!nullToAbsent || textRevision != null) {
+      map['text_revision'] = Variable<String>(textRevision);
+    }
+    map['text_origin'] = Variable<String>(textOrigin);
+    map['extractor_version'] = Variable<String>(extractorVersion);
+    map['tokenizer_version'] = Variable<String>(tokenizerVersion);
+    map['state'] = Variable<String>(state);
+    map['created_at'] = Variable<int>(createdAt);
+    if (!nullToAbsent || publishedAt != null) {
+      map['published_at'] = Variable<int>(publishedAt);
+    }
+    return map;
+  }
+
+  SearchIndexGenerationsCompanion toCompanion(bool nullToAbsent) {
+    return SearchIndexGenerationsCompanion(
+      id: Value(id),
+      unitId: Value(unitId),
+      inputRevision: Value(inputRevision),
+      sourceRevision: sourceRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceRevision),
+      textRevision: textRevision == null && nullToAbsent
+          ? const Value.absent()
+          : Value(textRevision),
+      textOrigin: Value(textOrigin),
+      extractorVersion: Value(extractorVersion),
+      tokenizerVersion: Value(tokenizerVersion),
+      state: Value(state),
+      createdAt: Value(createdAt),
+      publishedAt: publishedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(publishedAt),
+    );
+  }
+
+  factory SearchIndexGenerationRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SearchIndexGenerationRow(
+      id: serializer.fromJson<String>(json['id']),
+      unitId: serializer.fromJson<String>(json['unitId']),
+      inputRevision: serializer.fromJson<String>(json['inputRevision']),
+      sourceRevision: serializer.fromJson<String?>(json['sourceRevision']),
+      textRevision: serializer.fromJson<String?>(json['textRevision']),
+      textOrigin: serializer.fromJson<String>(json['textOrigin']),
+      extractorVersion: serializer.fromJson<String>(json['extractorVersion']),
+      tokenizerVersion: serializer.fromJson<String>(json['tokenizerVersion']),
+      state: serializer.fromJson<String>(json['state']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      publishedAt: serializer.fromJson<int?>(json['publishedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'unitId': serializer.toJson<String>(unitId),
+      'inputRevision': serializer.toJson<String>(inputRevision),
+      'sourceRevision': serializer.toJson<String?>(sourceRevision),
+      'textRevision': serializer.toJson<String?>(textRevision),
+      'textOrigin': serializer.toJson<String>(textOrigin),
+      'extractorVersion': serializer.toJson<String>(extractorVersion),
+      'tokenizerVersion': serializer.toJson<String>(tokenizerVersion),
+      'state': serializer.toJson<String>(state),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'publishedAt': serializer.toJson<int?>(publishedAt),
+    };
+  }
+
+  SearchIndexGenerationRow copyWith({
+    String? id,
+    String? unitId,
+    String? inputRevision,
+    Value<String?> sourceRevision = const Value.absent(),
+    Value<String?> textRevision = const Value.absent(),
+    String? textOrigin,
+    String? extractorVersion,
+    String? tokenizerVersion,
+    String? state,
+    int? createdAt,
+    Value<int?> publishedAt = const Value.absent(),
+  }) => SearchIndexGenerationRow(
+    id: id ?? this.id,
+    unitId: unitId ?? this.unitId,
+    inputRevision: inputRevision ?? this.inputRevision,
+    sourceRevision: sourceRevision.present
+        ? sourceRevision.value
+        : this.sourceRevision,
+    textRevision: textRevision.present ? textRevision.value : this.textRevision,
+    textOrigin: textOrigin ?? this.textOrigin,
+    extractorVersion: extractorVersion ?? this.extractorVersion,
+    tokenizerVersion: tokenizerVersion ?? this.tokenizerVersion,
+    state: state ?? this.state,
+    createdAt: createdAt ?? this.createdAt,
+    publishedAt: publishedAt.present ? publishedAt.value : this.publishedAt,
+  );
+  SearchIndexGenerationRow copyWithCompanion(
+    SearchIndexGenerationsCompanion data,
+  ) {
+    return SearchIndexGenerationRow(
+      id: data.id.present ? data.id.value : this.id,
+      unitId: data.unitId.present ? data.unitId.value : this.unitId,
+      inputRevision: data.inputRevision.present
+          ? data.inputRevision.value
+          : this.inputRevision,
+      sourceRevision: data.sourceRevision.present
+          ? data.sourceRevision.value
+          : this.sourceRevision,
+      textRevision: data.textRevision.present
+          ? data.textRevision.value
+          : this.textRevision,
+      textOrigin: data.textOrigin.present
+          ? data.textOrigin.value
+          : this.textOrigin,
+      extractorVersion: data.extractorVersion.present
+          ? data.extractorVersion.value
+          : this.extractorVersion,
+      tokenizerVersion: data.tokenizerVersion.present
+          ? data.tokenizerVersion.value
+          : this.tokenizerVersion,
+      state: data.state.present ? data.state.value : this.state,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      publishedAt: data.publishedAt.present
+          ? data.publishedAt.value
+          : this.publishedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchIndexGenerationRow(')
+          ..write('id: $id, ')
+          ..write('unitId: $unitId, ')
+          ..write('inputRevision: $inputRevision, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('textOrigin: $textOrigin, ')
+          ..write('extractorVersion: $extractorVersion, ')
+          ..write('tokenizerVersion: $tokenizerVersion, ')
+          ..write('state: $state, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('publishedAt: $publishedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    unitId,
+    inputRevision,
+    sourceRevision,
+    textRevision,
+    textOrigin,
+    extractorVersion,
+    tokenizerVersion,
+    state,
+    createdAt,
+    publishedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SearchIndexGenerationRow &&
+          other.id == this.id &&
+          other.unitId == this.unitId &&
+          other.inputRevision == this.inputRevision &&
+          other.sourceRevision == this.sourceRevision &&
+          other.textRevision == this.textRevision &&
+          other.textOrigin == this.textOrigin &&
+          other.extractorVersion == this.extractorVersion &&
+          other.tokenizerVersion == this.tokenizerVersion &&
+          other.state == this.state &&
+          other.createdAt == this.createdAt &&
+          other.publishedAt == this.publishedAt);
+}
+
+class SearchIndexGenerationsCompanion
+    extends UpdateCompanion<SearchIndexGenerationRow> {
+  final Value<String> id;
+  final Value<String> unitId;
+  final Value<String> inputRevision;
+  final Value<String?> sourceRevision;
+  final Value<String?> textRevision;
+  final Value<String> textOrigin;
+  final Value<String> extractorVersion;
+  final Value<String> tokenizerVersion;
+  final Value<String> state;
+  final Value<int> createdAt;
+  final Value<int?> publishedAt;
+  final Value<int> rowid;
+  const SearchIndexGenerationsCompanion({
+    this.id = const Value.absent(),
+    this.unitId = const Value.absent(),
+    this.inputRevision = const Value.absent(),
+    this.sourceRevision = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.textOrigin = const Value.absent(),
+    this.extractorVersion = const Value.absent(),
+    this.tokenizerVersion = const Value.absent(),
+    this.state = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.publishedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SearchIndexGenerationsCompanion.insert({
+    required String id,
+    required String unitId,
+    required String inputRevision,
+    this.sourceRevision = const Value.absent(),
+    this.textRevision = const Value.absent(),
+    this.textOrigin = const Value.absent(),
+    required String extractorVersion,
+    required String tokenizerVersion,
+    this.state = const Value.absent(),
+    required int createdAt,
+    this.publishedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       unitId = Value(unitId),
+       inputRevision = Value(inputRevision),
+       extractorVersion = Value(extractorVersion),
+       tokenizerVersion = Value(tokenizerVersion),
+       createdAt = Value(createdAt);
+  static Insertable<SearchIndexGenerationRow> custom({
+    Expression<String>? id,
+    Expression<String>? unitId,
+    Expression<String>? inputRevision,
+    Expression<String>? sourceRevision,
+    Expression<String>? textRevision,
+    Expression<String>? textOrigin,
+    Expression<String>? extractorVersion,
+    Expression<String>? tokenizerVersion,
+    Expression<String>? state,
+    Expression<int>? createdAt,
+    Expression<int>? publishedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (unitId != null) 'unit_id': unitId,
+      if (inputRevision != null) 'input_revision': inputRevision,
+      if (sourceRevision != null) 'source_revision': sourceRevision,
+      if (textRevision != null) 'text_revision': textRevision,
+      if (textOrigin != null) 'text_origin': textOrigin,
+      if (extractorVersion != null) 'extractor_version': extractorVersion,
+      if (tokenizerVersion != null) 'tokenizer_version': tokenizerVersion,
+      if (state != null) 'state': state,
+      if (createdAt != null) 'created_at': createdAt,
+      if (publishedAt != null) 'published_at': publishedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SearchIndexGenerationsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? unitId,
+    Value<String>? inputRevision,
+    Value<String?>? sourceRevision,
+    Value<String?>? textRevision,
+    Value<String>? textOrigin,
+    Value<String>? extractorVersion,
+    Value<String>? tokenizerVersion,
+    Value<String>? state,
+    Value<int>? createdAt,
+    Value<int?>? publishedAt,
+    Value<int>? rowid,
+  }) {
+    return SearchIndexGenerationsCompanion(
+      id: id ?? this.id,
+      unitId: unitId ?? this.unitId,
+      inputRevision: inputRevision ?? this.inputRevision,
+      sourceRevision: sourceRevision ?? this.sourceRevision,
+      textRevision: textRevision ?? this.textRevision,
+      textOrigin: textOrigin ?? this.textOrigin,
+      extractorVersion: extractorVersion ?? this.extractorVersion,
+      tokenizerVersion: tokenizerVersion ?? this.tokenizerVersion,
+      state: state ?? this.state,
+      createdAt: createdAt ?? this.createdAt,
+      publishedAt: publishedAt ?? this.publishedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (unitId.present) {
+      map['unit_id'] = Variable<String>(unitId.value);
+    }
+    if (inputRevision.present) {
+      map['input_revision'] = Variable<String>(inputRevision.value);
+    }
+    if (sourceRevision.present) {
+      map['source_revision'] = Variable<String>(sourceRevision.value);
+    }
+    if (textRevision.present) {
+      map['text_revision'] = Variable<String>(textRevision.value);
+    }
+    if (textOrigin.present) {
+      map['text_origin'] = Variable<String>(textOrigin.value);
+    }
+    if (extractorVersion.present) {
+      map['extractor_version'] = Variable<String>(extractorVersion.value);
+    }
+    if (tokenizerVersion.present) {
+      map['tokenizer_version'] = Variable<String>(tokenizerVersion.value);
+    }
+    if (state.present) {
+      map['state'] = Variable<String>(state.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (publishedAt.present) {
+      map['published_at'] = Variable<int>(publishedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchIndexGenerationsCompanion(')
+          ..write('id: $id, ')
+          ..write('unitId: $unitId, ')
+          ..write('inputRevision: $inputRevision, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('textRevision: $textRevision, ')
+          ..write('textOrigin: $textOrigin, ')
+          ..write('extractorVersion: $extractorVersion, ')
+          ..write('tokenizerVersion: $tokenizerVersion, ')
+          ..write('state: $state, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('publishedAt: $publishedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $AiProfilesTable extends AiProfiles
+    with TableInfo<$AiProfilesTable, AiProfileRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AiProfilesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _providerMeta = const VerificationMeta(
+    'provider',
+  );
+  @override
+  late final GeneratedColumn<String> provider = GeneratedColumn<String>(
+    'provider',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('openai-compatible'),
+  );
+  static const VerificationMeta _baseUrlMeta = const VerificationMeta(
+    'baseUrl',
+  );
+  @override
+  late final GeneratedColumn<String> baseUrl = GeneratedColumn<String>(
+    'base_url',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _modelMeta = const VerificationMeta('model');
+  @override
+  late final GeneratedColumn<String> model = GeneratedColumn<String>(
+    'model',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _temperatureMeta = const VerificationMeta(
+    'temperature',
+  );
+  @override
+  late final GeneratedColumn<double> temperature = GeneratedColumn<double>(
+    'temperature',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0.2),
+  );
+  static const VerificationMeta _maxTokensMeta = const VerificationMeta(
+    'maxTokens',
+  );
+  @override
+  late final GeneratedColumn<int> maxTokens = GeneratedColumn<int>(
+    'max_tokens',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1200),
+  );
+  static const VerificationMeta _streamingMeta = const VerificationMeta(
+    'streaming',
+  );
+  @override
+  late final GeneratedColumn<bool> streaming = GeneratedColumn<bool>(
+    'streaming',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("streaming" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _systemPromptMeta = const VerificationMeta(
+    'systemPrompt',
+  );
+  @override
+  late final GeneratedColumn<String> systemPrompt = GeneratedColumn<String>(
+    'system_prompt',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _revisionMeta = const VerificationMeta(
+    'revision',
+  );
+  @override
+  late final GeneratedColumn<int> revision = GeneratedColumn<int>(
+    'revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<int> deletedAt = GeneratedColumn<int>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    provider,
+    baseUrl,
+    model,
+    temperature,
+    maxTokens,
+    streaming,
+    systemPrompt,
+    revision,
+    createdAt,
+    updatedAt,
+    deletedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ai_profiles';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AiProfileRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('provider')) {
+      context.handle(
+        _providerMeta,
+        provider.isAcceptableOrUnknown(data['provider']!, _providerMeta),
+      );
+    }
+    if (data.containsKey('base_url')) {
+      context.handle(
+        _baseUrlMeta,
+        baseUrl.isAcceptableOrUnknown(data['base_url']!, _baseUrlMeta),
+      );
+    }
+    if (data.containsKey('model')) {
+      context.handle(
+        _modelMeta,
+        model.isAcceptableOrUnknown(data['model']!, _modelMeta),
+      );
+    }
+    if (data.containsKey('temperature')) {
+      context.handle(
+        _temperatureMeta,
+        temperature.isAcceptableOrUnknown(
+          data['temperature']!,
+          _temperatureMeta,
+        ),
+      );
+    }
+    if (data.containsKey('max_tokens')) {
+      context.handle(
+        _maxTokensMeta,
+        maxTokens.isAcceptableOrUnknown(data['max_tokens']!, _maxTokensMeta),
+      );
+    }
+    if (data.containsKey('streaming')) {
+      context.handle(
+        _streamingMeta,
+        streaming.isAcceptableOrUnknown(data['streaming']!, _streamingMeta),
+      );
+    }
+    if (data.containsKey('system_prompt')) {
+      context.handle(
+        _systemPromptMeta,
+        systemPrompt.isAcceptableOrUnknown(
+          data['system_prompt']!,
+          _systemPromptMeta,
+        ),
+      );
+    }
+    if (data.containsKey('revision')) {
+      context.handle(
+        _revisionMeta,
+        revision.isAcceptableOrUnknown(data['revision']!, _revisionMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AiProfileRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AiProfileRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      provider: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}provider'],
+      )!,
+      baseUrl: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}base_url'],
+      )!,
+      model: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}model'],
+      )!,
+      temperature: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}temperature'],
+      )!,
+      maxTokens: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}max_tokens'],
+      )!,
+      streaming: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}streaming'],
+      )!,
+      systemPrompt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}system_prompt'],
+      )!,
+      revision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}revision'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}deleted_at'],
+      ),
+    );
+  }
+
+  @override
+  $AiProfilesTable createAlias(String alias) {
+    return $AiProfilesTable(attachedDatabase, alias);
+  }
+}
+
+class AiProfileRow extends DataClass implements Insertable<AiProfileRow> {
+  final String id;
+  final String name;
+  final String provider;
+  final String baseUrl;
+  final String model;
+  final double temperature;
+  final int maxTokens;
+  final bool streaming;
+  final String systemPrompt;
+  final int revision;
+  final int createdAt;
+  final int updatedAt;
+  final int? deletedAt;
+  const AiProfileRow({
+    required this.id,
+    required this.name,
+    required this.provider,
+    required this.baseUrl,
+    required this.model,
+    required this.temperature,
+    required this.maxTokens,
+    required this.streaming,
+    required this.systemPrompt,
+    required this.revision,
+    required this.createdAt,
+    required this.updatedAt,
+    this.deletedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['provider'] = Variable<String>(provider);
+    map['base_url'] = Variable<String>(baseUrl);
+    map['model'] = Variable<String>(model);
+    map['temperature'] = Variable<double>(temperature);
+    map['max_tokens'] = Variable<int>(maxTokens);
+    map['streaming'] = Variable<bool>(streaming);
+    map['system_prompt'] = Variable<String>(systemPrompt);
+    map['revision'] = Variable<int>(revision);
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<int>(deletedAt);
+    }
+    return map;
+  }
+
+  AiProfilesCompanion toCompanion(bool nullToAbsent) {
+    return AiProfilesCompanion(
+      id: Value(id),
+      name: Value(name),
+      provider: Value(provider),
+      baseUrl: Value(baseUrl),
+      model: Value(model),
+      temperature: Value(temperature),
+      maxTokens: Value(maxTokens),
+      streaming: Value(streaming),
+      systemPrompt: Value(systemPrompt),
+      revision: Value(revision),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+    );
+  }
+
+  factory AiProfileRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AiProfileRow(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      provider: serializer.fromJson<String>(json['provider']),
+      baseUrl: serializer.fromJson<String>(json['baseUrl']),
+      model: serializer.fromJson<String>(json['model']),
+      temperature: serializer.fromJson<double>(json['temperature']),
+      maxTokens: serializer.fromJson<int>(json['maxTokens']),
+      streaming: serializer.fromJson<bool>(json['streaming']),
+      systemPrompt: serializer.fromJson<String>(json['systemPrompt']),
+      revision: serializer.fromJson<int>(json['revision']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      deletedAt: serializer.fromJson<int?>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'provider': serializer.toJson<String>(provider),
+      'baseUrl': serializer.toJson<String>(baseUrl),
+      'model': serializer.toJson<String>(model),
+      'temperature': serializer.toJson<double>(temperature),
+      'maxTokens': serializer.toJson<int>(maxTokens),
+      'streaming': serializer.toJson<bool>(streaming),
+      'systemPrompt': serializer.toJson<String>(systemPrompt),
+      'revision': serializer.toJson<int>(revision),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+      'deletedAt': serializer.toJson<int?>(deletedAt),
+    };
+  }
+
+  AiProfileRow copyWith({
+    String? id,
+    String? name,
+    String? provider,
+    String? baseUrl,
+    String? model,
+    double? temperature,
+    int? maxTokens,
+    bool? streaming,
+    String? systemPrompt,
+    int? revision,
+    int? createdAt,
+    int? updatedAt,
+    Value<int?> deletedAt = const Value.absent(),
+  }) => AiProfileRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    provider: provider ?? this.provider,
+    baseUrl: baseUrl ?? this.baseUrl,
+    model: model ?? this.model,
+    temperature: temperature ?? this.temperature,
+    maxTokens: maxTokens ?? this.maxTokens,
+    streaming: streaming ?? this.streaming,
+    systemPrompt: systemPrompt ?? this.systemPrompt,
+    revision: revision ?? this.revision,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+  );
+  AiProfileRow copyWithCompanion(AiProfilesCompanion data) {
+    return AiProfileRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      provider: data.provider.present ? data.provider.value : this.provider,
+      baseUrl: data.baseUrl.present ? data.baseUrl.value : this.baseUrl,
+      model: data.model.present ? data.model.value : this.model,
+      temperature: data.temperature.present
+          ? data.temperature.value
+          : this.temperature,
+      maxTokens: data.maxTokens.present ? data.maxTokens.value : this.maxTokens,
+      streaming: data.streaming.present ? data.streaming.value : this.streaming,
+      systemPrompt: data.systemPrompt.present
+          ? data.systemPrompt.value
+          : this.systemPrompt,
+      revision: data.revision.present ? data.revision.value : this.revision,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AiProfileRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('provider: $provider, ')
+          ..write('baseUrl: $baseUrl, ')
+          ..write('model: $model, ')
+          ..write('temperature: $temperature, ')
+          ..write('maxTokens: $maxTokens, ')
+          ..write('streaming: $streaming, ')
+          ..write('systemPrompt: $systemPrompt, ')
+          ..write('revision: $revision, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    provider,
+    baseUrl,
+    model,
+    temperature,
+    maxTokens,
+    streaming,
+    systemPrompt,
+    revision,
+    createdAt,
+    updatedAt,
+    deletedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AiProfileRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.provider == this.provider &&
+          other.baseUrl == this.baseUrl &&
+          other.model == this.model &&
+          other.temperature == this.temperature &&
+          other.maxTokens == this.maxTokens &&
+          other.streaming == this.streaming &&
+          other.systemPrompt == this.systemPrompt &&
+          other.revision == this.revision &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt);
+}
+
+class AiProfilesCompanion extends UpdateCompanion<AiProfileRow> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String> provider;
+  final Value<String> baseUrl;
+  final Value<String> model;
+  final Value<double> temperature;
+  final Value<int> maxTokens;
+  final Value<bool> streaming;
+  final Value<String> systemPrompt;
+  final Value<int> revision;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int?> deletedAt;
+  final Value<int> rowid;
+  const AiProfilesCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.provider = const Value.absent(),
+    this.baseUrl = const Value.absent(),
+    this.model = const Value.absent(),
+    this.temperature = const Value.absent(),
+    this.maxTokens = const Value.absent(),
+    this.streaming = const Value.absent(),
+    this.systemPrompt = const Value.absent(),
+    this.revision = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AiProfilesCompanion.insert({
+    required String id,
+    required String name,
+    this.provider = const Value.absent(),
+    this.baseUrl = const Value.absent(),
+    this.model = const Value.absent(),
+    this.temperature = const Value.absent(),
+    this.maxTokens = const Value.absent(),
+    this.streaming = const Value.absent(),
+    this.systemPrompt = const Value.absent(),
+    this.revision = const Value.absent(),
+    required int createdAt,
+    required int updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<AiProfileRow> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? provider,
+    Expression<String>? baseUrl,
+    Expression<String>? model,
+    Expression<double>? temperature,
+    Expression<int>? maxTokens,
+    Expression<bool>? streaming,
+    Expression<String>? systemPrompt,
+    Expression<int>? revision,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? deletedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (provider != null) 'provider': provider,
+      if (baseUrl != null) 'base_url': baseUrl,
+      if (model != null) 'model': model,
+      if (temperature != null) 'temperature': temperature,
+      if (maxTokens != null) 'max_tokens': maxTokens,
+      if (streaming != null) 'streaming': streaming,
+      if (systemPrompt != null) 'system_prompt': systemPrompt,
+      if (revision != null) 'revision': revision,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AiProfilesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String>? provider,
+    Value<String>? baseUrl,
+    Value<String>? model,
+    Value<double>? temperature,
+    Value<int>? maxTokens,
+    Value<bool>? streaming,
+    Value<String>? systemPrompt,
+    Value<int>? revision,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int?>? deletedAt,
+    Value<int>? rowid,
+  }) {
+    return AiProfilesCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      provider: provider ?? this.provider,
+      baseUrl: baseUrl ?? this.baseUrl,
+      model: model ?? this.model,
+      temperature: temperature ?? this.temperature,
+      maxTokens: maxTokens ?? this.maxTokens,
+      streaming: streaming ?? this.streaming,
+      systemPrompt: systemPrompt ?? this.systemPrompt,
+      revision: revision ?? this.revision,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (provider.present) {
+      map['provider'] = Variable<String>(provider.value);
+    }
+    if (baseUrl.present) {
+      map['base_url'] = Variable<String>(baseUrl.value);
+    }
+    if (model.present) {
+      map['model'] = Variable<String>(model.value);
+    }
+    if (temperature.present) {
+      map['temperature'] = Variable<double>(temperature.value);
+    }
+    if (maxTokens.present) {
+      map['max_tokens'] = Variable<int>(maxTokens.value);
+    }
+    if (streaming.present) {
+      map['streaming'] = Variable<bool>(streaming.value);
+    }
+    if (systemPrompt.present) {
+      map['system_prompt'] = Variable<String>(systemPrompt.value);
+    }
+    if (revision.present) {
+      map['revision'] = Variable<int>(revision.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<int>(deletedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AiProfilesCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('provider: $provider, ')
+          ..write('baseUrl: $baseUrl, ')
+          ..write('model: $model, ')
+          ..write('temperature: $temperature, ')
+          ..write('maxTokens: $maxTokens, ')
+          ..write('streaming: $streaming, ')
+          ..write('systemPrompt: $systemPrompt, ')
+          ..write('revision: $revision, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $AiCredentialOperationsTable extends AiCredentialOperations
+    with TableInfo<$AiCredentialOperationsTable, AiCredentialOperationRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AiCredentialOperationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _profileIdMeta = const VerificationMeta(
+    'profileId',
+  );
+  @override
+  late final GeneratedColumn<String> profileId = GeneratedColumn<String>(
+    'profile_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _operationMeta = const VerificationMeta(
+    'operation',
+  );
+  @override
+  late final GeneratedColumn<String> operation = GeneratedColumn<String>(
+    'operation',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _phaseMeta = const VerificationMeta('phase');
+  @override
+  late final GeneratedColumn<String> phase = GeneratedColumn<String>(
+    'phase',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _expectedRevisionMeta = const VerificationMeta(
+    'expectedRevision',
+  );
+  @override
+  late final GeneratedColumn<int> expectedRevision = GeneratedColumn<int>(
+    'expected_revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _ownerSessionIdMeta = const VerificationMeta(
+    'ownerSessionId',
+  );
+  @override
+  late final GeneratedColumn<String> ownerSessionId = GeneratedColumn<String>(
+    'owner_session_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    profileId,
+    operation,
+    phase,
+    expectedRevision,
+    ownerSessionId,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ai_credential_operations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AiCredentialOperationRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('profile_id')) {
+      context.handle(
+        _profileIdMeta,
+        profileId.isAcceptableOrUnknown(data['profile_id']!, _profileIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_profileIdMeta);
+    }
+    if (data.containsKey('operation')) {
+      context.handle(
+        _operationMeta,
+        operation.isAcceptableOrUnknown(data['operation']!, _operationMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_operationMeta);
+    }
+    if (data.containsKey('phase')) {
+      context.handle(
+        _phaseMeta,
+        phase.isAcceptableOrUnknown(data['phase']!, _phaseMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_phaseMeta);
+    }
+    if (data.containsKey('expected_revision')) {
+      context.handle(
+        _expectedRevisionMeta,
+        expectedRevision.isAcceptableOrUnknown(
+          data['expected_revision']!,
+          _expectedRevisionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_expectedRevisionMeta);
+    }
+    if (data.containsKey('owner_session_id')) {
+      context.handle(
+        _ownerSessionIdMeta,
+        ownerSessionId.isAcceptableOrUnknown(
+          data['owner_session_id']!,
+          _ownerSessionIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerSessionIdMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AiCredentialOperationRow map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AiCredentialOperationRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      profileId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}profile_id'],
+      )!,
+      operation: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}operation'],
+      )!,
+      phase: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}phase'],
+      )!,
+      expectedRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}expected_revision'],
+      )!,
+      ownerSessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_session_id'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $AiCredentialOperationsTable createAlias(String alias) {
+    return $AiCredentialOperationsTable(attachedDatabase, alias);
+  }
+}
+
+class AiCredentialOperationRow extends DataClass
+    implements Insertable<AiCredentialOperationRow> {
+  final String id;
+  final String profileId;
+  final String operation;
+  final String phase;
+  final int expectedRevision;
+  final String ownerSessionId;
+  final int createdAt;
+  final int updatedAt;
+  const AiCredentialOperationRow({
+    required this.id,
+    required this.profileId,
+    required this.operation,
+    required this.phase,
+    required this.expectedRevision,
+    required this.ownerSessionId,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['profile_id'] = Variable<String>(profileId);
+    map['operation'] = Variable<String>(operation);
+    map['phase'] = Variable<String>(phase);
+    map['expected_revision'] = Variable<int>(expectedRevision);
+    map['owner_session_id'] = Variable<String>(ownerSessionId);
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  AiCredentialOperationsCompanion toCompanion(bool nullToAbsent) {
+    return AiCredentialOperationsCompanion(
+      id: Value(id),
+      profileId: Value(profileId),
+      operation: Value(operation),
+      phase: Value(phase),
+      expectedRevision: Value(expectedRevision),
+      ownerSessionId: Value(ownerSessionId),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory AiCredentialOperationRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AiCredentialOperationRow(
+      id: serializer.fromJson<String>(json['id']),
+      profileId: serializer.fromJson<String>(json['profileId']),
+      operation: serializer.fromJson<String>(json['operation']),
+      phase: serializer.fromJson<String>(json['phase']),
+      expectedRevision: serializer.fromJson<int>(json['expectedRevision']),
+      ownerSessionId: serializer.fromJson<String>(json['ownerSessionId']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'profileId': serializer.toJson<String>(profileId),
+      'operation': serializer.toJson<String>(operation),
+      'phase': serializer.toJson<String>(phase),
+      'expectedRevision': serializer.toJson<int>(expectedRevision),
+      'ownerSessionId': serializer.toJson<String>(ownerSessionId),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  AiCredentialOperationRow copyWith({
+    String? id,
+    String? profileId,
+    String? operation,
+    String? phase,
+    int? expectedRevision,
+    String? ownerSessionId,
+    int? createdAt,
+    int? updatedAt,
+  }) => AiCredentialOperationRow(
+    id: id ?? this.id,
+    profileId: profileId ?? this.profileId,
+    operation: operation ?? this.operation,
+    phase: phase ?? this.phase,
+    expectedRevision: expectedRevision ?? this.expectedRevision,
+    ownerSessionId: ownerSessionId ?? this.ownerSessionId,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  AiCredentialOperationRow copyWithCompanion(
+    AiCredentialOperationsCompanion data,
+  ) {
+    return AiCredentialOperationRow(
+      id: data.id.present ? data.id.value : this.id,
+      profileId: data.profileId.present ? data.profileId.value : this.profileId,
+      operation: data.operation.present ? data.operation.value : this.operation,
+      phase: data.phase.present ? data.phase.value : this.phase,
+      expectedRevision: data.expectedRevision.present
+          ? data.expectedRevision.value
+          : this.expectedRevision,
+      ownerSessionId: data.ownerSessionId.present
+          ? data.ownerSessionId.value
+          : this.ownerSessionId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AiCredentialOperationRow(')
+          ..write('id: $id, ')
+          ..write('profileId: $profileId, ')
+          ..write('operation: $operation, ')
+          ..write('phase: $phase, ')
+          ..write('expectedRevision: $expectedRevision, ')
+          ..write('ownerSessionId: $ownerSessionId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    profileId,
+    operation,
+    phase,
+    expectedRevision,
+    ownerSessionId,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AiCredentialOperationRow &&
+          other.id == this.id &&
+          other.profileId == this.profileId &&
+          other.operation == this.operation &&
+          other.phase == this.phase &&
+          other.expectedRevision == this.expectedRevision &&
+          other.ownerSessionId == this.ownerSessionId &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class AiCredentialOperationsCompanion
+    extends UpdateCompanion<AiCredentialOperationRow> {
+  final Value<String> id;
+  final Value<String> profileId;
+  final Value<String> operation;
+  final Value<String> phase;
+  final Value<int> expectedRevision;
+  final Value<String> ownerSessionId;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const AiCredentialOperationsCompanion({
+    this.id = const Value.absent(),
+    this.profileId = const Value.absent(),
+    this.operation = const Value.absent(),
+    this.phase = const Value.absent(),
+    this.expectedRevision = const Value.absent(),
+    this.ownerSessionId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AiCredentialOperationsCompanion.insert({
+    required String id,
+    required String profileId,
+    required String operation,
+    required String phase,
+    required int expectedRevision,
+    required String ownerSessionId,
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       profileId = Value(profileId),
+       operation = Value(operation),
+       phase = Value(phase),
+       expectedRevision = Value(expectedRevision),
+       ownerSessionId = Value(ownerSessionId),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<AiCredentialOperationRow> custom({
+    Expression<String>? id,
+    Expression<String>? profileId,
+    Expression<String>? operation,
+    Expression<String>? phase,
+    Expression<int>? expectedRevision,
+    Expression<String>? ownerSessionId,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (profileId != null) 'profile_id': profileId,
+      if (operation != null) 'operation': operation,
+      if (phase != null) 'phase': phase,
+      if (expectedRevision != null) 'expected_revision': expectedRevision,
+      if (ownerSessionId != null) 'owner_session_id': ownerSessionId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AiCredentialOperationsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? profileId,
+    Value<String>? operation,
+    Value<String>? phase,
+    Value<int>? expectedRevision,
+    Value<String>? ownerSessionId,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return AiCredentialOperationsCompanion(
+      id: id ?? this.id,
+      profileId: profileId ?? this.profileId,
+      operation: operation ?? this.operation,
+      phase: phase ?? this.phase,
+      expectedRevision: expectedRevision ?? this.expectedRevision,
+      ownerSessionId: ownerSessionId ?? this.ownerSessionId,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (profileId.present) {
+      map['profile_id'] = Variable<String>(profileId.value);
+    }
+    if (operation.present) {
+      map['operation'] = Variable<String>(operation.value);
+    }
+    if (phase.present) {
+      map['phase'] = Variable<String>(phase.value);
+    }
+    if (expectedRevision.present) {
+      map['expected_revision'] = Variable<int>(expectedRevision.value);
+    }
+    if (ownerSessionId.present) {
+      map['owner_session_id'] = Variable<String>(ownerSessionId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AiCredentialOperationsCompanion(')
+          ..write('id: $id, ')
+          ..write('profileId: $profileId, ')
+          ..write('operation: $operation, ')
+          ..write('phase: $phase, ')
+          ..write('expectedRevision: $expectedRevision, ')
+          ..write('ownerSessionId: $ownerSessionId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SearchTermDocumentsTable extends SearchTermDocuments
+    with TableInfo<$SearchTermDocumentsTable, SearchTermDocumentRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SearchTermDocumentsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _chunkIdMeta = const VerificationMeta(
+    'chunkId',
+  );
+  @override
+  late final GeneratedColumn<String> chunkId = GeneratedColumn<String>(
+    'chunk_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _generationIdMeta = const VerificationMeta(
+    'generationId',
+  );
+  @override
+  late final GeneratedColumn<String> generationId = GeneratedColumn<String>(
+    'generation_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _titleNormalizedMeta = const VerificationMeta(
+    'titleNormalized',
+  );
+  @override
+  late final GeneratedColumn<String> titleNormalized = GeneratedColumn<String>(
+    'title_normalized',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _textNormalizedMeta = const VerificationMeta(
+    'textNormalized',
+  );
+  @override
+  late final GeneratedColumn<String> textNormalized = GeneratedColumn<String>(
+    'text_normalized',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleTermsMeta = const VerificationMeta(
+    'titleTerms',
+  );
+  @override
+  late final GeneratedColumn<String> titleTerms = GeneratedColumn<String>(
+    'title_terms',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _textTermsMeta = const VerificationMeta(
+    'textTerms',
+  );
+  @override
+  late final GeneratedColumn<String> textTerms = GeneratedColumn<String>(
+    'text_terms',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _normalizerVersionMeta = const VerificationMeta(
+    'normalizerVersion',
+  );
+  @override
+  late final GeneratedColumn<String> normalizerVersion =
+      GeneratedColumn<String>(
+        'normalizer_version',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _tokenizerVersionMeta = const VerificationMeta(
+    'tokenizerVersion',
+  );
+  @override
+  late final GeneratedColumn<String> tokenizerVersion = GeneratedColumn<String>(
+    'tokenizer_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    chunkId,
+    generationId,
+    titleNormalized,
+    textNormalized,
+    titleTerms,
+    textTerms,
+    normalizerVersion,
+    tokenizerVersion,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'search_term_documents';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SearchTermDocumentRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('chunk_id')) {
+      context.handle(
+        _chunkIdMeta,
+        chunkId.isAcceptableOrUnknown(data['chunk_id']!, _chunkIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_chunkIdMeta);
+    }
+    if (data.containsKey('generation_id')) {
+      context.handle(
+        _generationIdMeta,
+        generationId.isAcceptableOrUnknown(
+          data['generation_id']!,
+          _generationIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('title_normalized')) {
+      context.handle(
+        _titleNormalizedMeta,
+        titleNormalized.isAcceptableOrUnknown(
+          data['title_normalized']!,
+          _titleNormalizedMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_titleNormalizedMeta);
+    }
+    if (data.containsKey('text_normalized')) {
+      context.handle(
+        _textNormalizedMeta,
+        textNormalized.isAcceptableOrUnknown(
+          data['text_normalized']!,
+          _textNormalizedMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_textNormalizedMeta);
+    }
+    if (data.containsKey('title_terms')) {
+      context.handle(
+        _titleTermsMeta,
+        titleTerms.isAcceptableOrUnknown(data['title_terms']!, _titleTermsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleTermsMeta);
+    }
+    if (data.containsKey('text_terms')) {
+      context.handle(
+        _textTermsMeta,
+        textTerms.isAcceptableOrUnknown(data['text_terms']!, _textTermsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_textTermsMeta);
+    }
+    if (data.containsKey('normalizer_version')) {
+      context.handle(
+        _normalizerVersionMeta,
+        normalizerVersion.isAcceptableOrUnknown(
+          data['normalizer_version']!,
+          _normalizerVersionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_normalizerVersionMeta);
+    }
+    if (data.containsKey('tokenizer_version')) {
+      context.handle(
+        _tokenizerVersionMeta,
+        tokenizerVersion.isAcceptableOrUnknown(
+          data['tokenizer_version']!,
+          _tokenizerVersionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_tokenizerVersionMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SearchTermDocumentRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SearchTermDocumentRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      chunkId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}chunk_id'],
+      )!,
+      generationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}generation_id'],
+      ),
+      titleNormalized: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title_normalized'],
+      )!,
+      textNormalized: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_normalized'],
+      )!,
+      titleTerms: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title_terms'],
+      )!,
+      textTerms: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}text_terms'],
+      )!,
+      normalizerVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}normalizer_version'],
+      )!,
+      tokenizerVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tokenizer_version'],
+      )!,
+    );
+  }
+
+  @override
+  $SearchTermDocumentsTable createAlias(String alias) {
+    return $SearchTermDocumentsTable(attachedDatabase, alias);
+  }
+}
+
+class SearchTermDocumentRow extends DataClass
+    implements Insertable<SearchTermDocumentRow> {
+  final String id;
+  final String chunkId;
+  final String? generationId;
+  final String titleNormalized;
+  final String textNormalized;
+  final String titleTerms;
+  final String textTerms;
+  final String normalizerVersion;
+  final String tokenizerVersion;
+  const SearchTermDocumentRow({
+    required this.id,
+    required this.chunkId,
+    this.generationId,
+    required this.titleNormalized,
+    required this.textNormalized,
+    required this.titleTerms,
+    required this.textTerms,
+    required this.normalizerVersion,
+    required this.tokenizerVersion,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['chunk_id'] = Variable<String>(chunkId);
+    if (!nullToAbsent || generationId != null) {
+      map['generation_id'] = Variable<String>(generationId);
+    }
+    map['title_normalized'] = Variable<String>(titleNormalized);
+    map['text_normalized'] = Variable<String>(textNormalized);
+    map['title_terms'] = Variable<String>(titleTerms);
+    map['text_terms'] = Variable<String>(textTerms);
+    map['normalizer_version'] = Variable<String>(normalizerVersion);
+    map['tokenizer_version'] = Variable<String>(tokenizerVersion);
+    return map;
+  }
+
+  SearchTermDocumentsCompanion toCompanion(bool nullToAbsent) {
+    return SearchTermDocumentsCompanion(
+      id: Value(id),
+      chunkId: Value(chunkId),
+      generationId: generationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(generationId),
+      titleNormalized: Value(titleNormalized),
+      textNormalized: Value(textNormalized),
+      titleTerms: Value(titleTerms),
+      textTerms: Value(textTerms),
+      normalizerVersion: Value(normalizerVersion),
+      tokenizerVersion: Value(tokenizerVersion),
+    );
+  }
+
+  factory SearchTermDocumentRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SearchTermDocumentRow(
+      id: serializer.fromJson<String>(json['id']),
+      chunkId: serializer.fromJson<String>(json['chunkId']),
+      generationId: serializer.fromJson<String?>(json['generationId']),
+      titleNormalized: serializer.fromJson<String>(json['titleNormalized']),
+      textNormalized: serializer.fromJson<String>(json['textNormalized']),
+      titleTerms: serializer.fromJson<String>(json['titleTerms']),
+      textTerms: serializer.fromJson<String>(json['textTerms']),
+      normalizerVersion: serializer.fromJson<String>(json['normalizerVersion']),
+      tokenizerVersion: serializer.fromJson<String>(json['tokenizerVersion']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'chunkId': serializer.toJson<String>(chunkId),
+      'generationId': serializer.toJson<String?>(generationId),
+      'titleNormalized': serializer.toJson<String>(titleNormalized),
+      'textNormalized': serializer.toJson<String>(textNormalized),
+      'titleTerms': serializer.toJson<String>(titleTerms),
+      'textTerms': serializer.toJson<String>(textTerms),
+      'normalizerVersion': serializer.toJson<String>(normalizerVersion),
+      'tokenizerVersion': serializer.toJson<String>(tokenizerVersion),
+    };
+  }
+
+  SearchTermDocumentRow copyWith({
+    String? id,
+    String? chunkId,
+    Value<String?> generationId = const Value.absent(),
+    String? titleNormalized,
+    String? textNormalized,
+    String? titleTerms,
+    String? textTerms,
+    String? normalizerVersion,
+    String? tokenizerVersion,
+  }) => SearchTermDocumentRow(
+    id: id ?? this.id,
+    chunkId: chunkId ?? this.chunkId,
+    generationId: generationId.present ? generationId.value : this.generationId,
+    titleNormalized: titleNormalized ?? this.titleNormalized,
+    textNormalized: textNormalized ?? this.textNormalized,
+    titleTerms: titleTerms ?? this.titleTerms,
+    textTerms: textTerms ?? this.textTerms,
+    normalizerVersion: normalizerVersion ?? this.normalizerVersion,
+    tokenizerVersion: tokenizerVersion ?? this.tokenizerVersion,
+  );
+  SearchTermDocumentRow copyWithCompanion(SearchTermDocumentsCompanion data) {
+    return SearchTermDocumentRow(
+      id: data.id.present ? data.id.value : this.id,
+      chunkId: data.chunkId.present ? data.chunkId.value : this.chunkId,
+      generationId: data.generationId.present
+          ? data.generationId.value
+          : this.generationId,
+      titleNormalized: data.titleNormalized.present
+          ? data.titleNormalized.value
+          : this.titleNormalized,
+      textNormalized: data.textNormalized.present
+          ? data.textNormalized.value
+          : this.textNormalized,
+      titleTerms: data.titleTerms.present
+          ? data.titleTerms.value
+          : this.titleTerms,
+      textTerms: data.textTerms.present ? data.textTerms.value : this.textTerms,
+      normalizerVersion: data.normalizerVersion.present
+          ? data.normalizerVersion.value
+          : this.normalizerVersion,
+      tokenizerVersion: data.tokenizerVersion.present
+          ? data.tokenizerVersion.value
+          : this.tokenizerVersion,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchTermDocumentRow(')
+          ..write('id: $id, ')
+          ..write('chunkId: $chunkId, ')
+          ..write('generationId: $generationId, ')
+          ..write('titleNormalized: $titleNormalized, ')
+          ..write('textNormalized: $textNormalized, ')
+          ..write('titleTerms: $titleTerms, ')
+          ..write('textTerms: $textTerms, ')
+          ..write('normalizerVersion: $normalizerVersion, ')
+          ..write('tokenizerVersion: $tokenizerVersion')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    chunkId,
+    generationId,
+    titleNormalized,
+    textNormalized,
+    titleTerms,
+    textTerms,
+    normalizerVersion,
+    tokenizerVersion,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SearchTermDocumentRow &&
+          other.id == this.id &&
+          other.chunkId == this.chunkId &&
+          other.generationId == this.generationId &&
+          other.titleNormalized == this.titleNormalized &&
+          other.textNormalized == this.textNormalized &&
+          other.titleTerms == this.titleTerms &&
+          other.textTerms == this.textTerms &&
+          other.normalizerVersion == this.normalizerVersion &&
+          other.tokenizerVersion == this.tokenizerVersion);
+}
+
+class SearchTermDocumentsCompanion
+    extends UpdateCompanion<SearchTermDocumentRow> {
+  final Value<String> id;
+  final Value<String> chunkId;
+  final Value<String?> generationId;
+  final Value<String> titleNormalized;
+  final Value<String> textNormalized;
+  final Value<String> titleTerms;
+  final Value<String> textTerms;
+  final Value<String> normalizerVersion;
+  final Value<String> tokenizerVersion;
+  final Value<int> rowid;
+  const SearchTermDocumentsCompanion({
+    this.id = const Value.absent(),
+    this.chunkId = const Value.absent(),
+    this.generationId = const Value.absent(),
+    this.titleNormalized = const Value.absent(),
+    this.textNormalized = const Value.absent(),
+    this.titleTerms = const Value.absent(),
+    this.textTerms = const Value.absent(),
+    this.normalizerVersion = const Value.absent(),
+    this.tokenizerVersion = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SearchTermDocumentsCompanion.insert({
+    required String id,
+    required String chunkId,
+    this.generationId = const Value.absent(),
+    required String titleNormalized,
+    required String textNormalized,
+    required String titleTerms,
+    required String textTerms,
+    required String normalizerVersion,
+    required String tokenizerVersion,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       chunkId = Value(chunkId),
+       titleNormalized = Value(titleNormalized),
+       textNormalized = Value(textNormalized),
+       titleTerms = Value(titleTerms),
+       textTerms = Value(textTerms),
+       normalizerVersion = Value(normalizerVersion),
+       tokenizerVersion = Value(tokenizerVersion);
+  static Insertable<SearchTermDocumentRow> custom({
+    Expression<String>? id,
+    Expression<String>? chunkId,
+    Expression<String>? generationId,
+    Expression<String>? titleNormalized,
+    Expression<String>? textNormalized,
+    Expression<String>? titleTerms,
+    Expression<String>? textTerms,
+    Expression<String>? normalizerVersion,
+    Expression<String>? tokenizerVersion,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (chunkId != null) 'chunk_id': chunkId,
+      if (generationId != null) 'generation_id': generationId,
+      if (titleNormalized != null) 'title_normalized': titleNormalized,
+      if (textNormalized != null) 'text_normalized': textNormalized,
+      if (titleTerms != null) 'title_terms': titleTerms,
+      if (textTerms != null) 'text_terms': textTerms,
+      if (normalizerVersion != null) 'normalizer_version': normalizerVersion,
+      if (tokenizerVersion != null) 'tokenizer_version': tokenizerVersion,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SearchTermDocumentsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? chunkId,
+    Value<String?>? generationId,
+    Value<String>? titleNormalized,
+    Value<String>? textNormalized,
+    Value<String>? titleTerms,
+    Value<String>? textTerms,
+    Value<String>? normalizerVersion,
+    Value<String>? tokenizerVersion,
+    Value<int>? rowid,
+  }) {
+    return SearchTermDocumentsCompanion(
+      id: id ?? this.id,
+      chunkId: chunkId ?? this.chunkId,
+      generationId: generationId ?? this.generationId,
+      titleNormalized: titleNormalized ?? this.titleNormalized,
+      textNormalized: textNormalized ?? this.textNormalized,
+      titleTerms: titleTerms ?? this.titleTerms,
+      textTerms: textTerms ?? this.textTerms,
+      normalizerVersion: normalizerVersion ?? this.normalizerVersion,
+      tokenizerVersion: tokenizerVersion ?? this.tokenizerVersion,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (chunkId.present) {
+      map['chunk_id'] = Variable<String>(chunkId.value);
+    }
+    if (generationId.present) {
+      map['generation_id'] = Variable<String>(generationId.value);
+    }
+    if (titleNormalized.present) {
+      map['title_normalized'] = Variable<String>(titleNormalized.value);
+    }
+    if (textNormalized.present) {
+      map['text_normalized'] = Variable<String>(textNormalized.value);
+    }
+    if (titleTerms.present) {
+      map['title_terms'] = Variable<String>(titleTerms.value);
+    }
+    if (textTerms.present) {
+      map['text_terms'] = Variable<String>(textTerms.value);
+    }
+    if (normalizerVersion.present) {
+      map['normalizer_version'] = Variable<String>(normalizerVersion.value);
+    }
+    if (tokenizerVersion.present) {
+      map['tokenizer_version'] = Variable<String>(tokenizerVersion.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SearchTermDocumentsCompanion(')
+          ..write('id: $id, ')
+          ..write('chunkId: $chunkId, ')
+          ..write('generationId: $generationId, ')
+          ..write('titleNormalized: $titleNormalized, ')
+          ..write('textNormalized: $textNormalized, ')
+          ..write('titleTerms: $titleTerms, ')
+          ..write('textTerms: $textTerms, ')
+          ..write('normalizerVersion: $normalizerVersion, ')
+          ..write('tokenizerVersion: $tokenizerVersion, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $OcrJobsTable extends OcrJobs with TableInfo<$OcrJobsTable, OcrJobRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $OcrJobsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _taskIdMeta = const VerificationMeta('taskId');
+  @override
+  late final GeneratedColumn<String> taskId = GeneratedColumn<String>(
+    'task_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _bookIdMeta = const VerificationMeta('bookId');
+  @override
+  late final GeneratedColumn<String> bookId = GeneratedColumn<String>(
+    'book_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceRevisionMeta = const VerificationMeta(
+    'sourceRevision',
+  );
+  @override
+  late final GeneratedColumn<String> sourceRevision = GeneratedColumn<String>(
+    'source_revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _configJsonMeta = const VerificationMeta(
+    'configJson',
+  );
+  @override
+  late final GeneratedColumn<String> configJson = GeneratedColumn<String>(
+    'config_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('queued'),
+  );
+  static const VerificationMeta _reasonMeta = const VerificationMeta('reason');
+  @override
+  late final GeneratedColumn<String> reason = GeneratedColumn<String>(
+    'reason',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    taskId,
+    bookId,
+    sourceRevision,
+    configJson,
+    status,
+    reason,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ocr_jobs';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<OcrJobRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('task_id')) {
+      context.handle(
+        _taskIdMeta,
+        taskId.isAcceptableOrUnknown(data['task_id']!, _taskIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_taskIdMeta);
+    }
+    if (data.containsKey('book_id')) {
+      context.handle(
+        _bookIdMeta,
+        bookId.isAcceptableOrUnknown(data['book_id']!, _bookIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_bookIdMeta);
+    }
+    if (data.containsKey('source_revision')) {
+      context.handle(
+        _sourceRevisionMeta,
+        sourceRevision.isAcceptableOrUnknown(
+          data['source_revision']!,
+          _sourceRevisionMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_sourceRevisionMeta);
+    }
+    if (data.containsKey('config_json')) {
+      context.handle(
+        _configJsonMeta,
+        configJson.isAcceptableOrUnknown(data['config_json']!, _configJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_configJsonMeta);
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('reason')) {
+      context.handle(
+        _reasonMeta,
+        reason.isAcceptableOrUnknown(data['reason']!, _reasonMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  OcrJobRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return OcrJobRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      taskId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}task_id'],
+      )!,
+      bookId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}book_id'],
+      )!,
+      sourceRevision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_revision'],
+      )!,
+      configJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}config_json'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      reason: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reason'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $OcrJobsTable createAlias(String alias) {
+    return $OcrJobsTable(attachedDatabase, alias);
+  }
+}
+
+class OcrJobRow extends DataClass implements Insertable<OcrJobRow> {
+  final String id;
+  final String taskId;
+  final String bookId;
+  final String sourceRevision;
+  final String configJson;
+  final String status;
+  final String? reason;
+  final int createdAt;
+  final int updatedAt;
+  const OcrJobRow({
+    required this.id,
+    required this.taskId,
+    required this.bookId,
+    required this.sourceRevision,
+    required this.configJson,
+    required this.status,
+    this.reason,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['task_id'] = Variable<String>(taskId);
+    map['book_id'] = Variable<String>(bookId);
+    map['source_revision'] = Variable<String>(sourceRevision);
+    map['config_json'] = Variable<String>(configJson);
+    map['status'] = Variable<String>(status);
+    if (!nullToAbsent || reason != null) {
+      map['reason'] = Variable<String>(reason);
+    }
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  OcrJobsCompanion toCompanion(bool nullToAbsent) {
+    return OcrJobsCompanion(
+      id: Value(id),
+      taskId: Value(taskId),
+      bookId: Value(bookId),
+      sourceRevision: Value(sourceRevision),
+      configJson: Value(configJson),
+      status: Value(status),
+      reason: reason == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reason),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory OcrJobRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return OcrJobRow(
+      id: serializer.fromJson<String>(json['id']),
+      taskId: serializer.fromJson<String>(json['taskId']),
+      bookId: serializer.fromJson<String>(json['bookId']),
+      sourceRevision: serializer.fromJson<String>(json['sourceRevision']),
+      configJson: serializer.fromJson<String>(json['configJson']),
+      status: serializer.fromJson<String>(json['status']),
+      reason: serializer.fromJson<String?>(json['reason']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'taskId': serializer.toJson<String>(taskId),
+      'bookId': serializer.toJson<String>(bookId),
+      'sourceRevision': serializer.toJson<String>(sourceRevision),
+      'configJson': serializer.toJson<String>(configJson),
+      'status': serializer.toJson<String>(status),
+      'reason': serializer.toJson<String?>(reason),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  OcrJobRow copyWith({
+    String? id,
+    String? taskId,
+    String? bookId,
+    String? sourceRevision,
+    String? configJson,
+    String? status,
+    Value<String?> reason = const Value.absent(),
+    int? createdAt,
+    int? updatedAt,
+  }) => OcrJobRow(
+    id: id ?? this.id,
+    taskId: taskId ?? this.taskId,
+    bookId: bookId ?? this.bookId,
+    sourceRevision: sourceRevision ?? this.sourceRevision,
+    configJson: configJson ?? this.configJson,
+    status: status ?? this.status,
+    reason: reason.present ? reason.value : this.reason,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  OcrJobRow copyWithCompanion(OcrJobsCompanion data) {
+    return OcrJobRow(
+      id: data.id.present ? data.id.value : this.id,
+      taskId: data.taskId.present ? data.taskId.value : this.taskId,
+      bookId: data.bookId.present ? data.bookId.value : this.bookId,
+      sourceRevision: data.sourceRevision.present
+          ? data.sourceRevision.value
+          : this.sourceRevision,
+      configJson: data.configJson.present
+          ? data.configJson.value
+          : this.configJson,
+      status: data.status.present ? data.status.value : this.status,
+      reason: data.reason.present ? data.reason.value : this.reason,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OcrJobRow(')
+          ..write('id: $id, ')
+          ..write('taskId: $taskId, ')
+          ..write('bookId: $bookId, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('configJson: $configJson, ')
+          ..write('status: $status, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    taskId,
+    bookId,
+    sourceRevision,
+    configJson,
+    status,
+    reason,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is OcrJobRow &&
+          other.id == this.id &&
+          other.taskId == this.taskId &&
+          other.bookId == this.bookId &&
+          other.sourceRevision == this.sourceRevision &&
+          other.configJson == this.configJson &&
+          other.status == this.status &&
+          other.reason == this.reason &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class OcrJobsCompanion extends UpdateCompanion<OcrJobRow> {
+  final Value<String> id;
+  final Value<String> taskId;
+  final Value<String> bookId;
+  final Value<String> sourceRevision;
+  final Value<String> configJson;
+  final Value<String> status;
+  final Value<String?> reason;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const OcrJobsCompanion({
+    this.id = const Value.absent(),
+    this.taskId = const Value.absent(),
+    this.bookId = const Value.absent(),
+    this.sourceRevision = const Value.absent(),
+    this.configJson = const Value.absent(),
+    this.status = const Value.absent(),
+    this.reason = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  OcrJobsCompanion.insert({
+    required String id,
+    required String taskId,
+    required String bookId,
+    required String sourceRevision,
+    required String configJson,
+    this.status = const Value.absent(),
+    this.reason = const Value.absent(),
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       taskId = Value(taskId),
+       bookId = Value(bookId),
+       sourceRevision = Value(sourceRevision),
+       configJson = Value(configJson),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<OcrJobRow> custom({
+    Expression<String>? id,
+    Expression<String>? taskId,
+    Expression<String>? bookId,
+    Expression<String>? sourceRevision,
+    Expression<String>? configJson,
+    Expression<String>? status,
+    Expression<String>? reason,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (taskId != null) 'task_id': taskId,
+      if (bookId != null) 'book_id': bookId,
+      if (sourceRevision != null) 'source_revision': sourceRevision,
+      if (configJson != null) 'config_json': configJson,
+      if (status != null) 'status': status,
+      if (reason != null) 'reason': reason,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  OcrJobsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? taskId,
+    Value<String>? bookId,
+    Value<String>? sourceRevision,
+    Value<String>? configJson,
+    Value<String>? status,
+    Value<String?>? reason,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return OcrJobsCompanion(
+      id: id ?? this.id,
+      taskId: taskId ?? this.taskId,
+      bookId: bookId ?? this.bookId,
+      sourceRevision: sourceRevision ?? this.sourceRevision,
+      configJson: configJson ?? this.configJson,
+      status: status ?? this.status,
+      reason: reason ?? this.reason,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (taskId.present) {
+      map['task_id'] = Variable<String>(taskId.value);
+    }
+    if (bookId.present) {
+      map['book_id'] = Variable<String>(bookId.value);
+    }
+    if (sourceRevision.present) {
+      map['source_revision'] = Variable<String>(sourceRevision.value);
+    }
+    if (configJson.present) {
+      map['config_json'] = Variable<String>(configJson.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (reason.present) {
+      map['reason'] = Variable<String>(reason.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OcrJobsCompanion(')
+          ..write('id: $id, ')
+          ..write('taskId: $taskId, ')
+          ..write('bookId: $bookId, ')
+          ..write('sourceRevision: $sourceRevision, ')
+          ..write('configJson: $configJson, ')
+          ..write('status: $status, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $OcrJobPagesTable extends OcrJobPages
+    with TableInfo<$OcrJobPagesTable, OcrJobPageRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $OcrJobPagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _jobIdMeta = const VerificationMeta('jobId');
+  @override
+  late final GeneratedColumn<String> jobId = GeneratedColumn<String>(
+    'job_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _pageNumberMeta = const VerificationMeta(
+    'pageNumber',
+  );
+  @override
+  late final GeneratedColumn<int> pageNumber = GeneratedColumn<int>(
+    'page_number',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _attemptMeta = const VerificationMeta(
+    'attempt',
+  );
+  @override
+  late final GeneratedColumn<int> attempt = GeneratedColumn<int>(
+    'attempt',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _ocrPageIdMeta = const VerificationMeta(
+    'ocrPageId',
+  );
+  @override
+  late final GeneratedColumn<String> ocrPageId = GeneratedColumn<String>(
+    'ocr_page_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _expectedCacheSignatureMeta =
+      const VerificationMeta('expectedCacheSignature');
+  @override
+  late final GeneratedColumn<String> expectedCacheSignature =
+      GeneratedColumn<String>(
+        'expected_cache_signature',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _errorCodeMeta = const VerificationMeta(
+    'errorCode',
+  );
+  @override
+  late final GeneratedColumn<String> errorCode = GeneratedColumn<String>(
+    'error_code',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    jobId,
+    pageNumber,
+    status,
+    attempt,
+    ocrPageId,
+    expectedCacheSignature,
+    errorCode,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ocr_job_pages';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<OcrJobPageRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('job_id')) {
+      context.handle(
+        _jobIdMeta,
+        jobId.isAcceptableOrUnknown(data['job_id']!, _jobIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jobIdMeta);
+    }
+    if (data.containsKey('page_number')) {
+      context.handle(
+        _pageNumberMeta,
+        pageNumber.isAcceptableOrUnknown(data['page_number']!, _pageNumberMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pageNumberMeta);
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('attempt')) {
+      context.handle(
+        _attemptMeta,
+        attempt.isAcceptableOrUnknown(data['attempt']!, _attemptMeta),
+      );
+    }
+    if (data.containsKey('ocr_page_id')) {
+      context.handle(
+        _ocrPageIdMeta,
+        ocrPageId.isAcceptableOrUnknown(data['ocr_page_id']!, _ocrPageIdMeta),
+      );
+    }
+    if (data.containsKey('expected_cache_signature')) {
+      context.handle(
+        _expectedCacheSignatureMeta,
+        expectedCacheSignature.isAcceptableOrUnknown(
+          data['expected_cache_signature']!,
+          _expectedCacheSignatureMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_expectedCacheSignatureMeta);
+    }
+    if (data.containsKey('error_code')) {
+      context.handle(
+        _errorCodeMeta,
+        errorCode.isAcceptableOrUnknown(data['error_code']!, _errorCodeMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  OcrJobPageRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return OcrJobPageRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      jobId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}job_id'],
+      )!,
+      pageNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}page_number'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      attempt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempt'],
+      )!,
+      ocrPageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}ocr_page_id'],
+      ),
+      expectedCacheSignature: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}expected_cache_signature'],
+      )!,
+      errorCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}error_code'],
+      ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $OcrJobPagesTable createAlias(String alias) {
+    return $OcrJobPagesTable(attachedDatabase, alias);
+  }
+}
+
+class OcrJobPageRow extends DataClass implements Insertable<OcrJobPageRow> {
+  final String id;
+  final String jobId;
+  final int pageNumber;
+  final String status;
+  final int attempt;
+  final String? ocrPageId;
+  final String expectedCacheSignature;
+  final String? errorCode;
+  final int updatedAt;
+  const OcrJobPageRow({
+    required this.id,
+    required this.jobId,
+    required this.pageNumber,
+    required this.status,
+    required this.attempt,
+    this.ocrPageId,
+    required this.expectedCacheSignature,
+    this.errorCode,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['job_id'] = Variable<String>(jobId);
+    map['page_number'] = Variable<int>(pageNumber);
+    map['status'] = Variable<String>(status);
+    map['attempt'] = Variable<int>(attempt);
+    if (!nullToAbsent || ocrPageId != null) {
+      map['ocr_page_id'] = Variable<String>(ocrPageId);
+    }
+    map['expected_cache_signature'] = Variable<String>(expectedCacheSignature);
+    if (!nullToAbsent || errorCode != null) {
+      map['error_code'] = Variable<String>(errorCode);
+    }
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  OcrJobPagesCompanion toCompanion(bool nullToAbsent) {
+    return OcrJobPagesCompanion(
+      id: Value(id),
+      jobId: Value(jobId),
+      pageNumber: Value(pageNumber),
+      status: Value(status),
+      attempt: Value(attempt),
+      ocrPageId: ocrPageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ocrPageId),
+      expectedCacheSignature: Value(expectedCacheSignature),
+      errorCode: errorCode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(errorCode),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory OcrJobPageRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return OcrJobPageRow(
+      id: serializer.fromJson<String>(json['id']),
+      jobId: serializer.fromJson<String>(json['jobId']),
+      pageNumber: serializer.fromJson<int>(json['pageNumber']),
+      status: serializer.fromJson<String>(json['status']),
+      attempt: serializer.fromJson<int>(json['attempt']),
+      ocrPageId: serializer.fromJson<String?>(json['ocrPageId']),
+      expectedCacheSignature: serializer.fromJson<String>(
+        json['expectedCacheSignature'],
+      ),
+      errorCode: serializer.fromJson<String?>(json['errorCode']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'jobId': serializer.toJson<String>(jobId),
+      'pageNumber': serializer.toJson<int>(pageNumber),
+      'status': serializer.toJson<String>(status),
+      'attempt': serializer.toJson<int>(attempt),
+      'ocrPageId': serializer.toJson<String?>(ocrPageId),
+      'expectedCacheSignature': serializer.toJson<String>(
+        expectedCacheSignature,
+      ),
+      'errorCode': serializer.toJson<String?>(errorCode),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  OcrJobPageRow copyWith({
+    String? id,
+    String? jobId,
+    int? pageNumber,
+    String? status,
+    int? attempt,
+    Value<String?> ocrPageId = const Value.absent(),
+    String? expectedCacheSignature,
+    Value<String?> errorCode = const Value.absent(),
+    int? updatedAt,
+  }) => OcrJobPageRow(
+    id: id ?? this.id,
+    jobId: jobId ?? this.jobId,
+    pageNumber: pageNumber ?? this.pageNumber,
+    status: status ?? this.status,
+    attempt: attempt ?? this.attempt,
+    ocrPageId: ocrPageId.present ? ocrPageId.value : this.ocrPageId,
+    expectedCacheSignature:
+        expectedCacheSignature ?? this.expectedCacheSignature,
+    errorCode: errorCode.present ? errorCode.value : this.errorCode,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  OcrJobPageRow copyWithCompanion(OcrJobPagesCompanion data) {
+    return OcrJobPageRow(
+      id: data.id.present ? data.id.value : this.id,
+      jobId: data.jobId.present ? data.jobId.value : this.jobId,
+      pageNumber: data.pageNumber.present
+          ? data.pageNumber.value
+          : this.pageNumber,
+      status: data.status.present ? data.status.value : this.status,
+      attempt: data.attempt.present ? data.attempt.value : this.attempt,
+      ocrPageId: data.ocrPageId.present ? data.ocrPageId.value : this.ocrPageId,
+      expectedCacheSignature: data.expectedCacheSignature.present
+          ? data.expectedCacheSignature.value
+          : this.expectedCacheSignature,
+      errorCode: data.errorCode.present ? data.errorCode.value : this.errorCode,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OcrJobPageRow(')
+          ..write('id: $id, ')
+          ..write('jobId: $jobId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('status: $status, ')
+          ..write('attempt: $attempt, ')
+          ..write('ocrPageId: $ocrPageId, ')
+          ..write('expectedCacheSignature: $expectedCacheSignature, ')
+          ..write('errorCode: $errorCode, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    jobId,
+    pageNumber,
+    status,
+    attempt,
+    ocrPageId,
+    expectedCacheSignature,
+    errorCode,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is OcrJobPageRow &&
+          other.id == this.id &&
+          other.jobId == this.jobId &&
+          other.pageNumber == this.pageNumber &&
+          other.status == this.status &&
+          other.attempt == this.attempt &&
+          other.ocrPageId == this.ocrPageId &&
+          other.expectedCacheSignature == this.expectedCacheSignature &&
+          other.errorCode == this.errorCode &&
+          other.updatedAt == this.updatedAt);
+}
+
+class OcrJobPagesCompanion extends UpdateCompanion<OcrJobPageRow> {
+  final Value<String> id;
+  final Value<String> jobId;
+  final Value<int> pageNumber;
+  final Value<String> status;
+  final Value<int> attempt;
+  final Value<String?> ocrPageId;
+  final Value<String> expectedCacheSignature;
+  final Value<String?> errorCode;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const OcrJobPagesCompanion({
+    this.id = const Value.absent(),
+    this.jobId = const Value.absent(),
+    this.pageNumber = const Value.absent(),
+    this.status = const Value.absent(),
+    this.attempt = const Value.absent(),
+    this.ocrPageId = const Value.absent(),
+    this.expectedCacheSignature = const Value.absent(),
+    this.errorCode = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  OcrJobPagesCompanion.insert({
+    required String id,
+    required String jobId,
+    required int pageNumber,
+    this.status = const Value.absent(),
+    this.attempt = const Value.absent(),
+    this.ocrPageId = const Value.absent(),
+    required String expectedCacheSignature,
+    this.errorCode = const Value.absent(),
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       jobId = Value(jobId),
+       pageNumber = Value(pageNumber),
+       expectedCacheSignature = Value(expectedCacheSignature),
+       updatedAt = Value(updatedAt);
+  static Insertable<OcrJobPageRow> custom({
+    Expression<String>? id,
+    Expression<String>? jobId,
+    Expression<int>? pageNumber,
+    Expression<String>? status,
+    Expression<int>? attempt,
+    Expression<String>? ocrPageId,
+    Expression<String>? expectedCacheSignature,
+    Expression<String>? errorCode,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (jobId != null) 'job_id': jobId,
+      if (pageNumber != null) 'page_number': pageNumber,
+      if (status != null) 'status': status,
+      if (attempt != null) 'attempt': attempt,
+      if (ocrPageId != null) 'ocr_page_id': ocrPageId,
+      if (expectedCacheSignature != null)
+        'expected_cache_signature': expectedCacheSignature,
+      if (errorCode != null) 'error_code': errorCode,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  OcrJobPagesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? jobId,
+    Value<int>? pageNumber,
+    Value<String>? status,
+    Value<int>? attempt,
+    Value<String?>? ocrPageId,
+    Value<String>? expectedCacheSignature,
+    Value<String?>? errorCode,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return OcrJobPagesCompanion(
+      id: id ?? this.id,
+      jobId: jobId ?? this.jobId,
+      pageNumber: pageNumber ?? this.pageNumber,
+      status: status ?? this.status,
+      attempt: attempt ?? this.attempt,
+      ocrPageId: ocrPageId ?? this.ocrPageId,
+      expectedCacheSignature:
+          expectedCacheSignature ?? this.expectedCacheSignature,
+      errorCode: errorCode ?? this.errorCode,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (jobId.present) {
+      map['job_id'] = Variable<String>(jobId.value);
+    }
+    if (pageNumber.present) {
+      map['page_number'] = Variable<int>(pageNumber.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (attempt.present) {
+      map['attempt'] = Variable<int>(attempt.value);
+    }
+    if (ocrPageId.present) {
+      map['ocr_page_id'] = Variable<String>(ocrPageId.value);
+    }
+    if (expectedCacheSignature.present) {
+      map['expected_cache_signature'] = Variable<String>(
+        expectedCacheSignature.value,
+      );
+    }
+    if (errorCode.present) {
+      map['error_code'] = Variable<String>(errorCode.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OcrJobPagesCompanion(')
+          ..write('id: $id, ')
+          ..write('jobId: $jobId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('status: $status, ')
+          ..write('attempt: $attempt, ')
+          ..write('ocrPageId: $ocrPageId, ')
+          ..write('expectedCacheSignature: $expectedCacheSignature, ')
+          ..write('errorCode: $errorCode, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -7711,9 +14537,26 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $SearchChunksTable searchChunks = $SearchChunksTable(this);
+  late final $SearchParentChunksTable searchParentChunks =
+      $SearchParentChunksTable(this);
   late final $AppSettingsTable appSettings = $AppSettingsTable(this);
   late final $ImportTasksTable importTasks = $ImportTasksTable(this);
   late final $OcrPagesTable ocrPages = $OcrPagesTable(this);
+  late final $DocumentSourcesTable documentSources = $DocumentSourcesTable(
+    this,
+  );
+  late final $SearchIndexUnitsTable searchIndexUnits = $SearchIndexUnitsTable(
+    this,
+  );
+  late final $SearchIndexGenerationsTable searchIndexGenerations =
+      $SearchIndexGenerationsTable(this);
+  late final $AiProfilesTable aiProfiles = $AiProfilesTable(this);
+  late final $AiCredentialOperationsTable aiCredentialOperations =
+      $AiCredentialOperationsTable(this);
+  late final $SearchTermDocumentsTable searchTermDocuments =
+      $SearchTermDocumentsTable(this);
+  late final $OcrJobsTable ocrJobs = $OcrJobsTable(this);
+  late final $OcrJobPagesTable ocrJobPages = $OcrJobPagesTable(this);
   late final BookDao bookDao = BookDao(this as AppDatabase);
   late final ProgressDao progressDao = ProgressDao(this as AppDatabase);
   late final CategoryDao categoryDao = CategoryDao(this as AppDatabase);
@@ -7728,6 +14571,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final SettingsDao settingsDao = SettingsDao(this as AppDatabase);
   late final TaskDao taskDao = TaskDao(this as AppDatabase);
   late final OcrPageDao ocrPageDao = OcrPageDao(this as AppDatabase);
+  late final AiProfileDao aiProfileDao = AiProfileDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -7744,9 +14588,18 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     noteTags,
     aiConversations,
     searchChunks,
+    searchParentChunks,
     appSettings,
     importTasks,
     ocrPages,
+    documentSources,
+    searchIndexUnits,
+    searchIndexGenerations,
+    aiProfiles,
+    aiCredentialOperations,
+    searchTermDocuments,
+    ocrJobs,
+    ocrJobPages,
   ];
 }
 
@@ -10147,6 +17000,10 @@ typedef $$AiConversationsTableCreateCompanionBuilder =
       Value<String?> noteId,
       required int createdAt,
       Value<String?> threadId,
+      Value<String?> contextSnapshot,
+      Value<String?> profileId,
+      Value<String?> profileSnapshot,
+      Value<String?> answerMeta,
       Value<int> rowid,
     });
 typedef $$AiConversationsTableUpdateCompanionBuilder =
@@ -10163,6 +17020,10 @@ typedef $$AiConversationsTableUpdateCompanionBuilder =
       Value<String?> noteId,
       Value<int> createdAt,
       Value<String?> threadId,
+      Value<String?> contextSnapshot,
+      Value<String?> profileId,
+      Value<String?> profileSnapshot,
+      Value<String?> answerMeta,
       Value<int> rowid,
     });
 
@@ -10232,6 +17093,26 @@ class $$AiConversationsTableFilterComposer
 
   ColumnFilters<String> get threadId => $composableBuilder(
     column: $table.threadId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get contextSnapshot => $composableBuilder(
+    column: $table.contextSnapshot,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get profileId => $composableBuilder(
+    column: $table.profileId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get profileSnapshot => $composableBuilder(
+    column: $table.profileSnapshot,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get answerMeta => $composableBuilder(
+    column: $table.answerMeta,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -10304,6 +17185,26 @@ class $$AiConversationsTableOrderingComposer
     column: $table.threadId,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get contextSnapshot => $composableBuilder(
+    column: $table.contextSnapshot,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get profileId => $composableBuilder(
+    column: $table.profileId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get profileSnapshot => $composableBuilder(
+    column: $table.profileSnapshot,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get answerMeta => $composableBuilder(
+    column: $table.answerMeta,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AiConversationsTableAnnotationComposer
@@ -10354,6 +17255,24 @@ class $$AiConversationsTableAnnotationComposer
 
   GeneratedColumn<String> get threadId =>
       $composableBuilder(column: $table.threadId, builder: (column) => column);
+
+  GeneratedColumn<String> get contextSnapshot => $composableBuilder(
+    column: $table.contextSnapshot,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get profileId =>
+      $composableBuilder(column: $table.profileId, builder: (column) => column);
+
+  GeneratedColumn<String> get profileSnapshot => $composableBuilder(
+    column: $table.profileSnapshot,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get answerMeta => $composableBuilder(
+    column: $table.answerMeta,
+    builder: (column) => column,
+  );
 }
 
 class $$AiConversationsTableTableManager
@@ -10405,6 +17324,10 @@ class $$AiConversationsTableTableManager
                 Value<String?> noteId = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<String?> threadId = const Value.absent(),
+                Value<String?> contextSnapshot = const Value.absent(),
+                Value<String?> profileId = const Value.absent(),
+                Value<String?> profileSnapshot = const Value.absent(),
+                Value<String?> answerMeta = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AiConversationsCompanion(
                 id: id,
@@ -10419,6 +17342,10 @@ class $$AiConversationsTableTableManager
                 noteId: noteId,
                 createdAt: createdAt,
                 threadId: threadId,
+                contextSnapshot: contextSnapshot,
+                profileId: profileId,
+                profileSnapshot: profileSnapshot,
+                answerMeta: answerMeta,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -10435,6 +17362,10 @@ class $$AiConversationsTableTableManager
                 Value<String?> noteId = const Value.absent(),
                 required int createdAt,
                 Value<String?> threadId = const Value.absent(),
+                Value<String?> contextSnapshot = const Value.absent(),
+                Value<String?> profileId = const Value.absent(),
+                Value<String?> profileSnapshot = const Value.absent(),
+                Value<String?> answerMeta = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AiConversationsCompanion.insert(
                 id: id,
@@ -10449,6 +17380,10 @@ class $$AiConversationsTableTableManager
                 noteId: noteId,
                 createdAt: createdAt,
                 threadId: threadId,
+                contextSnapshot: contextSnapshot,
+                profileId: profileId,
+                profileSnapshot: profileSnapshot,
+                answerMeta: answerMeta,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -10489,6 +17424,7 @@ typedef $$SearchChunksTableCreateCompanionBuilder =
     SearchChunksCompanion Function({
       required String id,
       Value<String?> bookId,
+      Value<String?> parentId,
       required String sourceType,
       Value<String?> sourceId,
       Value<String?> locator,
@@ -10497,10 +17433,484 @@ typedef $$SearchChunksTableCreateCompanionBuilder =
       Value<int> sortOrder,
       required int createdAt,
       required int updatedAt,
+      Value<String?> generationId,
+      Value<String?> documentSourceId,
+      Value<String?> sourceRevision,
+      Value<String?> textRevision,
+      Value<int?> startOffset,
+      Value<int?> endOffset,
+      Value<String> textOrigin,
       Value<int> rowid,
     });
 typedef $$SearchChunksTableUpdateCompanionBuilder =
     SearchChunksCompanion Function({
+      Value<String> id,
+      Value<String?> bookId,
+      Value<String?> parentId,
+      Value<String> sourceType,
+      Value<String?> sourceId,
+      Value<String?> locator,
+      Value<String?> title,
+      Value<String> body,
+      Value<int> sortOrder,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<String?> generationId,
+      Value<String?> documentSourceId,
+      Value<String?> sourceRevision,
+      Value<String?> textRevision,
+      Value<int?> startOffset,
+      Value<int?> endOffset,
+      Value<String> textOrigin,
+      Value<int> rowid,
+    });
+
+class $$SearchChunksTableFilterComposer
+    extends Composer<_$AppDatabase, $SearchChunksTable> {
+  $$SearchChunksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get parentId => $composableBuilder(
+    column: $table.parentId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceType => $composableBuilder(
+    column: $table.sourceType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceId => $composableBuilder(
+    column: $table.sourceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get locator => $composableBuilder(
+    column: $table.locator,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get startOffset => $composableBuilder(
+    column: $table.startOffset,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get endOffset => $composableBuilder(
+    column: $table.endOffset,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SearchChunksTableOrderingComposer
+    extends Composer<_$AppDatabase, $SearchChunksTable> {
+  $$SearchChunksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get parentId => $composableBuilder(
+    column: $table.parentId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceType => $composableBuilder(
+    column: $table.sourceType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceId => $composableBuilder(
+    column: $table.sourceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get locator => $composableBuilder(
+    column: $table.locator,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get body => $composableBuilder(
+    column: $table.body,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortOrder => $composableBuilder(
+    column: $table.sortOrder,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get startOffset => $composableBuilder(
+    column: $table.startOffset,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get endOffset => $composableBuilder(
+    column: $table.endOffset,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SearchChunksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SearchChunksTable> {
+  $$SearchChunksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get bookId =>
+      $composableBuilder(column: $table.bookId, builder: (column) => column);
+
+  GeneratedColumn<String> get parentId =>
+      $composableBuilder(column: $table.parentId, builder: (column) => column);
+
+  GeneratedColumn<String> get sourceType => $composableBuilder(
+    column: $table.sourceType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sourceId =>
+      $composableBuilder(column: $table.sourceId, builder: (column) => column);
+
+  GeneratedColumn<String> get locator =>
+      $composableBuilder(column: $table.locator, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get body =>
+      $composableBuilder(column: $table.body, builder: (column) => column);
+
+  GeneratedColumn<int> get sortOrder =>
+      $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get startOffset => $composableBuilder(
+    column: $table.startOffset,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get endOffset =>
+      $composableBuilder(column: $table.endOffset, builder: (column) => column);
+
+  GeneratedColumn<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => column,
+  );
+}
+
+class $$SearchChunksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SearchChunksTable,
+          SearchChunkRow,
+          $$SearchChunksTableFilterComposer,
+          $$SearchChunksTableOrderingComposer,
+          $$SearchChunksTableAnnotationComposer,
+          $$SearchChunksTableCreateCompanionBuilder,
+          $$SearchChunksTableUpdateCompanionBuilder,
+          (
+            SearchChunkRow,
+            BaseReferences<_$AppDatabase, $SearchChunksTable, SearchChunkRow>,
+          ),
+          SearchChunkRow,
+          PrefetchHooks Function()
+        > {
+  $$SearchChunksTableTableManager(_$AppDatabase db, $SearchChunksTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SearchChunksTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SearchChunksTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SearchChunksTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String?> bookId = const Value.absent(),
+                Value<String?> parentId = const Value.absent(),
+                Value<String> sourceType = const Value.absent(),
+                Value<String?> sourceId = const Value.absent(),
+                Value<String?> locator = const Value.absent(),
+                Value<String?> title = const Value.absent(),
+                Value<String> body = const Value.absent(),
+                Value<int> sortOrder = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<String?> generationId = const Value.absent(),
+                Value<String?> documentSourceId = const Value.absent(),
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<int?> startOffset = const Value.absent(),
+                Value<int?> endOffset = const Value.absent(),
+                Value<String> textOrigin = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SearchChunksCompanion(
+                id: id,
+                bookId: bookId,
+                parentId: parentId,
+                sourceType: sourceType,
+                sourceId: sourceId,
+                locator: locator,
+                title: title,
+                body: body,
+                sortOrder: sortOrder,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                generationId: generationId,
+                documentSourceId: documentSourceId,
+                sourceRevision: sourceRevision,
+                textRevision: textRevision,
+                startOffset: startOffset,
+                endOffset: endOffset,
+                textOrigin: textOrigin,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String?> bookId = const Value.absent(),
+                Value<String?> parentId = const Value.absent(),
+                required String sourceType,
+                Value<String?> sourceId = const Value.absent(),
+                Value<String?> locator = const Value.absent(),
+                Value<String?> title = const Value.absent(),
+                required String body,
+                Value<int> sortOrder = const Value.absent(),
+                required int createdAt,
+                required int updatedAt,
+                Value<String?> generationId = const Value.absent(),
+                Value<String?> documentSourceId = const Value.absent(),
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<int?> startOffset = const Value.absent(),
+                Value<int?> endOffset = const Value.absent(),
+                Value<String> textOrigin = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SearchChunksCompanion.insert(
+                id: id,
+                bookId: bookId,
+                parentId: parentId,
+                sourceType: sourceType,
+                sourceId: sourceId,
+                locator: locator,
+                title: title,
+                body: body,
+                sortOrder: sortOrder,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                generationId: generationId,
+                documentSourceId: documentSourceId,
+                sourceRevision: sourceRevision,
+                textRevision: textRevision,
+                startOffset: startOffset,
+                endOffset: endOffset,
+                textOrigin: textOrigin,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SearchChunksTable, SearchChunkRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SearchChunksTable,
+                    SearchChunkRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SearchChunksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SearchChunksTable,
+      SearchChunkRow,
+      $$SearchChunksTableFilterComposer,
+      $$SearchChunksTableOrderingComposer,
+      $$SearchChunksTableAnnotationComposer,
+      $$SearchChunksTableCreateCompanionBuilder,
+      $$SearchChunksTableUpdateCompanionBuilder,
+      (
+        SearchChunkRow,
+        BaseReferences<_$AppDatabase, $SearchChunksTable, SearchChunkRow>,
+      ),
+      SearchChunkRow,
+      PrefetchHooks Function()
+    >;
+typedef $$SearchParentChunksTableCreateCompanionBuilder =
+    SearchParentChunksCompanion Function({
+      required String id,
+      Value<String?> bookId,
+      required String sourceType,
+      Value<String?> sourceId,
+      Value<String?> locator,
+      Value<String?> title,
+      required String body,
+      Value<int> sortOrder,
+      required int createdAt,
+      required int updatedAt,
+      Value<String?> generationId,
+      Value<String?> documentSourceId,
+      Value<String?> sourceRevision,
+      Value<String?> textRevision,
+      Value<String> textOrigin,
+      Value<int> rowid,
+    });
+typedef $$SearchParentChunksTableUpdateCompanionBuilder =
+    SearchParentChunksCompanion Function({
       Value<String> id,
       Value<String?> bookId,
       Value<String> sourceType,
@@ -10511,12 +17921,17 @@ typedef $$SearchChunksTableUpdateCompanionBuilder =
       Value<int> sortOrder,
       Value<int> createdAt,
       Value<int> updatedAt,
+      Value<String?> generationId,
+      Value<String?> documentSourceId,
+      Value<String?> sourceRevision,
+      Value<String?> textRevision,
+      Value<String> textOrigin,
       Value<int> rowid,
     });
 
-class $$SearchChunksTableFilterComposer
-    extends Composer<_$AppDatabase, $SearchChunksTable> {
-  $$SearchChunksTableFilterComposer({
+class $$SearchParentChunksTableFilterComposer
+    extends Composer<_$AppDatabase, $SearchParentChunksTable> {
+  $$SearchParentChunksTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -10572,11 +17987,36 @@ class $$SearchChunksTableFilterComposer
     column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
+
+  ColumnFilters<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => ColumnFilters(column),
+  );
 }
 
-class $$SearchChunksTableOrderingComposer
-    extends Composer<_$AppDatabase, $SearchChunksTable> {
-  $$SearchChunksTableOrderingComposer({
+class $$SearchParentChunksTableOrderingComposer
+    extends Composer<_$AppDatabase, $SearchParentChunksTable> {
+  $$SearchParentChunksTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -10632,11 +18072,36 @@ class $$SearchChunksTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
-class $$SearchChunksTableAnnotationComposer
-    extends Composer<_$AppDatabase, $SearchChunksTable> {
-  $$SearchChunksTableAnnotationComposer({
+class $$SearchParentChunksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SearchParentChunksTable> {
+  $$SearchParentChunksTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -10674,37 +18139,71 @@ class $$SearchChunksTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => column,
+  );
 }
 
-class $$SearchChunksTableTableManager
+class $$SearchParentChunksTableTableManager
     extends
         RootTableManager<
           _$AppDatabase,
-          $SearchChunksTable,
-          SearchChunkRow,
-          $$SearchChunksTableFilterComposer,
-          $$SearchChunksTableOrderingComposer,
-          $$SearchChunksTableAnnotationComposer,
-          $$SearchChunksTableCreateCompanionBuilder,
-          $$SearchChunksTableUpdateCompanionBuilder,
+          $SearchParentChunksTable,
+          SearchParentChunkRow,
+          $$SearchParentChunksTableFilterComposer,
+          $$SearchParentChunksTableOrderingComposer,
+          $$SearchParentChunksTableAnnotationComposer,
+          $$SearchParentChunksTableCreateCompanionBuilder,
+          $$SearchParentChunksTableUpdateCompanionBuilder,
           (
-            SearchChunkRow,
-            BaseReferences<_$AppDatabase, $SearchChunksTable, SearchChunkRow>,
+            SearchParentChunkRow,
+            BaseReferences<
+              _$AppDatabase,
+              $SearchParentChunksTable,
+              SearchParentChunkRow
+            >,
           ),
-          SearchChunkRow,
+          SearchParentChunkRow,
           PrefetchHooks Function()
         > {
-  $$SearchChunksTableTableManager(_$AppDatabase db, $SearchChunksTable table)
-    : super(
+  $$SearchParentChunksTableTableManager(
+    _$AppDatabase db,
+    $SearchParentChunksTable table,
+  ) : super(
         TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$SearchChunksTableFilterComposer($db: db, $table: table),
+              $$SearchParentChunksTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$SearchChunksTableOrderingComposer($db: db, $table: table),
+              $$SearchParentChunksTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$SearchChunksTableAnnotationComposer($db: db, $table: table),
+              $$SearchParentChunksTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
@@ -10717,8 +18216,13 @@ class $$SearchChunksTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
+                Value<String?> generationId = const Value.absent(),
+                Value<String?> documentSourceId = const Value.absent(),
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<String> textOrigin = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
-              }) => SearchChunksCompanion(
+              }) => SearchParentChunksCompanion(
                 id: id,
                 bookId: bookId,
                 sourceType: sourceType,
@@ -10729,6 +18233,11 @@ class $$SearchChunksTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                generationId: generationId,
+                documentSourceId: documentSourceId,
+                sourceRevision: sourceRevision,
+                textRevision: textRevision,
+                textOrigin: textOrigin,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -10743,8 +18252,13 @@ class $$SearchChunksTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
+                Value<String?> generationId = const Value.absent(),
+                Value<String?> documentSourceId = const Value.absent(),
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<String> textOrigin = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
-              }) => SearchChunksCompanion.insert(
+              }) => SearchParentChunksCompanion.insert(
                 id: id,
                 bookId: bookId,
                 sourceType: sourceType,
@@ -10755,16 +18269,23 @@ class $$SearchChunksTableTableManager
                 sortOrder: sortOrder,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                generationId: generationId,
+                documentSourceId: documentSourceId,
+                sourceRevision: sourceRevision,
+                textRevision: textRevision,
+                textOrigin: textOrigin,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable<$SearchChunksTable, SearchChunkRow>(table),
+                  e.readTable<$SearchParentChunksTable, SearchParentChunkRow>(
+                    table,
+                  ),
                   BaseReferences<
                     _$AppDatabase,
-                    $SearchChunksTable,
-                    SearchChunkRow
+                    $SearchParentChunksTable,
+                    SearchParentChunkRow
                   >(db, table, e),
                 ),
               )
@@ -10774,21 +18295,25 @@ class $$SearchChunksTableTableManager
       );
 }
 
-typedef $$SearchChunksTableProcessedTableManager =
+typedef $$SearchParentChunksTableProcessedTableManager =
     ProcessedTableManager<
       _$AppDatabase,
-      $SearchChunksTable,
-      SearchChunkRow,
-      $$SearchChunksTableFilterComposer,
-      $$SearchChunksTableOrderingComposer,
-      $$SearchChunksTableAnnotationComposer,
-      $$SearchChunksTableCreateCompanionBuilder,
-      $$SearchChunksTableUpdateCompanionBuilder,
+      $SearchParentChunksTable,
+      SearchParentChunkRow,
+      $$SearchParentChunksTableFilterComposer,
+      $$SearchParentChunksTableOrderingComposer,
+      $$SearchParentChunksTableAnnotationComposer,
+      $$SearchParentChunksTableCreateCompanionBuilder,
+      $$SearchParentChunksTableUpdateCompanionBuilder,
       (
-        SearchChunkRow,
-        BaseReferences<_$AppDatabase, $SearchChunksTable, SearchChunkRow>,
+        SearchParentChunkRow,
+        BaseReferences<
+          _$AppDatabase,
+          $SearchParentChunksTable,
+          SearchParentChunkRow
+        >,
       ),
-      SearchChunkRow,
+      SearchParentChunkRow,
       PrefetchHooks Function()
     >;
 typedef $$AppSettingsTableCreateCompanionBuilder =
@@ -11303,6 +18828,13 @@ typedef $$OcrPagesTableCreateCompanionBuilder =
       Value<int?> imageHeight,
       required int createdAt,
       required int updatedAt,
+      Value<String?> sourceRevision,
+      Value<String?> cacheSignature,
+      Value<String?> textRevision,
+      Value<String?> engineVersion,
+      Value<String?> pipelineVersion,
+      Value<String> resultState,
+      Value<String> indexState,
       Value<int> rowid,
     });
 typedef $$OcrPagesTableUpdateCompanionBuilder =
@@ -11319,6 +18851,13 @@ typedef $$OcrPagesTableUpdateCompanionBuilder =
       Value<int?> imageHeight,
       Value<int> createdAt,
       Value<int> updatedAt,
+      Value<String?> sourceRevision,
+      Value<String?> cacheSignature,
+      Value<String?> textRevision,
+      Value<String?> engineVersion,
+      Value<String?> pipelineVersion,
+      Value<String> resultState,
+      Value<String> indexState,
       Value<int> rowid,
     });
 
@@ -11388,6 +18927,41 @@ class $$OcrPagesTableFilterComposer
 
   ColumnFilters<int> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get cacheSignature => $composableBuilder(
+    column: $table.cacheSignature,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get engineVersion => $composableBuilder(
+    column: $table.engineVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pipelineVersion => $composableBuilder(
+    column: $table.pipelineVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get resultState => $composableBuilder(
+    column: $table.resultState,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get indexState => $composableBuilder(
+    column: $table.indexState,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -11460,6 +19034,41 @@ class $$OcrPagesTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get cacheSignature => $composableBuilder(
+    column: $table.cacheSignature,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get engineVersion => $composableBuilder(
+    column: $table.engineVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pipelineVersion => $composableBuilder(
+    column: $table.pipelineVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get resultState => $composableBuilder(
+    column: $table.resultState,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get indexState => $composableBuilder(
+    column: $table.indexState,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$OcrPagesTableAnnotationComposer
@@ -11516,6 +19125,41 @@ class $$OcrPagesTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get cacheSignature => $composableBuilder(
+    column: $table.cacheSignature,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get engineVersion => $composableBuilder(
+    column: $table.engineVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get pipelineVersion => $composableBuilder(
+    column: $table.pipelineVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get resultState => $composableBuilder(
+    column: $table.resultState,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get indexState => $composableBuilder(
+    column: $table.indexState,
+    builder: (column) => column,
+  );
 }
 
 class $$OcrPagesTableTableManager
@@ -11561,6 +19205,13 @@ class $$OcrPagesTableTableManager
                 Value<int?> imageHeight = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> cacheSignature = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<String?> engineVersion = const Value.absent(),
+                Value<String?> pipelineVersion = const Value.absent(),
+                Value<String> resultState = const Value.absent(),
+                Value<String> indexState = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => OcrPagesCompanion(
                 id: id,
@@ -11575,6 +19226,13 @@ class $$OcrPagesTableTableManager
                 imageHeight: imageHeight,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                sourceRevision: sourceRevision,
+                cacheSignature: cacheSignature,
+                textRevision: textRevision,
+                engineVersion: engineVersion,
+                pipelineVersion: pipelineVersion,
+                resultState: resultState,
+                indexState: indexState,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -11591,6 +19249,13 @@ class $$OcrPagesTableTableManager
                 Value<int?> imageHeight = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> cacheSignature = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<String?> engineVersion = const Value.absent(),
+                Value<String?> pipelineVersion = const Value.absent(),
+                Value<String> resultState = const Value.absent(),
+                Value<String> indexState = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => OcrPagesCompanion.insert(
                 id: id,
@@ -11605,6 +19270,13 @@ class $$OcrPagesTableTableManager
                 imageHeight: imageHeight,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                sourceRevision: sourceRevision,
+                cacheSignature: cacheSignature,
+                textRevision: textRevision,
+                engineVersion: engineVersion,
+                pipelineVersion: pipelineVersion,
+                resultState: resultState,
+                indexState: indexState,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -11638,6 +19310,2530 @@ typedef $$OcrPagesTableProcessedTableManager =
       OcrPageRow,
       PrefetchHooks Function()
     >;
+typedef $$DocumentSourcesTableCreateCompanionBuilder =
+    DocumentSourcesCompanion Function({
+      required String id,
+      required String bookId,
+      required String kind,
+      required String address,
+      Value<String?> currentSourceRevision,
+      Value<String> state,
+      Value<int?> observedSize,
+      Value<int?> observedMtime,
+      required int observedAt,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$DocumentSourcesTableUpdateCompanionBuilder =
+    DocumentSourcesCompanion Function({
+      Value<String> id,
+      Value<String> bookId,
+      Value<String> kind,
+      Value<String> address,
+      Value<String?> currentSourceRevision,
+      Value<String> state,
+      Value<int?> observedSize,
+      Value<int?> observedMtime,
+      Value<int> observedAt,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$DocumentSourcesTableFilterComposer
+    extends Composer<_$AppDatabase, $DocumentSourcesTable> {
+  $$DocumentSourcesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get currentSourceRevision => $composableBuilder(
+    column: $table.currentSourceRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get observedSize => $composableBuilder(
+    column: $table.observedSize,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get observedMtime => $composableBuilder(
+    column: $table.observedMtime,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get observedAt => $composableBuilder(
+    column: $table.observedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DocumentSourcesTableOrderingComposer
+    extends Composer<_$AppDatabase, $DocumentSourcesTable> {
+  $$DocumentSourcesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get currentSourceRevision => $composableBuilder(
+    column: $table.currentSourceRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get observedSize => $composableBuilder(
+    column: $table.observedSize,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get observedMtime => $composableBuilder(
+    column: $table.observedMtime,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get observedAt => $composableBuilder(
+    column: $table.observedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DocumentSourcesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $DocumentSourcesTable> {
+  $$DocumentSourcesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get bookId =>
+      $composableBuilder(column: $table.bookId, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get address =>
+      $composableBuilder(column: $table.address, builder: (column) => column);
+
+  GeneratedColumn<String> get currentSourceRevision => $composableBuilder(
+    column: $table.currentSourceRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get state =>
+      $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<int> get observedSize => $composableBuilder(
+    column: $table.observedSize,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get observedMtime => $composableBuilder(
+    column: $table.observedMtime,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get observedAt => $composableBuilder(
+    column: $table.observedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$DocumentSourcesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $DocumentSourcesTable,
+          DocumentSourceRow,
+          $$DocumentSourcesTableFilterComposer,
+          $$DocumentSourcesTableOrderingComposer,
+          $$DocumentSourcesTableAnnotationComposer,
+          $$DocumentSourcesTableCreateCompanionBuilder,
+          $$DocumentSourcesTableUpdateCompanionBuilder,
+          (
+            DocumentSourceRow,
+            BaseReferences<
+              _$AppDatabase,
+              $DocumentSourcesTable,
+              DocumentSourceRow
+            >,
+          ),
+          DocumentSourceRow,
+          PrefetchHooks Function()
+        > {
+  $$DocumentSourcesTableTableManager(
+    _$AppDatabase db,
+    $DocumentSourcesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DocumentSourcesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DocumentSourcesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DocumentSourcesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> bookId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> address = const Value.absent(),
+                Value<String?> currentSourceRevision = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                Value<int?> observedSize = const Value.absent(),
+                Value<int?> observedMtime = const Value.absent(),
+                Value<int> observedAt = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DocumentSourcesCompanion(
+                id: id,
+                bookId: bookId,
+                kind: kind,
+                address: address,
+                currentSourceRevision: currentSourceRevision,
+                state: state,
+                observedSize: observedSize,
+                observedMtime: observedMtime,
+                observedAt: observedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String bookId,
+                required String kind,
+                required String address,
+                Value<String?> currentSourceRevision = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                Value<int?> observedSize = const Value.absent(),
+                Value<int?> observedMtime = const Value.absent(),
+                required int observedAt,
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => DocumentSourcesCompanion.insert(
+                id: id,
+                bookId: bookId,
+                kind: kind,
+                address: address,
+                currentSourceRevision: currentSourceRevision,
+                state: state,
+                observedSize: observedSize,
+                observedMtime: observedMtime,
+                observedAt: observedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$DocumentSourcesTable, DocumentSourceRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $DocumentSourcesTable,
+                    DocumentSourceRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DocumentSourcesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $DocumentSourcesTable,
+      DocumentSourceRow,
+      $$DocumentSourcesTableFilterComposer,
+      $$DocumentSourcesTableOrderingComposer,
+      $$DocumentSourcesTableAnnotationComposer,
+      $$DocumentSourcesTableCreateCompanionBuilder,
+      $$DocumentSourcesTableUpdateCompanionBuilder,
+      (
+        DocumentSourceRow,
+        BaseReferences<_$AppDatabase, $DocumentSourcesTable, DocumentSourceRow>,
+      ),
+      DocumentSourceRow,
+      PrefetchHooks Function()
+    >;
+typedef $$SearchIndexUnitsTableCreateCompanionBuilder =
+    SearchIndexUnitsCompanion Function({
+      required String id,
+      required String unitKey,
+      Value<String?> bookId,
+      Value<String?> documentSourceId,
+      required String requestedInputRevision,
+      Value<String?> activeGenerationId,
+      Value<String> state,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$SearchIndexUnitsTableUpdateCompanionBuilder =
+    SearchIndexUnitsCompanion Function({
+      Value<String> id,
+      Value<String> unitKey,
+      Value<String?> bookId,
+      Value<String?> documentSourceId,
+      Value<String> requestedInputRevision,
+      Value<String?> activeGenerationId,
+      Value<String> state,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$SearchIndexUnitsTableFilterComposer
+    extends Composer<_$AppDatabase, $SearchIndexUnitsTable> {
+  $$SearchIndexUnitsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unitKey => $composableBuilder(
+    column: $table.unitKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestedInputRevision => $composableBuilder(
+    column: $table.requestedInputRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get activeGenerationId => $composableBuilder(
+    column: $table.activeGenerationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SearchIndexUnitsTableOrderingComposer
+    extends Composer<_$AppDatabase, $SearchIndexUnitsTable> {
+  $$SearchIndexUnitsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get unitKey => $composableBuilder(
+    column: $table.unitKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestedInputRevision => $composableBuilder(
+    column: $table.requestedInputRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get activeGenerationId => $composableBuilder(
+    column: $table.activeGenerationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SearchIndexUnitsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SearchIndexUnitsTable> {
+  $$SearchIndexUnitsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get unitKey =>
+      $composableBuilder(column: $table.unitKey, builder: (column) => column);
+
+  GeneratedColumn<String> get bookId =>
+      $composableBuilder(column: $table.bookId, builder: (column) => column);
+
+  GeneratedColumn<String> get documentSourceId => $composableBuilder(
+    column: $table.documentSourceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestedInputRevision => $composableBuilder(
+    column: $table.requestedInputRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get activeGenerationId => $composableBuilder(
+    column: $table.activeGenerationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get state =>
+      $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$SearchIndexUnitsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SearchIndexUnitsTable,
+          SearchIndexUnitRow,
+          $$SearchIndexUnitsTableFilterComposer,
+          $$SearchIndexUnitsTableOrderingComposer,
+          $$SearchIndexUnitsTableAnnotationComposer,
+          $$SearchIndexUnitsTableCreateCompanionBuilder,
+          $$SearchIndexUnitsTableUpdateCompanionBuilder,
+          (
+            SearchIndexUnitRow,
+            BaseReferences<
+              _$AppDatabase,
+              $SearchIndexUnitsTable,
+              SearchIndexUnitRow
+            >,
+          ),
+          SearchIndexUnitRow,
+          PrefetchHooks Function()
+        > {
+  $$SearchIndexUnitsTableTableManager(
+    _$AppDatabase db,
+    $SearchIndexUnitsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SearchIndexUnitsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SearchIndexUnitsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SearchIndexUnitsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> unitKey = const Value.absent(),
+                Value<String?> bookId = const Value.absent(),
+                Value<String?> documentSourceId = const Value.absent(),
+                Value<String> requestedInputRevision = const Value.absent(),
+                Value<String?> activeGenerationId = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SearchIndexUnitsCompanion(
+                id: id,
+                unitKey: unitKey,
+                bookId: bookId,
+                documentSourceId: documentSourceId,
+                requestedInputRevision: requestedInputRevision,
+                activeGenerationId: activeGenerationId,
+                state: state,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String unitKey,
+                Value<String?> bookId = const Value.absent(),
+                Value<String?> documentSourceId = const Value.absent(),
+                required String requestedInputRevision,
+                Value<String?> activeGenerationId = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => SearchIndexUnitsCompanion.insert(
+                id: id,
+                unitKey: unitKey,
+                bookId: bookId,
+                documentSourceId: documentSourceId,
+                requestedInputRevision: requestedInputRevision,
+                activeGenerationId: activeGenerationId,
+                state: state,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SearchIndexUnitsTable, SearchIndexUnitRow>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SearchIndexUnitsTable,
+                    SearchIndexUnitRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SearchIndexUnitsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SearchIndexUnitsTable,
+      SearchIndexUnitRow,
+      $$SearchIndexUnitsTableFilterComposer,
+      $$SearchIndexUnitsTableOrderingComposer,
+      $$SearchIndexUnitsTableAnnotationComposer,
+      $$SearchIndexUnitsTableCreateCompanionBuilder,
+      $$SearchIndexUnitsTableUpdateCompanionBuilder,
+      (
+        SearchIndexUnitRow,
+        BaseReferences<
+          _$AppDatabase,
+          $SearchIndexUnitsTable,
+          SearchIndexUnitRow
+        >,
+      ),
+      SearchIndexUnitRow,
+      PrefetchHooks Function()
+    >;
+typedef $$SearchIndexGenerationsTableCreateCompanionBuilder =
+    SearchIndexGenerationsCompanion Function({
+      required String id,
+      required String unitId,
+      required String inputRevision,
+      Value<String?> sourceRevision,
+      Value<String?> textRevision,
+      Value<String> textOrigin,
+      required String extractorVersion,
+      required String tokenizerVersion,
+      Value<String> state,
+      required int createdAt,
+      Value<int?> publishedAt,
+      Value<int> rowid,
+    });
+typedef $$SearchIndexGenerationsTableUpdateCompanionBuilder =
+    SearchIndexGenerationsCompanion Function({
+      Value<String> id,
+      Value<String> unitId,
+      Value<String> inputRevision,
+      Value<String?> sourceRevision,
+      Value<String?> textRevision,
+      Value<String> textOrigin,
+      Value<String> extractorVersion,
+      Value<String> tokenizerVersion,
+      Value<String> state,
+      Value<int> createdAt,
+      Value<int?> publishedAt,
+      Value<int> rowid,
+    });
+
+class $$SearchIndexGenerationsTableFilterComposer
+    extends Composer<_$AppDatabase, $SearchIndexGenerationsTable> {
+  $$SearchIndexGenerationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unitId => $composableBuilder(
+    column: $table.unitId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get inputRevision => $composableBuilder(
+    column: $table.inputRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get extractorVersion => $composableBuilder(
+    column: $table.extractorVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get tokenizerVersion => $composableBuilder(
+    column: $table.tokenizerVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get publishedAt => $composableBuilder(
+    column: $table.publishedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SearchIndexGenerationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $SearchIndexGenerationsTable> {
+  $$SearchIndexGenerationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get unitId => $composableBuilder(
+    column: $table.unitId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get inputRevision => $composableBuilder(
+    column: $table.inputRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get extractorVersion => $composableBuilder(
+    column: $table.extractorVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get tokenizerVersion => $composableBuilder(
+    column: $table.tokenizerVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get publishedAt => $composableBuilder(
+    column: $table.publishedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SearchIndexGenerationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SearchIndexGenerationsTable> {
+  $$SearchIndexGenerationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get unitId =>
+      $composableBuilder(column: $table.unitId, builder: (column) => column);
+
+  GeneratedColumn<String> get inputRevision => $composableBuilder(
+    column: $table.inputRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textRevision => $composableBuilder(
+    column: $table.textRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textOrigin => $composableBuilder(
+    column: $table.textOrigin,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get extractorVersion => $composableBuilder(
+    column: $table.extractorVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get tokenizerVersion => $composableBuilder(
+    column: $table.tokenizerVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get state =>
+      $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get publishedAt => $composableBuilder(
+    column: $table.publishedAt,
+    builder: (column) => column,
+  );
+}
+
+class $$SearchIndexGenerationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SearchIndexGenerationsTable,
+          SearchIndexGenerationRow,
+          $$SearchIndexGenerationsTableFilterComposer,
+          $$SearchIndexGenerationsTableOrderingComposer,
+          $$SearchIndexGenerationsTableAnnotationComposer,
+          $$SearchIndexGenerationsTableCreateCompanionBuilder,
+          $$SearchIndexGenerationsTableUpdateCompanionBuilder,
+          (
+            SearchIndexGenerationRow,
+            BaseReferences<
+              _$AppDatabase,
+              $SearchIndexGenerationsTable,
+              SearchIndexGenerationRow
+            >,
+          ),
+          SearchIndexGenerationRow,
+          PrefetchHooks Function()
+        > {
+  $$SearchIndexGenerationsTableTableManager(
+    _$AppDatabase db,
+    $SearchIndexGenerationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SearchIndexGenerationsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$SearchIndexGenerationsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$SearchIndexGenerationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> unitId = const Value.absent(),
+                Value<String> inputRevision = const Value.absent(),
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<String> textOrigin = const Value.absent(),
+                Value<String> extractorVersion = const Value.absent(),
+                Value<String> tokenizerVersion = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int?> publishedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SearchIndexGenerationsCompanion(
+                id: id,
+                unitId: unitId,
+                inputRevision: inputRevision,
+                sourceRevision: sourceRevision,
+                textRevision: textRevision,
+                textOrigin: textOrigin,
+                extractorVersion: extractorVersion,
+                tokenizerVersion: tokenizerVersion,
+                state: state,
+                createdAt: createdAt,
+                publishedAt: publishedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String unitId,
+                required String inputRevision,
+                Value<String?> sourceRevision = const Value.absent(),
+                Value<String?> textRevision = const Value.absent(),
+                Value<String> textOrigin = const Value.absent(),
+                required String extractorVersion,
+                required String tokenizerVersion,
+                Value<String> state = const Value.absent(),
+                required int createdAt,
+                Value<int?> publishedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SearchIndexGenerationsCompanion.insert(
+                id: id,
+                unitId: unitId,
+                inputRevision: inputRevision,
+                sourceRevision: sourceRevision,
+                textRevision: textRevision,
+                textOrigin: textOrigin,
+                extractorVersion: extractorVersion,
+                tokenizerVersion: tokenizerVersion,
+                state: state,
+                createdAt: createdAt,
+                publishedAt: publishedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $SearchIndexGenerationsTable,
+                    SearchIndexGenerationRow
+                  >(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SearchIndexGenerationsTable,
+                    SearchIndexGenerationRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SearchIndexGenerationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SearchIndexGenerationsTable,
+      SearchIndexGenerationRow,
+      $$SearchIndexGenerationsTableFilterComposer,
+      $$SearchIndexGenerationsTableOrderingComposer,
+      $$SearchIndexGenerationsTableAnnotationComposer,
+      $$SearchIndexGenerationsTableCreateCompanionBuilder,
+      $$SearchIndexGenerationsTableUpdateCompanionBuilder,
+      (
+        SearchIndexGenerationRow,
+        BaseReferences<
+          _$AppDatabase,
+          $SearchIndexGenerationsTable,
+          SearchIndexGenerationRow
+        >,
+      ),
+      SearchIndexGenerationRow,
+      PrefetchHooks Function()
+    >;
+typedef $$AiProfilesTableCreateCompanionBuilder =
+    AiProfilesCompanion Function({
+      required String id,
+      required String name,
+      Value<String> provider,
+      Value<String> baseUrl,
+      Value<String> model,
+      Value<double> temperature,
+      Value<int> maxTokens,
+      Value<bool> streaming,
+      Value<String> systemPrompt,
+      Value<int> revision,
+      required int createdAt,
+      required int updatedAt,
+      Value<int?> deletedAt,
+      Value<int> rowid,
+    });
+typedef $$AiProfilesTableUpdateCompanionBuilder =
+    AiProfilesCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> provider,
+      Value<String> baseUrl,
+      Value<String> model,
+      Value<double> temperature,
+      Value<int> maxTokens,
+      Value<bool> streaming,
+      Value<String> systemPrompt,
+      Value<int> revision,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int?> deletedAt,
+      Value<int> rowid,
+    });
+
+class $$AiProfilesTableFilterComposer
+    extends Composer<_$AppDatabase, $AiProfilesTable> {
+  $$AiProfilesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get provider => $composableBuilder(
+    column: $table.provider,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get baseUrl => $composableBuilder(
+    column: $table.baseUrl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get model => $composableBuilder(
+    column: $table.model,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get temperature => $composableBuilder(
+    column: $table.temperature,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get maxTokens => $composableBuilder(
+    column: $table.maxTokens,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get streaming => $composableBuilder(
+    column: $table.streaming,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AiProfilesTableOrderingComposer
+    extends Composer<_$AppDatabase, $AiProfilesTable> {
+  $$AiProfilesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get provider => $composableBuilder(
+    column: $table.provider,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get baseUrl => $composableBuilder(
+    column: $table.baseUrl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get model => $composableBuilder(
+    column: $table.model,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get temperature => $composableBuilder(
+    column: $table.temperature,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get maxTokens => $composableBuilder(
+    column: $table.maxTokens,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get streaming => $composableBuilder(
+    column: $table.streaming,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AiProfilesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AiProfilesTable> {
+  $$AiProfilesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get provider =>
+      $composableBuilder(column: $table.provider, builder: (column) => column);
+
+  GeneratedColumn<String> get baseUrl =>
+      $composableBuilder(column: $table.baseUrl, builder: (column) => column);
+
+  GeneratedColumn<String> get model =>
+      $composableBuilder(column: $table.model, builder: (column) => column);
+
+  GeneratedColumn<double> get temperature => $composableBuilder(
+    column: $table.temperature,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get maxTokens =>
+      $composableBuilder(column: $table.maxTokens, builder: (column) => column);
+
+  GeneratedColumn<bool> get streaming =>
+      $composableBuilder(column: $table.streaming, builder: (column) => column);
+
+  GeneratedColumn<String> get systemPrompt => $composableBuilder(
+    column: $table.systemPrompt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get revision =>
+      $composableBuilder(column: $table.revision, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+}
+
+class $$AiProfilesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AiProfilesTable,
+          AiProfileRow,
+          $$AiProfilesTableFilterComposer,
+          $$AiProfilesTableOrderingComposer,
+          $$AiProfilesTableAnnotationComposer,
+          $$AiProfilesTableCreateCompanionBuilder,
+          $$AiProfilesTableUpdateCompanionBuilder,
+          (
+            AiProfileRow,
+            BaseReferences<_$AppDatabase, $AiProfilesTable, AiProfileRow>,
+          ),
+          AiProfileRow,
+          PrefetchHooks Function()
+        > {
+  $$AiProfilesTableTableManager(_$AppDatabase db, $AiProfilesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AiProfilesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AiProfilesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$AiProfilesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> provider = const Value.absent(),
+                Value<String> baseUrl = const Value.absent(),
+                Value<String> model = const Value.absent(),
+                Value<double> temperature = const Value.absent(),
+                Value<int> maxTokens = const Value.absent(),
+                Value<bool> streaming = const Value.absent(),
+                Value<String> systemPrompt = const Value.absent(),
+                Value<int> revision = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int?> deletedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AiProfilesCompanion(
+                id: id,
+                name: name,
+                provider: provider,
+                baseUrl: baseUrl,
+                model: model,
+                temperature: temperature,
+                maxTokens: maxTokens,
+                streaming: streaming,
+                systemPrompt: systemPrompt,
+                revision: revision,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                Value<String> provider = const Value.absent(),
+                Value<String> baseUrl = const Value.absent(),
+                Value<String> model = const Value.absent(),
+                Value<double> temperature = const Value.absent(),
+                Value<int> maxTokens = const Value.absent(),
+                Value<bool> streaming = const Value.absent(),
+                Value<String> systemPrompt = const Value.absent(),
+                Value<int> revision = const Value.absent(),
+                required int createdAt,
+                required int updatedAt,
+                Value<int?> deletedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AiProfilesCompanion.insert(
+                id: id,
+                name: name,
+                provider: provider,
+                baseUrl: baseUrl,
+                model: model,
+                temperature: temperature,
+                maxTokens: maxTokens,
+                streaming: streaming,
+                systemPrompt: systemPrompt,
+                revision: revision,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$AiProfilesTable, AiProfileRow>(table),
+                  BaseReferences<_$AppDatabase, $AiProfilesTable, AiProfileRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AiProfilesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AiProfilesTable,
+      AiProfileRow,
+      $$AiProfilesTableFilterComposer,
+      $$AiProfilesTableOrderingComposer,
+      $$AiProfilesTableAnnotationComposer,
+      $$AiProfilesTableCreateCompanionBuilder,
+      $$AiProfilesTableUpdateCompanionBuilder,
+      (
+        AiProfileRow,
+        BaseReferences<_$AppDatabase, $AiProfilesTable, AiProfileRow>,
+      ),
+      AiProfileRow,
+      PrefetchHooks Function()
+    >;
+typedef $$AiCredentialOperationsTableCreateCompanionBuilder =
+    AiCredentialOperationsCompanion Function({
+      required String id,
+      required String profileId,
+      required String operation,
+      required String phase,
+      required int expectedRevision,
+      required String ownerSessionId,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$AiCredentialOperationsTableUpdateCompanionBuilder =
+    AiCredentialOperationsCompanion Function({
+      Value<String> id,
+      Value<String> profileId,
+      Value<String> operation,
+      Value<String> phase,
+      Value<int> expectedRevision,
+      Value<String> ownerSessionId,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$AiCredentialOperationsTableFilterComposer
+    extends Composer<_$AppDatabase, $AiCredentialOperationsTable> {
+  $$AiCredentialOperationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get profileId => $composableBuilder(
+    column: $table.profileId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get operation => $composableBuilder(
+    column: $table.operation,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get phase => $composableBuilder(
+    column: $table.phase,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get expectedRevision => $composableBuilder(
+    column: $table.expectedRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ownerSessionId => $composableBuilder(
+    column: $table.ownerSessionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AiCredentialOperationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $AiCredentialOperationsTable> {
+  $$AiCredentialOperationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get profileId => $composableBuilder(
+    column: $table.profileId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get operation => $composableBuilder(
+    column: $table.operation,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get phase => $composableBuilder(
+    column: $table.phase,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get expectedRevision => $composableBuilder(
+    column: $table.expectedRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ownerSessionId => $composableBuilder(
+    column: $table.ownerSessionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AiCredentialOperationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AiCredentialOperationsTable> {
+  $$AiCredentialOperationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get profileId =>
+      $composableBuilder(column: $table.profileId, builder: (column) => column);
+
+  GeneratedColumn<String> get operation =>
+      $composableBuilder(column: $table.operation, builder: (column) => column);
+
+  GeneratedColumn<String> get phase =>
+      $composableBuilder(column: $table.phase, builder: (column) => column);
+
+  GeneratedColumn<int> get expectedRevision => $composableBuilder(
+    column: $table.expectedRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ownerSessionId => $composableBuilder(
+    column: $table.ownerSessionId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$AiCredentialOperationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AiCredentialOperationsTable,
+          AiCredentialOperationRow,
+          $$AiCredentialOperationsTableFilterComposer,
+          $$AiCredentialOperationsTableOrderingComposer,
+          $$AiCredentialOperationsTableAnnotationComposer,
+          $$AiCredentialOperationsTableCreateCompanionBuilder,
+          $$AiCredentialOperationsTableUpdateCompanionBuilder,
+          (
+            AiCredentialOperationRow,
+            BaseReferences<
+              _$AppDatabase,
+              $AiCredentialOperationsTable,
+              AiCredentialOperationRow
+            >,
+          ),
+          AiCredentialOperationRow,
+          PrefetchHooks Function()
+        > {
+  $$AiCredentialOperationsTableTableManager(
+    _$AppDatabase db,
+    $AiCredentialOperationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AiCredentialOperationsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$AiCredentialOperationsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$AiCredentialOperationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> profileId = const Value.absent(),
+                Value<String> operation = const Value.absent(),
+                Value<String> phase = const Value.absent(),
+                Value<int> expectedRevision = const Value.absent(),
+                Value<String> ownerSessionId = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AiCredentialOperationsCompanion(
+                id: id,
+                profileId: profileId,
+                operation: operation,
+                phase: phase,
+                expectedRevision: expectedRevision,
+                ownerSessionId: ownerSessionId,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String profileId,
+                required String operation,
+                required String phase,
+                required int expectedRevision,
+                required String ownerSessionId,
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => AiCredentialOperationsCompanion.insert(
+                id: id,
+                profileId: profileId,
+                operation: operation,
+                phase: phase,
+                expectedRevision: expectedRevision,
+                ownerSessionId: ownerSessionId,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $AiCredentialOperationsTable,
+                    AiCredentialOperationRow
+                  >(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $AiCredentialOperationsTable,
+                    AiCredentialOperationRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AiCredentialOperationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AiCredentialOperationsTable,
+      AiCredentialOperationRow,
+      $$AiCredentialOperationsTableFilterComposer,
+      $$AiCredentialOperationsTableOrderingComposer,
+      $$AiCredentialOperationsTableAnnotationComposer,
+      $$AiCredentialOperationsTableCreateCompanionBuilder,
+      $$AiCredentialOperationsTableUpdateCompanionBuilder,
+      (
+        AiCredentialOperationRow,
+        BaseReferences<
+          _$AppDatabase,
+          $AiCredentialOperationsTable,
+          AiCredentialOperationRow
+        >,
+      ),
+      AiCredentialOperationRow,
+      PrefetchHooks Function()
+    >;
+typedef $$SearchTermDocumentsTableCreateCompanionBuilder =
+    SearchTermDocumentsCompanion Function({
+      required String id,
+      required String chunkId,
+      Value<String?> generationId,
+      required String titleNormalized,
+      required String textNormalized,
+      required String titleTerms,
+      required String textTerms,
+      required String normalizerVersion,
+      required String tokenizerVersion,
+      Value<int> rowid,
+    });
+typedef $$SearchTermDocumentsTableUpdateCompanionBuilder =
+    SearchTermDocumentsCompanion Function({
+      Value<String> id,
+      Value<String> chunkId,
+      Value<String?> generationId,
+      Value<String> titleNormalized,
+      Value<String> textNormalized,
+      Value<String> titleTerms,
+      Value<String> textTerms,
+      Value<String> normalizerVersion,
+      Value<String> tokenizerVersion,
+      Value<int> rowid,
+    });
+
+class $$SearchTermDocumentsTableFilterComposer
+    extends Composer<_$AppDatabase, $SearchTermDocumentsTable> {
+  $$SearchTermDocumentsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get chunkId => $composableBuilder(
+    column: $table.chunkId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get titleNormalized => $composableBuilder(
+    column: $table.titleNormalized,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textNormalized => $composableBuilder(
+    column: $table.textNormalized,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get titleTerms => $composableBuilder(
+    column: $table.titleTerms,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get textTerms => $composableBuilder(
+    column: $table.textTerms,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get normalizerVersion => $composableBuilder(
+    column: $table.normalizerVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get tokenizerVersion => $composableBuilder(
+    column: $table.tokenizerVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SearchTermDocumentsTableOrderingComposer
+    extends Composer<_$AppDatabase, $SearchTermDocumentsTable> {
+  $$SearchTermDocumentsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get chunkId => $composableBuilder(
+    column: $table.chunkId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get titleNormalized => $composableBuilder(
+    column: $table.titleNormalized,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textNormalized => $composableBuilder(
+    column: $table.textNormalized,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get titleTerms => $composableBuilder(
+    column: $table.titleTerms,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get textTerms => $composableBuilder(
+    column: $table.textTerms,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get normalizerVersion => $composableBuilder(
+    column: $table.normalizerVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get tokenizerVersion => $composableBuilder(
+    column: $table.tokenizerVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SearchTermDocumentsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SearchTermDocumentsTable> {
+  $$SearchTermDocumentsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get chunkId =>
+      $composableBuilder(column: $table.chunkId, builder: (column) => column);
+
+  GeneratedColumn<String> get generationId => $composableBuilder(
+    column: $table.generationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get titleNormalized => $composableBuilder(
+    column: $table.titleNormalized,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textNormalized => $composableBuilder(
+    column: $table.textNormalized,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get titleTerms => $composableBuilder(
+    column: $table.titleTerms,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get textTerms =>
+      $composableBuilder(column: $table.textTerms, builder: (column) => column);
+
+  GeneratedColumn<String> get normalizerVersion => $composableBuilder(
+    column: $table.normalizerVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get tokenizerVersion => $composableBuilder(
+    column: $table.tokenizerVersion,
+    builder: (column) => column,
+  );
+}
+
+class $$SearchTermDocumentsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SearchTermDocumentsTable,
+          SearchTermDocumentRow,
+          $$SearchTermDocumentsTableFilterComposer,
+          $$SearchTermDocumentsTableOrderingComposer,
+          $$SearchTermDocumentsTableAnnotationComposer,
+          $$SearchTermDocumentsTableCreateCompanionBuilder,
+          $$SearchTermDocumentsTableUpdateCompanionBuilder,
+          (
+            SearchTermDocumentRow,
+            BaseReferences<
+              _$AppDatabase,
+              $SearchTermDocumentsTable,
+              SearchTermDocumentRow
+            >,
+          ),
+          SearchTermDocumentRow,
+          PrefetchHooks Function()
+        > {
+  $$SearchTermDocumentsTableTableManager(
+    _$AppDatabase db,
+    $SearchTermDocumentsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SearchTermDocumentsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SearchTermDocumentsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$SearchTermDocumentsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> chunkId = const Value.absent(),
+                Value<String?> generationId = const Value.absent(),
+                Value<String> titleNormalized = const Value.absent(),
+                Value<String> textNormalized = const Value.absent(),
+                Value<String> titleTerms = const Value.absent(),
+                Value<String> textTerms = const Value.absent(),
+                Value<String> normalizerVersion = const Value.absent(),
+                Value<String> tokenizerVersion = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SearchTermDocumentsCompanion(
+                id: id,
+                chunkId: chunkId,
+                generationId: generationId,
+                titleNormalized: titleNormalized,
+                textNormalized: textNormalized,
+                titleTerms: titleTerms,
+                textTerms: textTerms,
+                normalizerVersion: normalizerVersion,
+                tokenizerVersion: tokenizerVersion,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String chunkId,
+                Value<String?> generationId = const Value.absent(),
+                required String titleNormalized,
+                required String textNormalized,
+                required String titleTerms,
+                required String textTerms,
+                required String normalizerVersion,
+                required String tokenizerVersion,
+                Value<int> rowid = const Value.absent(),
+              }) => SearchTermDocumentsCompanion.insert(
+                id: id,
+                chunkId: chunkId,
+                generationId: generationId,
+                titleNormalized: titleNormalized,
+                textNormalized: textNormalized,
+                titleTerms: titleTerms,
+                textTerms: textTerms,
+                normalizerVersion: normalizerVersion,
+                tokenizerVersion: tokenizerVersion,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SearchTermDocumentsTable, SearchTermDocumentRow>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SearchTermDocumentsTable,
+                    SearchTermDocumentRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SearchTermDocumentsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SearchTermDocumentsTable,
+      SearchTermDocumentRow,
+      $$SearchTermDocumentsTableFilterComposer,
+      $$SearchTermDocumentsTableOrderingComposer,
+      $$SearchTermDocumentsTableAnnotationComposer,
+      $$SearchTermDocumentsTableCreateCompanionBuilder,
+      $$SearchTermDocumentsTableUpdateCompanionBuilder,
+      (
+        SearchTermDocumentRow,
+        BaseReferences<
+          _$AppDatabase,
+          $SearchTermDocumentsTable,
+          SearchTermDocumentRow
+        >,
+      ),
+      SearchTermDocumentRow,
+      PrefetchHooks Function()
+    >;
+typedef $$OcrJobsTableCreateCompanionBuilder =
+    OcrJobsCompanion Function({
+      required String id,
+      required String taskId,
+      required String bookId,
+      required String sourceRevision,
+      required String configJson,
+      Value<String> status,
+      Value<String?> reason,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$OcrJobsTableUpdateCompanionBuilder =
+    OcrJobsCompanion Function({
+      Value<String> id,
+      Value<String> taskId,
+      Value<String> bookId,
+      Value<String> sourceRevision,
+      Value<String> configJson,
+      Value<String> status,
+      Value<String?> reason,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$OcrJobsTableFilterComposer
+    extends Composer<_$AppDatabase, $OcrJobsTable> {
+  $$OcrJobsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get taskId => $composableBuilder(
+    column: $table.taskId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get configJson => $composableBuilder(
+    column: $table.configJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$OcrJobsTableOrderingComposer
+    extends Composer<_$AppDatabase, $OcrJobsTable> {
+  $$OcrJobsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get taskId => $composableBuilder(
+    column: $table.taskId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bookId => $composableBuilder(
+    column: $table.bookId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get configJson => $composableBuilder(
+    column: $table.configJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$OcrJobsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $OcrJobsTable> {
+  $$OcrJobsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get taskId =>
+      $composableBuilder(column: $table.taskId, builder: (column) => column);
+
+  GeneratedColumn<String> get bookId =>
+      $composableBuilder(column: $table.bookId, builder: (column) => column);
+
+  GeneratedColumn<String> get sourceRevision => $composableBuilder(
+    column: $table.sourceRevision,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get configJson => $composableBuilder(
+    column: $table.configJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get reason =>
+      $composableBuilder(column: $table.reason, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$OcrJobsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $OcrJobsTable,
+          OcrJobRow,
+          $$OcrJobsTableFilterComposer,
+          $$OcrJobsTableOrderingComposer,
+          $$OcrJobsTableAnnotationComposer,
+          $$OcrJobsTableCreateCompanionBuilder,
+          $$OcrJobsTableUpdateCompanionBuilder,
+          (OcrJobRow, BaseReferences<_$AppDatabase, $OcrJobsTable, OcrJobRow>),
+          OcrJobRow,
+          PrefetchHooks Function()
+        > {
+  $$OcrJobsTableTableManager(_$AppDatabase db, $OcrJobsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$OcrJobsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$OcrJobsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$OcrJobsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> taskId = const Value.absent(),
+                Value<String> bookId = const Value.absent(),
+                Value<String> sourceRevision = const Value.absent(),
+                Value<String> configJson = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String?> reason = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => OcrJobsCompanion(
+                id: id,
+                taskId: taskId,
+                bookId: bookId,
+                sourceRevision: sourceRevision,
+                configJson: configJson,
+                status: status,
+                reason: reason,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String taskId,
+                required String bookId,
+                required String sourceRevision,
+                required String configJson,
+                Value<String> status = const Value.absent(),
+                Value<String?> reason = const Value.absent(),
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => OcrJobsCompanion.insert(
+                id: id,
+                taskId: taskId,
+                bookId: bookId,
+                sourceRevision: sourceRevision,
+                configJson: configJson,
+                status: status,
+                reason: reason,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$OcrJobsTable, OcrJobRow>(table),
+                  BaseReferences<_$AppDatabase, $OcrJobsTable, OcrJobRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$OcrJobsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $OcrJobsTable,
+      OcrJobRow,
+      $$OcrJobsTableFilterComposer,
+      $$OcrJobsTableOrderingComposer,
+      $$OcrJobsTableAnnotationComposer,
+      $$OcrJobsTableCreateCompanionBuilder,
+      $$OcrJobsTableUpdateCompanionBuilder,
+      (OcrJobRow, BaseReferences<_$AppDatabase, $OcrJobsTable, OcrJobRow>),
+      OcrJobRow,
+      PrefetchHooks Function()
+    >;
+typedef $$OcrJobPagesTableCreateCompanionBuilder =
+    OcrJobPagesCompanion Function({
+      required String id,
+      required String jobId,
+      required int pageNumber,
+      Value<String> status,
+      Value<int> attempt,
+      Value<String?> ocrPageId,
+      required String expectedCacheSignature,
+      Value<String?> errorCode,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$OcrJobPagesTableUpdateCompanionBuilder =
+    OcrJobPagesCompanion Function({
+      Value<String> id,
+      Value<String> jobId,
+      Value<int> pageNumber,
+      Value<String> status,
+      Value<int> attempt,
+      Value<String?> ocrPageId,
+      Value<String> expectedCacheSignature,
+      Value<String?> errorCode,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$OcrJobPagesTableFilterComposer
+    extends Composer<_$AppDatabase, $OcrJobPagesTable> {
+  $$OcrJobPagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attempt => $composableBuilder(
+    column: $table.attempt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ocrPageId => $composableBuilder(
+    column: $table.ocrPageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get expectedCacheSignature => $composableBuilder(
+    column: $table.expectedCacheSignature,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get errorCode => $composableBuilder(
+    column: $table.errorCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$OcrJobPagesTableOrderingComposer
+    extends Composer<_$AppDatabase, $OcrJobPagesTable> {
+  $$OcrJobPagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get jobId => $composableBuilder(
+    column: $table.jobId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get attempt => $composableBuilder(
+    column: $table.attempt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ocrPageId => $composableBuilder(
+    column: $table.ocrPageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get expectedCacheSignature => $composableBuilder(
+    column: $table.expectedCacheSignature,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get errorCode => $composableBuilder(
+    column: $table.errorCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$OcrJobPagesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $OcrJobPagesTable> {
+  $$OcrJobPagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get jobId =>
+      $composableBuilder(column: $table.jobId, builder: (column) => column);
+
+  GeneratedColumn<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get attempt =>
+      $composableBuilder(column: $table.attempt, builder: (column) => column);
+
+  GeneratedColumn<String> get ocrPageId =>
+      $composableBuilder(column: $table.ocrPageId, builder: (column) => column);
+
+  GeneratedColumn<String> get expectedCacheSignature => $composableBuilder(
+    column: $table.expectedCacheSignature,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get errorCode =>
+      $composableBuilder(column: $table.errorCode, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$OcrJobPagesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $OcrJobPagesTable,
+          OcrJobPageRow,
+          $$OcrJobPagesTableFilterComposer,
+          $$OcrJobPagesTableOrderingComposer,
+          $$OcrJobPagesTableAnnotationComposer,
+          $$OcrJobPagesTableCreateCompanionBuilder,
+          $$OcrJobPagesTableUpdateCompanionBuilder,
+          (
+            OcrJobPageRow,
+            BaseReferences<_$AppDatabase, $OcrJobPagesTable, OcrJobPageRow>,
+          ),
+          OcrJobPageRow,
+          PrefetchHooks Function()
+        > {
+  $$OcrJobPagesTableTableManager(_$AppDatabase db, $OcrJobPagesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$OcrJobPagesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$OcrJobPagesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$OcrJobPagesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> jobId = const Value.absent(),
+                Value<int> pageNumber = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> attempt = const Value.absent(),
+                Value<String?> ocrPageId = const Value.absent(),
+                Value<String> expectedCacheSignature = const Value.absent(),
+                Value<String?> errorCode = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => OcrJobPagesCompanion(
+                id: id,
+                jobId: jobId,
+                pageNumber: pageNumber,
+                status: status,
+                attempt: attempt,
+                ocrPageId: ocrPageId,
+                expectedCacheSignature: expectedCacheSignature,
+                errorCode: errorCode,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String jobId,
+                required int pageNumber,
+                Value<String> status = const Value.absent(),
+                Value<int> attempt = const Value.absent(),
+                Value<String?> ocrPageId = const Value.absent(),
+                required String expectedCacheSignature,
+                Value<String?> errorCode = const Value.absent(),
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => OcrJobPagesCompanion.insert(
+                id: id,
+                jobId: jobId,
+                pageNumber: pageNumber,
+                status: status,
+                attempt: attempt,
+                ocrPageId: ocrPageId,
+                expectedCacheSignature: expectedCacheSignature,
+                errorCode: errorCode,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$OcrJobPagesTable, OcrJobPageRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $OcrJobPagesTable,
+                    OcrJobPageRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$OcrJobPagesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $OcrJobPagesTable,
+      OcrJobPageRow,
+      $$OcrJobPagesTableFilterComposer,
+      $$OcrJobPagesTableOrderingComposer,
+      $$OcrJobPagesTableAnnotationComposer,
+      $$OcrJobPagesTableCreateCompanionBuilder,
+      $$OcrJobPagesTableUpdateCompanionBuilder,
+      (
+        OcrJobPageRow,
+        BaseReferences<_$AppDatabase, $OcrJobPagesTable, OcrJobPageRow>,
+      ),
+      OcrJobPageRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -11663,10 +21859,34 @@ class $AppDatabaseManager {
       $$AiConversationsTableTableManager(_db, _db.aiConversations);
   $$SearchChunksTableTableManager get searchChunks =>
       $$SearchChunksTableTableManager(_db, _db.searchChunks);
+  $$SearchParentChunksTableTableManager get searchParentChunks =>
+      $$SearchParentChunksTableTableManager(_db, _db.searchParentChunks);
   $$AppSettingsTableTableManager get appSettings =>
       $$AppSettingsTableTableManager(_db, _db.appSettings);
   $$ImportTasksTableTableManager get importTasks =>
       $$ImportTasksTableTableManager(_db, _db.importTasks);
   $$OcrPagesTableTableManager get ocrPages =>
       $$OcrPagesTableTableManager(_db, _db.ocrPages);
+  $$DocumentSourcesTableTableManager get documentSources =>
+      $$DocumentSourcesTableTableManager(_db, _db.documentSources);
+  $$SearchIndexUnitsTableTableManager get searchIndexUnits =>
+      $$SearchIndexUnitsTableTableManager(_db, _db.searchIndexUnits);
+  $$SearchIndexGenerationsTableTableManager get searchIndexGenerations =>
+      $$SearchIndexGenerationsTableTableManager(
+        _db,
+        _db.searchIndexGenerations,
+      );
+  $$AiProfilesTableTableManager get aiProfiles =>
+      $$AiProfilesTableTableManager(_db, _db.aiProfiles);
+  $$AiCredentialOperationsTableTableManager get aiCredentialOperations =>
+      $$AiCredentialOperationsTableTableManager(
+        _db,
+        _db.aiCredentialOperations,
+      );
+  $$SearchTermDocumentsTableTableManager get searchTermDocuments =>
+      $$SearchTermDocumentsTableTableManager(_db, _db.searchTermDocuments);
+  $$OcrJobsTableTableManager get ocrJobs =>
+      $$OcrJobsTableTableManager(_db, _db.ocrJobs);
+  $$OcrJobPagesTableTableManager get ocrJobPages =>
+      $$OcrJobPagesTableTableManager(_db, _db.ocrJobPages);
 }

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ocr/ocr_timeline.dart';
 import '../../../core/tasks/task_cancellation.dart';
 import '../../../domain/books/book.dart';
 import '../../../domain/ocr/ocr_models.dart';
@@ -46,10 +47,8 @@ final class OcrPageUiState {
 }
 
 /// Riverpod 3 family Notifier: constructor receives the family argument.
-final ocrPageControllerProvider =
-    NotifierProvider.family<OcrPageController, OcrPageUiState, String>(
-      OcrPageController.new,
-    );
+final ocrPageControllerProvider = NotifierProvider.autoDispose
+    .family<OcrPageController, OcrPageUiState, String>(OcrPageController.new);
 
 final class OcrPageController extends Notifier<OcrPageUiState> {
   OcrPageController(this.bookId);
@@ -59,7 +58,14 @@ final class OcrPageController extends Notifier<OcrPageUiState> {
   int _generation = 0;
 
   @override
-  OcrPageUiState build() => const OcrPageUiState();
+  OcrPageUiState build() {
+    ref.onDispose(() {
+      _token?.cancel();
+      _token = null;
+      _generation += 1;
+    });
+    return const OcrPageUiState();
+  }
 
   Future<OcrPageResult?> recognize({
     required Book book,
@@ -106,6 +112,7 @@ final class OcrPageController extends Notifier<OcrPageUiState> {
     final token = TaskCancelToken();
     _token = token;
     final primaryPage = pageNumbers.first;
+    final policy = ref.read(ocrPipelinePolicyProvider);
     state = OcrPageUiState(
       phase: OcrPagePhase.running,
       pageNumber: primaryPage,
@@ -126,7 +133,7 @@ final class OcrPageController extends Notifier<OcrPageUiState> {
           generation: generation,
         );
         // Prefer cache/disk first so returning to a recognized page is free.
-        if (!forceRefresh) {
+        if (!forceRefresh && languageHint == null) {
           final cached = await useCase.peekCachedPage(
             bookId: book.id,
             pageNumber: pageNumber,
@@ -139,9 +146,13 @@ final class OcrPageController extends Notifier<OcrPageUiState> {
             continue;
           }
         }
-        final displayBytes = exportPage == null
+        final displayBytes = exportPage == null || policy.preferNativePdfPage
             ? null
-            : await exportPage(pageNumber);
+            : await traceOcrAsync(
+                'ocr.export.display',
+                () => exportPage(pageNumber),
+                arguments: {'page': pageNumber},
+              );
         token.throwIfCancelled();
         final result = await useCase.recognizeCurrentPage(
           book: book,

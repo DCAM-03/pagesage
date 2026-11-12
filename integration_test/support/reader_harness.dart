@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/app/theme/app_theme.dart';
 import 'package:pagesage/core/database/app_database.dart';
 import 'package:pagesage/core/database/database_providers.dart';
+import 'package:pagesage/core/security/secure_store.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/reader_settings.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
@@ -18,7 +19,7 @@ import 'package:pagesage/features/reader/presentation/reader_page.dart';
 /// Hosts the real reader against an in-memory database on the Linux desktop.
 ///
 /// The integration tests exist to exercise what widget tests cannot: the real
-/// GTK window, real pointer input through the platform layer, and the real
+/// GTK window, Flutter pointer gestures, and the real
 /// host widget that positions menus. Everything the reader needs is the
 /// production implementation; only durable storage is swapped for an in-memory
 /// Drift database so a test run cannot touch the user's library.
@@ -93,7 +94,10 @@ final class ReaderHarness {
       RepaintBoundary(
         key: _captureKey,
         child: ProviderScope(
-          overrides: [appDatabaseProvider.overrideWithValue(database)],
+          overrides: [
+            appDatabaseProvider.overrideWithValue(database),
+            secureStoreProvider.overrideWithValue(SecureStore.memory()),
+          ],
           child: MaterialApp(
             // Use the production theme: without it the harness renders in
             // Flutter's default purple scheme, so captures would not show
@@ -126,8 +130,9 @@ final class ReaderHarness {
   /// reader mid-test. This grabs the frame the assertions just ran against,
   /// which is what makes a passing integration test reviewable after the fact
   /// rather than only reported as a check mark.
-  Future<File?> capture(String name) async {
-    final boundary = _captureKey.currentContext?.findRenderObject();
+  Future<File?> capture(String name, {GlobalKey? boundaryKey}) async {
+    final boundary = (boundaryKey ?? _captureKey).currentContext
+        ?.findRenderObject();
     if (boundary is! RenderRepaintBoundary) return null;
     final image = await boundary.toImage(pixelRatio: 1);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);

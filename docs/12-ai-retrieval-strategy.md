@@ -1,9 +1,10 @@
 # AI 检索层技术选型：DCI、向量 RAG 与结构感知词法检索
 
 > 决策日期：2026-10-21
-> 状态：已决策，待实施
+> 状态：基础词法检索与引用清单已实现（§7）；父子分块与结构扩展第一版已实现，真实 33 题离线 A/B 见 [专项记录](15-parent-child-chunking.md)
+> 最近复审：2026-11-08；新算法以 [结构感知的父子分块与上下文扩展](15-parent-child-chunking.md) 为准
 > 上游需求：`docs/tasks/selected-text-ai-workflows.md`（TASK-16），`docs/02-feature-spec.md` §10
-> 约束来源：`AGENTS.md`（AI 用户主动触发、上下文范围显式、本地优先）
+> 约束来源：`AGENTS.md`（上下文范围显式、本地优先）
 
 ## 1. 要解决的问题
 
@@ -41,7 +42,7 @@
 | 匿名数学扫描样本 | 1 | 17 |
 | **合计** | **3,499** | — |
 
-分块由 `SearchIndexer._splitTextWithOffsets(targetLength: 1200)` 产生，每块带 locator，已写入 FTS5。
+旧库仍是 schema v5 的 1200 字硬切数据；当前代码在重建索引时改用 `StructureAwareChunker`，EPUB/Markdown 按结构父块切分，PDF 使用物理页父块，子块仍写入 FTS5。评测器不读取旧块来冒充新候选，而是从当前源文件分别生成两路块。
 
 **这个规模是选型的决定性因素**：三千量级的块，精确词法检索是毫秒级的，DCI 省掉建索引的收益在这里等于零。
 
@@ -94,18 +95,39 @@ Flutter 端侧向量检索需要两样东西：
 
 **结论：不采用。** 若将来语料规模或语义召回需求显著上升，可按以下条件重新评估：单书库超过 5 万块、或实测发现词法检索召回不足以支撑真实提问。
 
+### 5.1 2026-11-08 复审：小模型改变了体积前提
+
+上面的结论基于「嵌入模型通常 100MB+」这一前提。现在 `BAAI/bge-small-zh-v1.5`
+的 ONNX 量化文件可做到约 24–95MB，模型本身只有 24M 参数、512 维；而 3,499 个
+`float32` 向量只占约 7.2MB。移动端已经不需要为了语义召回引入 100MB+ 模型和
+`sqlite-vec` 原生扩展。
+
+因此调整如下，但不推翻原结论的核心：
+
+- **仍不引入 `sqlite-vec` / ANN / 向量数据库。** 当前规模用 Drift BLOB +
+  isolate 全量余弦即可。
+- **语义检索降级为可选 P1。** 先与现有 BM25/中文二元组做 RRF 混合检索，用固定
+  评测集验证 Recall@5 和引用准确率；没有实测收益就不默认开启。
+- 默认路径仍是结构感知的词法检索；模型缺失、内存不足或索引未完成时自动回退。
+
+完整选型、模型体积和分阶段路线见 `docs/14-ai-open-source-stack.md`。
+
 ## 6. 选定方案：结构感知的词法检索
 
 ### 6.1 核心思路
+
+本节保留早期选型背景。当前第一版已把结构切块、父块与子块接入索引和检索，真实离线效果与限制见 [父子分块算法](15-parent-child-chunking.md)。章节树候选、版本快照与嵌入检索仍是后续范围。
 
 书籍天然自带层级结构，且项目里**已有现成实现**：
 
 - EPUB：`EpubTocItem` 树 + `EpubChapter.text`
 - PDF：`PdfOutline` 章节树（含页码），由 `pdfOutlineEntries()` 解析
 
-这与 PageIndex 的思路一致（用文档自身目录做检索），但关键区别是：**PageIndex 需要 LLM 生成树索引，我们的树本来就在文件里**，省掉了它最贵的一步。
+可以借鉴按结构组织检索的思路，但已有目录不等于已有完整检索树：目录需要与正文、跨度和版本建立可靠映射；缺目录时仍应保留正文检索。第一版建树与切块使用本地解析，不依赖 LLM。
 
 ### 6.2 流程
+
+以下为早期流程示意；其中 FTS 路径已被 §7.4 的正文词法扫描替代，固定每书配额和无条件邻块扩展也不是当前算法的约定。实际实现按新算法文档中的候选合并、父块窗口与最终预算检查执行。
 
 ```
 划词 / 提问
@@ -329,9 +351,9 @@ final built = const ContextBuilder().build(
 
 `AGENTS.md`：
 
-> AI is user-triggered only. Never upload a whole book automatically, and always **make the AI context range explicit**.
+> AI requests must **make their context range explicit**. Never upload a whole book automatically.
 
-「自动检索 → 挑块 → 发送」若做成后台黑箱，直接违背该约束。因此：
+检索可以自动，但「自动检索 → 挑块 → 发送」不能做成后台黑箱。因此：
 
 - 检索可以自动，但结果**必须回显成可检查、可增删的引用清单**，每条能跳回原文。
 - 跨书引用时，发送前必须明确列出「来自 N 本书的 M 处引用」，不能只用「当前文件夹」四个字概括。

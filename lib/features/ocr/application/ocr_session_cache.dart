@@ -2,7 +2,7 @@ import 'dart:collection';
 
 import '../../../domain/ocr/ocr_models.dart';
 
-/// Process-lifetime OCR page cache with O(1) LRU (Phase 1 — no Drift).
+/// Process-lifetime OCR page cache with O(1) LRU.
 final class OcrSessionCache {
   OcrSessionCache({this.maxEntries = 48});
 
@@ -33,13 +33,14 @@ final class OcrSessionCache {
     }
   }
 
-  void clearBook(String bookId) {
-    final prefix = '$bookId:';
-    _pages.removeWhere((key, _) => key.startsWith(prefix));
-  }
-
   void clearAll() {
     _pages.clear();
+  }
+
+  void removePages(String bookId, Iterable<int> pageNumbers) {
+    for (final pageNumber in pageNumbers) {
+      _pages.remove(_key(bookId, pageNumber));
+    }
   }
 
   int get length => _pages.length;

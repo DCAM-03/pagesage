@@ -1,140 +1,40 @@
 ---
 name: validation-harness
-description: Define, run, and record the narrowest reproducible validation surface for non-trivial software changes. Use before implementation, when choosing tests, when proving a fix or feature, when reviewing completion evidence, when runtime or browser smoke is requested, or when deciding whether build-, mock-, tooling-, runtime-, or end-to-end evidence supports a completion claim.
+description: 为 PageSage Dart/Flutter 变更选择并执行可复现的最小验证，核对组件测试、SQLite 迁移、渲染、检索评测和本地安装的证据边界；用于实施前选验证及完成声明审查。
 ---
 
-# Validation Harness
+# PageSage 验证闭环
 
-Read `docs/PROJECT_PROFILE.md`, the nearest applicable `AGENTS.md`, and the active task document when one exists. Discover commands and runtime topology from the project; do not require the user to maintain them in the profile.
+先读当前任务、根 `AGENTS.md`；执行命令或选择验证层次时读
+[验证与安装](references/pagesage-validation.md)。不使用 Java/Go 测试命令、IAM hooks 或 `coordctl.py`。
 
-## Declare The Harness Before Editing
+## 修改前声明
 
-Record these facts before changing production code:
+在已有任务或工作计划中记下：待证明行为、当前失败/基线、精确测试文件或场景、
+样本及运行环境、预期信号和证据位置。小修改不需要为此创建新文档。
 
-1. Behavior or contract being proved.
-2. Narrowest command, script, request, or user flow that exercises it.
-3. Fixture, account, seed data, service, browser, or external input required.
-4. Expected pass signal and, for a defect, the expected pre-fix failure.
-5. Meaningful negative cases for security, permissions, tenancy, validation, lifecycle, and destructive behavior when applicable.
-6. Where commands, results, and remaining gaps will be recorded.
+选择能拒绝实际缺陷的最小证明；反例来自本次不变量，不为每条格式化或构建命令制造反例。
+变更契约时用 `api-contract-sync` 查找消费者，避免只验证修改的那个文件。
 
-Prefer the fastest closed loop that can falsify the intended behavior. Do not substitute a broad build for a focused behavioral check, but do not stop at a narrow mock when the completion claim crosses a real boundary.
+## 执行与证据复用
 
-For each new behavioral assertion, identify the defect it would reject. Isolate competing causes (one expired deadline
-does not prove another); require the intended status/error rather than any failure. Concurrency proof needs observable
-admission/order and resulting state, not goroutine launch order or channel-read order. Reuse existing test support and
-add only the missing assertions. A full mutation-testing run is not required. Before handoff, map the declared
-invariants to actual assertions once; missing feasible coverage is implementation work, not an acceptance blocker to
-rediscover in another session.
+- 从决定性场景开始，再验证实际受影响调用方。默认按命名文件/用例运行，测试并发 4。
+- 同一实现、依赖、配置和样本上的有效 PASS 可复用。新会话、新时间戳、同内容提交不是重跑理由。
+- 重跑须有失效证据、变化输入或明确诊断问题；保留未受影响的结果。不能只凭文件哈希相同推断运行环境相同。
+- 首个失败阻断其下游昂贵检查；继续整理不依赖该失败的已知结果和源码发现，集中给出修复项。
+- 必需整套回归失败时保留失败结论；若干精确用例变绿不能把该回归重新标为通过。
+- 日志在现有工具会话内静默产生，只读取有用摘要和失败细节，不弹终端或应用窗口。
 
-For a consumer or integration task, cite the dependency task's candidate and applicable PASS evidence, then prove
-only this task's changed integration boundary. Do not repeat the dependency's full product, authentication or account
-lifecycle matrix unless the dependency source/contract/fixture changed, a concrete regression was observed, or the
-required boundary has no valid evidence. A missing prerequisite for an unrelated scenario is not a new gate for this
-task.
+## 分开记录结论
 
-## Keep Final Acceptance Focused
-
-Declare a short named matrix in the canonical task document. For every entry, record the exact test file, test class or test name, or browser scenario; the contract or invariant it proves; why it belongs to the changed scope; and the expected signal. A broad compile, typecheck, build, static scan, or mock may be recorded as tooling evidence only, with its limited closure claim.
-
-Acceptance independently reviews code, assertions and execution evidence; it need not rerun every command. Reuse
-reproducible PASS evidence when the relevant implementation, dependencies, contract and fixture remain applicable.
-Select independent replay for a material unproved boundary, suspect evidence, or a high-risk invariant whose runtime
-result is decisive. State the defect or uncertainty a replay resolves. A new review turn, timestamp, unrelated file
-change or desire for a second green result is not an invalidation reason. After remediation, run changed checks and
-actual affected dependents only. Review causal assertions before expensive runtime replay, rather than discovering
-obvious proof gaps after running the same suite again.
-
-Use this evidence decision before scheduling any replay:
-
-| Current evidence | Action |
+| 事实 | 能说明什么 |
 | --- | --- |
-| Source, contract, fixture and official entry point are unchanged and the prior PASS is reproducible | Reuse it and record why it remains valid |
-| A changed diff row has a named focused check | Review the executor's post-change result first; replay only for a remaining material uncertainty |
-| A required boundary has no decisive evidence, or a result is suspect/stale | Run one named replay and record the uncertainty it resolves |
-| Record wording or formatting changes with no behavioral effect | Check the changed artifact only; retain applicable product evidence |
+| format / analyze / 生成 / build 通过 | 对应工具或产物检查通过 |
+| 单元 / widget / 临时 SQLite 测试通过 | 被测算法、组件或持久化场景通过 |
+| 离屏截图已检查 | 指定尺寸和数据下的布局经过检查 |
+| 真实应用或平台场景通过 | 仅指定平台、版本、样本的运行行为通过 |
+| 安装与产物核对通过 | 当前本地安装已对应本次构建，不证明正在运行的旧进程已更新 |
 
-Repeated execution needs a concrete unresolved question, such as measured flakiness, a concurrency claim requiring
-repetition, or a corrected environment. Bound it and record the reason; a later green run does not erase a failure.
-Formatting of executable configuration, public contract documentation, and UI styling may affect product behavior;
-classify their actual impact rather than exempting them by file type. When no blocking gap remains, return the result.
-
-Do not use any of these as a final acceptance entry:
-
-- wildcard selectors such as `--tests '*Delivery*'`;
-- `pnpm test`, no-argument Vitest, or another unscoped frontend test command;
-- module tests with no exact selector; or
-- full-repository or full-module aggregate tests.
-
-The coordinator may allow an exception only in the task document, with a complete impact matrix and a specific explanation of why named focused selectors cannot prove the required contract. Do not infer an exception from a slow test suite, a convention, or a previous task.
-
-If a selector unexpectedly expands, let the already-running process finish. Record the actual executed count and result as exploratory evidence, then stop final acceptance. Replace it with a named selector before continuing. Do not relabel the expanded result as focused evidence.
-
-When a task removes a test, the execution record must map each deleted semantic invariant to a new named replacement test. Migration prose, byte parity, file names, and annotation scans do not establish runtime or security behavior. Require at least one semantic negative case whenever runtime, security, migration, or test replacement/removal is in scope.
-
-## Select Evidence Depth
-
-| Evidence depth | Typical surfaces | What it can establish |
-| --- | --- | --- |
-| Tooling | formatter, linter, compiler, typecheck, unit test, static scan, fake server, mock | Local structure or isolated behavior |
-| Runtime | integration test, real process, real database path, actual package consumer, live endpoint | Behavior on the owning runtime surface |
-| End to end | cross-service request, browser user flow, SDK against a real API, external integration | Behavior across all required consumer boundaries |
-
-When an `api-contract-sync` ledger exists, treat its authoritative source and affected-consumer list as validation inputs. If a contract change lacks that inventory, report the missing sync requirement instead of guessing the consumers. Use the installed `code-quality-audit` skill when the task declares a changed-file quality gate.
-
-For combined Portal/Admin and backend work, read
-`docs/guides/local-integration-runtime.md` before starting live smoke. Bind every integrated result to the fixed
-environment's service candidates, source/OpenAPI/schema fingerprints, configuration source, data volume and fixture
-identity. A component PASS or a healthy port cannot establish integrated completion; a fixed-environment PASS may be
-reused while those bindings remain unchanged.
-
-## Close Affected Contracts Independently
-
-A passing declared harness proves the selected behavior, not that the selected impact scope was complete. During
-independent acceptance (coordination imports the result rather than repeating this review):
-
-1. Inspect the actual diff and identify every changed external or cross-module contract, including API/DTO shapes, persistence and authorization behavior, configuration, UI placement, SDK/package exports, generated artifacts, deployment inputs, error semantics, and removed compatibility surfaces.
-2. Trace each contract through producers, consumers, official runtime/build/deployment entry points, mocks, generated artifacts, and public documentation as applicable. Do not stop at files named in the task or changed by the execution session.
-3. Record each relevant surface in the task's Contract Closure Matrix as `VERIFIED`, evidence-backed `NOT_AFFECTED`, or `BLOCKED`. The execution session may append evidence but may not approve its own disposition.
-4. Use static dependency and caller tracing first. Group unchanged consumers or entry points with the same concrete no-impact reason, listing each path in the grouped row. Run only the smallest named runtime gates needed for unresolved affected boundaries; closure review does not authorize wildcard, module-wide, repository-wide, or repeated aggregate tests.
-5. Treat implementation status, checked acceptance criteria, and execution summaries as claims to verify against current code and official entry points.
-
-Any `BLOCKED` production consumer or official runtime/build/deployment entry point prevents acceptance. A documentation-only correction may repair the record or preserve unaffected evidence, but cannot by itself upgrade runtime evidence or close a technical blocker.
-
-## Record Both Axes
-
-Every tracked execution and acceptance record must state:
-
-| Axis | Values |
-| --- | --- |
-| Implementation State | `DESIGN_ONLY`, `CONTRACT_ONLY`, `STUB_ONLY`, `IMPLEMENTED` |
-| Validation Evidence | `UNVERIFIED`, `TOOLING_PASS`, `RUNTIME_PASS`, `E2E_PASS`, `BLOCKED` |
-
-Only real product behavior with `IMPLEMENTED + RUNTIME_PASS` or `IMPLEMENTED + E2E_PASS` may be described externally as complete. A design, generated type, placeholder, mock-only flow, successful build, or timestamp proves only its stated surface. Documentation-only work may be accepted as documentation without implying runtime behavior.
-
-Move the two axes independently when evidence is invalidated. If implemented behavior still exists but a required
-runtime gate fails, becomes stale, or is found incomplete, preserve `Implementation State: IMPLEMENTED`, set
-`Validation Evidence: BLOCKED`, reopen the task, and name only the invalidated or missing closure rows. Do not reset
-implementation to design/stub state or rerun unaffected gates without a separate impact reason.
-
-When validation is blocked, record the missing environment, credential, account, service, decision, or external approval and the exact next command or flow. Do not weaken the expected behavior to obtain a pass.
-
-## Execute And Record
-
-1. Capture the starting failure or baseline when feasible.
-2. Implement only the declared task scope.
-3. Re-run the same harness after the change.
-4. Expand to runtime or end-to-end checks when the user-visible claim crosses those boundaries.
-5. Record each component or consumer lane independently; one lane passing does not imply another passed.
-6. Append evidence to the canonical task's execution record. The execution session does not accept its own work.
-7. During acceptance, independently inspect the diff, complete the Contract Closure Matrix, rerun or verify the smallest decisive harness, and confirm that the evidence depth matches the completion claim.
-
-For live service, SDK, browser, or external-integration smoke, read `references/runtime-smoke.md` before running or reporting the harness.
-
-For UI placement, relocation, visibility, or container ownership, read `references/frontend-structure.md`. For
-migrations, database permissions, row-level security, or separate bootstrap/runtime identities, read
-`references/privileged-runtime.md`.
-
-## Output
-
-Report the declared harness, commands or flows executed, observed results, both state axes, lane-specific gaps, and the next reproducible action. Never report a stronger conclusion than the evidence supports.
+文档或 skill 修改可按其交付内容完成，不需要伪造应用运行证据。
+应用行为的完成声明须对应实际场景；测试、截图、安装、真实使用和独立复核不可相互替代。
+保留未验证平台和外部依赖，只报告影响本次结论的缺口，不反复提醒已解决事项。

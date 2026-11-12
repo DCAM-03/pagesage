@@ -34,7 +34,7 @@ void main() {
         .toList(growable: false);
 
     final brokenLinks = <String>[];
-    final linkPattern = RegExp(r'\[[^\]]+\]\(([^)]+)\)');
+    final linkPattern = RegExp(r'(?<!!)\[[^\]]+\]\(([^)]+)\)');
     for (final file in markdownFiles) {
       final text = await file.readAsString();
       for (final match in linkPattern.allMatches(text)) {

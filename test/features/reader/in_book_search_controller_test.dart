@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/domain/search/search_models.dart';
@@ -117,6 +119,135 @@ void main() {
     expect(controller.state.error, '搜索失败');
     expect(controller.state.results, isEmpty);
   });
+
+  testWidgets('typing invalidates an older request before debounce fires', (
+    tester,
+  ) async {
+    final repository = _ControlledSearchRepository();
+    final controller = InBookSearchController(
+      bookId: 'book-1',
+      repository: repository,
+    );
+    addTearDown(controller.dispose);
+    final firstSearch = controller.searchNow('first');
+    controller.updateQuery('second');
+    repository.pending['first']!.complete([_result('first')]);
+    await firstSearch;
+
+    expect(controller.state.query, 'second');
+    expect(controller.state.results, isEmpty);
+    expect(repository.queries, hasLength(1));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(repository.queries.last.query, 'second');
+    repository.pending['second']!.complete([_result('second')]);
+    await tester.pump();
+    expect(controller.state.selectedResult!.id, 'second');
+  });
+
+  test(
+    'typing clears completed results before the next debounce fires',
+    () async {
+      final controller = InBookSearchController(
+        bookId: 'book-1',
+        repository: _FakeSearchRepository([_result('first')]),
+      );
+      addTearDown(controller.dispose);
+      await controller.searchNow('first');
+      expect(controller.state.selectedResult!.id, 'first');
+
+      controller.updateQuery('second');
+      expect(controller.state.query, 'second');
+      expect(controller.state.results, isEmpty);
+      expect(controller.state.selectedIndex, -1);
+      expect(controller.state.isSearching, isTrue);
+    },
+  );
+
+  test('typing invalidates an older failure before debounce fires', () async {
+    final repository = _ControlledSearchRepository();
+    final controller = InBookSearchController(
+      bookId: 'book-1',
+      repository: repository,
+    );
+    addTearDown(controller.dispose);
+    final firstSearch = controller.searchNow('first');
+    controller.updateQuery('second');
+    repository.pending['first']!.completeError(StateError('stale failure'));
+    await firstSearch;
+
+    expect(controller.state.query, 'second');
+    expect(controller.state.error, isNull);
+    expect(controller.state.results, isEmpty);
+  });
+
+  for (final fails in [false, true]) {
+    test(
+      'disposing ignores pending ${fails ? 'failure' : 'results'}',
+      () async {
+        final repository = _ControlledSearchRepository();
+        final controller = InBookSearchController(
+          bookId: 'book-1',
+          repository: repository,
+        );
+        var notifications = 0;
+        controller.addListener(() => notifications++);
+        final search = controller.searchNow('pending');
+        expect(notifications, 1);
+        controller.dispose();
+        final completed = expectLater(search, completes);
+        if (fails) {
+          repository.pending['pending']!.completeError(
+            StateError('late failure'),
+          );
+        } else {
+          repository.pending['pending']!.complete([_result('late')]);
+        }
+        await completed;
+        expect(notifications, 1);
+      },
+    );
+  }
+
+  test('clearing ignores pending results and keeps an empty state', () async {
+    final repository = _ControlledSearchRepository();
+    final controller = InBookSearchController(
+      bookId: 'book-1',
+      repository: repository,
+    );
+    addTearDown(controller.dispose);
+    final search = controller.searchNow('pending');
+    controller.clear();
+    repository.pending['pending']!.complete([_result('late')]);
+    await search;
+    expect(controller.state.query, isEmpty);
+    expect(controller.state.results, isEmpty);
+    expect(controller.state.selectedIndex, -1);
+    expect(controller.state.isSearching, isFalse);
+    expect(controller.state.error, isNull);
+  });
+}
+
+SearchResult _result(String id) => SearchResult(
+  id: id,
+  type: SearchResultType.content,
+  title: id,
+  snippet: '$id snippet',
+  bookId: 'book-1',
+  locator: ReadingLocator.epub(chapterIndex: 0),
+);
+
+final class _ControlledSearchRepository extends _FakeSearchRepository {
+  _ControlledSearchRepository() : super(const []);
+
+  final pending = <String, Completer<List<SearchResult>>>{};
+
+  @override
+  Future<List<SearchResult>> search(SearchQuery query) {
+    queries.add(query);
+    final response = Completer<List<SearchResult>>();
+    pending[query.query] = response;
+    return response.future;
+  }
 }
 
 final class _FakeSearchRepository implements SearchRepository {

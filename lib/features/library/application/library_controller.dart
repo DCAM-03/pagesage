@@ -30,6 +30,7 @@ final class LibraryState {
     this.hasNotesOnly = false,
     this.hasBookmarksOnly = false,
     this.selectedBookId,
+    this.categorySidebarOpen = true,
   });
 
   final LibrarySort sort;
@@ -42,6 +43,7 @@ final class LibraryState {
   final bool hasNotesOnly;
   final bool hasBookmarksOnly;
   final String? selectedBookId;
+  final bool categorySidebarOpen;
 
   LibraryState copyWith({
     LibrarySort? sort,
@@ -54,6 +56,7 @@ final class LibraryState {
     bool? hasNotesOnly,
     bool? hasBookmarksOnly,
     Object? selectedBookId = _sentinel,
+    bool? categorySidebarOpen,
   }) {
     return LibraryState(
       sort: sort ?? this.sort,
@@ -72,6 +75,7 @@ final class LibraryState {
       selectedBookId: identical(selectedBookId, _sentinel)
           ? this.selectedBookId
           : selectedBookId as String?,
+      categorySidebarOpen: categorySidebarOpen ?? this.categorySidebarOpen,
     );
   }
 }
@@ -92,6 +96,10 @@ final class LibraryController extends Notifier<LibraryState> {
 
   void setGridSize(LibraryGridSize gridSize) {
     state = state.copyWith(gridSize: gridSize, viewMode: LibraryViewMode.grid);
+  }
+
+  void setCategorySidebarOpen(bool open) {
+    state = state.copyWith(categorySidebarOpen: open);
   }
 
   void setSystemFilter(LibrarySystemFilter filter) {

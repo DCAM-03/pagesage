@@ -48,9 +48,18 @@
 | `file_picker_linux` | `1.1.0` | `transitive` | `hosted` | `LICENSE` |
 | `file_picker_platform_interface` | `3.4.0` | `transitive` | `hosted` | `LICENSE` |
 | `file_picker_web` | `3.1.0` | `transitive` | `hosted` | `LICENSE` |
+| `file_selector` | `1.1.0` | `direct main` | `hosted` | `LICENSE` |
+| `file_selector_android` | `0.5.2+11` | `transitive` | `hosted` | `LICENSE` |
+| `file_selector_ios` | `0.5.3+6` | `transitive` | `hosted` | `LICENSE` |
+| `file_selector_linux` | `0.9.4+1` | `transitive` | `hosted` | `LICENSE` |
+| `file_selector_macos` | `0.9.5+1` | `transitive` | `hosted` | `LICENSE` |
+| `file_selector_platform_interface` | `2.7.0` | `transitive` | `hosted` | `LICENSE` |
+| `file_selector_web` | `0.9.5` | `transitive` | `hosted` | `LICENSE` |
+| `file_selector_windows` | `0.9.3+6` | `transitive` | `hosted` | `LICENSE` |
 | `fixnum` | `1.1.1` | `transitive` | `hosted` | `LICENSE` |
 | `flutter_lints` | `6.0.0` | `direct dev` | `hosted` | `LICENSE` |
 | `flutter_markdown` | `0.7.7+1` | `direct main` | `hosted` | `LICENSE` |
+| `flutter_math_fork` | `0.7.4` | `direct main` | `hosted` | `LICENSE` |
 | `flutter_riverpod` | `3.4.3` | `direct main` | `hosted` | `LICENSE` |
 | `flutter_secure_storage` | `11.2.0` | `direct main` | `hosted` | `LICENSE` |
 | `flutter_secure_storage_darwin` | `0.4.3` | `transitive` | `hosted` | `LICENSE` |
@@ -58,6 +67,7 @@
 | `flutter_secure_storage_platform_interface` | `2.1.1` | `transitive` | `hosted` | `LICENSE` |
 | `flutter_secure_storage_web` | `2.1.1` | `transitive` | `hosted` | `LICENSE` |
 | `flutter_secure_storage_windows` | `4.2.2` | `transitive` | `hosted` | `LICENSE` |
+| `flutter_svg` | `2.3.2` | `transitive` | `hosted` | `LICENSE` |
 | `glob` | `2.2.0` | `transitive` | `hosted` | `LICENSE` |
 | `go_router` | `17.5.0` | `direct main` | `hosted` | `LICENSE` |
 | `graphs` | `2.3.2` | `transitive` | `hosted` | `LICENSE` |
@@ -77,17 +87,18 @@
 | `leak_tracker_testing` | `3.0.2` | `transitive` | `hosted` | `LICENSE` |
 | `lints` | `6.1.0` | `transitive` | `hosted` | `LICENSE` |
 | `listen` | `1.0.1` | `transitive` | `hosted` | `LICENSE` |
-| `logger` | `2.8.0` | `direct main` | `hosted` | `LICENSE` |
 | `logging` | `1.3.0` | `transitive` | `hosted` | `LICENSE` |
-| `markdown` | `7.3.1` | `transitive` | `hosted` | `LICENSE` |
+| `markdown` | `7.3.1` | `direct main` | `hosted` | `LICENSE` |
 | `matcher` | `0.12.19` | `transitive` | `hosted` | `LICENSE` |
 | `material_color_utilities` | `0.13.0` | `transitive` | `hosted` | `LICENSE` |
 | `meta` | `1.18.0` | `transitive` | `hosted` | `LICENSE` |
 | `mime` | `2.1.0` | `transitive` | `hosted` | `LICENSE` |
 | `native_toolchain_c` | `0.19.2` | `transitive` | `hosted` | `LICENSE` |
+| `nested` | `1.0.0` | `transitive` | `hosted` | `LICENSE` |
 | `objective_c` | `9.5.0` | `transitive` | `hosted` | `LICENSE` |
 | `package_config` | `2.2.0` | `transitive` | `hosted` | `LICENSE` |
 | `path` | `1.9.1` | `direct main` | `hosted` | `LICENSE` |
+| `path_parsing` | `1.1.0` | `transitive` | `hosted` | `LICENSE` |
 | `path_provider` | `2.1.6` | `direct main` | `hosted` | `LICENSE` |
 | `path_provider_android` | `2.3.1` | `transitive` | `hosted` | `LICENSE` |
 | `path_provider_foundation` | `2.6.0` | `transitive` | `hosted` | `LICENSE` |
@@ -103,6 +114,7 @@
 | `pool` | `1.5.3` | `transitive` | `hosted` | `LICENSE` |
 | `posix` | `6.5.2` | `transitive` | `hosted` | `LICENSE` |
 | `process` | `5.0.5` | `transitive` | `hosted` | `LICENSE` |
+| `provider` | `6.1.5+1` | `transitive` | `hosted` | `LICENSE` |
 | `pub_semver` | `2.2.1` | `transitive` | `hosted` | `LICENSE` |
 | `pubspec_parse` | `1.6.0` | `transitive` | `hosted` | `LICENSE` |
 | `recase` | `4.1.0` | `transitive` | `hosted` | `LICENSE` |
@@ -119,8 +131,7 @@
 | `shelf_web_socket` | `3.0.0` | `transitive` | `hosted` | `LICENSE` |
 | `source_gen` | `4.2.4` | `transitive` | `hosted` | `LICENSE` |
 | `source_span` | `1.10.2` | `transitive` | `hosted` | `LICENSE` |
-| `sqlite3` | `3.5.2` | `direct dev` | `hosted` | `LICENSE` |
-| `sqlite3_flutter_libs` | `0.6.0+eol` | `direct main` | `hosted` | `LICENSE` |
+| `sqlite3` | `3.5.2` | `direct main` | `hosted` | `LICENSE` |
 | `sqlparser` | `0.45.0` | `transitive` | `hosted` | `LICENSE` |
 | `stack_trace` | `1.12.1` | `transitive` | `hosted` | `LICENSE` |
 | `state_notifier` | `1.0.0` | `transitive` | `hosted` | `LICENSE` |
@@ -130,6 +141,7 @@
 | `sync_http` | `0.3.1` | `transitive` | `hosted` | `LICENSE` |
 | `term_glyph` | `1.2.2` | `transitive` | `hosted` | `LICENSE` |
 | `test_api` | `0.7.11` | `transitive` | `hosted` | `LICENSE` |
+| `tuple` | `2.0.2` | `transitive` | `hosted` | `LICENSE` |
 | `typed_data` | `1.4.0` | `transitive` | `hosted` | `LICENSE` |
 | `url_launcher` | `6.3.2` | `direct main` | `hosted` | `LICENSE` |
 | `url_launcher_android` | `6.3.33` | `transitive` | `hosted` | `LICENSE` |
@@ -140,6 +152,9 @@
 | `url_launcher_web` | `2.4.3` | `transitive` | `hosted` | `LICENSE` |
 | `url_launcher_windows` | `3.1.6` | `transitive` | `hosted` | `LICENSE` |
 | `uuid` | `4.6.0` | `direct main` | `hosted` | `LICENSE` |
+| `vector_graphics` | `1.2.6` | `transitive` | `hosted` | `LICENSE` |
+| `vector_graphics_codec` | `1.1.13` | `transitive` | `hosted` | `LICENSE` |
+| `vector_graphics_compiler` | `1.3.4` | `transitive` | `hosted` | `LICENSE` |
 | `vector_math` | `2.2.0` | `transitive` | `hosted` | `LICENSE` |
 | `vm_service` | `15.3.0` | `transitive` | `hosted` | `LICENSE` |
 | `watcher` | `1.2.1` | `transitive` | `hosted` | `LICENSE` |

@@ -546,20 +546,21 @@ final class _LibraryHeaderActions extends StatelessWidget {
       runSpacing: AppSpacing.x2,
       alignment: WrapAlignment.end,
       children: [
-        Tooltip(
-          message: '搜索书库和正文',
-          child: compact
-              ? IconButton(
-                  tooltip: '搜索',
-                  onPressed: onSearch,
-                  icon: const Icon(Icons.search),
-                )
-              : OutlinedButton.icon(
-                  onPressed: onSearch,
-                  icon: const Icon(Icons.search, size: 18),
-                  label: const Text('搜索'),
-                ),
-        ),
+        if (!context.appBreakpoint.isExpanded)
+          Tooltip(
+            message: '搜索书库和正文',
+            child: compact
+                ? IconButton(
+                    tooltip: '搜索',
+                    onPressed: onSearch,
+                    icon: const Icon(Icons.search),
+                  )
+                : OutlinedButton.icon(
+                    onPressed: onSearch,
+                    icon: const Icon(Icons.search, size: 18),
+                    label: const Text('搜索'),
+                  ),
+          ),
         PopupMenuButton<LibrarySort>(
           tooltip: '排序',
           initialValue: sort,
@@ -608,40 +609,22 @@ final class _LibraryHeaderActions extends StatelessWidget {
                   ),
           ),
         if (compact) ...[
-          IconButton(
+          _ImportMenuButton(
             key: const ValueKey('header-import-books-button'),
-            tooltip: '导入 EPUB/PDF/Markdown',
-            onPressed: isImporting ? null : onImport,
-            icon: isImporting
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.upload_file),
-          ),
-          _FolderImportButton(
             compact: true,
-            enabled: !isImporting,
+            isImporting: isImporting,
+            onImportFiles: onImport,
             onScanFolder: onScanFolder,
-            onOpenFolderAsBook: onImportFolderBook,
+            onImportFolderBook: onImportFolderBook,
           ),
         ] else ...[
-          FilledButton.icon(
+          _ImportMenuButton(
             key: const ValueKey('header-import-books-button'),
-            onPressed: isImporting ? null : onImport,
-            icon: isImporting
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.upload_file, size: 18),
-            label: const Text('导入'),
-          ),
-          _FolderImportButton(
             compact: false,
-            enabled: !isImporting,
+            isImporting: isImporting,
+            onImportFiles: onImport,
             onScanFolder: onScanFolder,
-            onOpenFolderAsBook: onImportFolderBook,
+            onImportFolderBook: onImportFolderBook,
           ),
         ],
       ],
@@ -649,32 +632,40 @@ final class _LibraryHeaderActions extends StatelessWidget {
   }
 }
 
-/// The folder button, and the two meanings a folder has in PageSage.
+/// One import entry, with the three shapes a source can have.
 ///
-/// A folder can be a container of books to scan, or a book in itself when it
-/// is a Markdown folder. Both start with the same picker, so they share one
-/// button; the menu names the difference rather than making the reader guess
-/// which of two folder buttons does what.
-final class _FolderImportButton extends StatelessWidget {
-  const _FolderImportButton({
+/// A file is one book, a scanned folder is many books, and a Markdown folder
+/// is one book. They all start with the same picker, so they share one button;
+/// the menu names the difference rather than making the reader guess which of
+/// several import buttons does what.
+final class _ImportMenuButton extends StatelessWidget {
+  const _ImportMenuButton({
+    super.key,
     required this.compact,
-    required this.enabled,
+    required this.isImporting,
+    required this.onImportFiles,
     required this.onScanFolder,
-    required this.onOpenFolderAsBook,
-    this.keyName = 'header-import-folder-button',
+    required this.onImportFolderBook,
   });
 
   final bool compact;
-  final bool enabled;
+  final bool isImporting;
+  final VoidCallback onImportFiles;
   final VoidCallback onScanFolder;
-  final VoidCallback onOpenFolderAsBook;
-  final String keyName;
+  final VoidCallback onImportFolderBook;
 
   @override
   Widget build(BuildContext context) {
+    final enabled = !isImporting;
     return MenuAnchor(
       alignmentOffset: const Offset(0, 4),
       menuChildren: [
+        MenuItemButton(
+          key: const ValueKey('import-books-item'),
+          leadingIcon: const Icon(Icons.upload_file_outlined),
+          onPressed: enabled ? onImportFiles : null,
+          child: const Text('导入文件（EPUB/PDF/Markdown）'),
+        ),
         MenuItemButton(
           key: const ValueKey('import-folder-scan-item'),
           leadingIcon: const Icon(Icons.folder_open_outlined),
@@ -684,7 +675,7 @@ final class _FolderImportButton extends StatelessWidget {
         MenuItemButton(
           key: const ValueKey('import-folder-as-book-item'),
           leadingIcon: const Icon(Icons.menu_book_outlined),
-          onPressed: enabled ? onOpenFolderAsBook : null,
+          onPressed: enabled ? onImportFolderBook : null,
           child: const Text('把文件夹作为一本书'),
         ),
       ],
@@ -699,19 +690,27 @@ final class _FolderImportButton extends StatelessWidget {
 
         if (compact) {
           return IconButton(
-            key: ValueKey<String>(keyName),
-            tooltip: '导入文件夹',
+            tooltip: '导入',
             onPressed: enabled ? toggle : null,
-            icon: const Icon(Icons.folder_open_outlined),
+            icon: isImporting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.upload_file),
           );
         }
-        return OutlinedButton.icon(
-          key: ValueKey<String>(keyName),
+        return FilledButton.icon(
           onPressed: enabled ? toggle : null,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
+          icon: isImporting
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.upload_file, size: 18),
           label: const Row(
             mainAxisSize: MainAxisSize.min,
-            children: [Text('文件夹'), Icon(Icons.arrow_drop_down, size: 18)],
+            children: [Text('导入'), Icon(Icons.arrow_drop_down, size: 18)],
           ),
         );
       },
@@ -919,22 +918,42 @@ final class _LibraryWithFilters extends ConsumerWidget {
     final selectedBook = _findLibraryBook(books, selectedBookId);
 
     if (context.appBreakpoint.isExpanded) {
+      final sidebarOpen = ref.watch(
+        libraryControllerProvider.select((state) => state.categorySidebarOpen),
+      );
       return Row(
         children: [
-          SizedBox(
-            width: 248,
-            child: _DesktopCategoryTree(
-              systemFilter: filters.systemFilter,
-              categoryId: filters.categoryId,
-              onSystemChanged: filters.onSystemChanged,
-              onCategoryChanged: filters.onCategoryChanged,
+          Offstage(
+            offstage: !sidebarOpen,
+            child: ExcludeFocus(
+              excluding: !sidebarOpen,
+              child: SizedBox(
+                key: const ValueKey('library-category-sidebar'),
+                width: 248,
+                child: _DesktopCategoryTree(
+                  systemFilter: filters.systemFilter,
+                  categoryId: filters.categoryId,
+                  onSystemChanged: filters.onSystemChanged,
+                  onCategoryChanged: filters.onCategoryChanged,
+                ),
+              ),
             ),
           ),
-          const VerticalDivider(width: 1),
+          Offstage(
+            offstage: !sidebarOpen,
+            child: const VerticalDivider(width: 1),
+          ),
           Expanded(
             child: Column(
               children: [
                 _LibraryFilters(
+                  leading: IconButton(
+                    tooltip: sidebarOpen ? '收起书库分类' : '展开书库分类',
+                    icon: Icon(sidebarOpen ? Icons.menu_open : Icons.menu),
+                    onPressed: () => ref
+                        .read(libraryControllerProvider.notifier)
+                        .setCategorySidebarOpen(!sidebarOpen),
+                  ),
                   systemFilter: filters.systemFilter,
                   categoryId: filters.categoryId,
                   format: filters.format,
@@ -948,8 +967,9 @@ final class _LibraryWithFilters extends ConsumerWidget {
                   onHasNotesChanged: filters.onHasNotesChanged,
                   onHasBookmarksChanged: filters.onHasBookmarksChanged,
                   onClear: filters.onClear,
-                  showSystemFilters: false,
-                  showCategoryFilter: false,
+                  showSystemFilters: !sidebarOpen,
+                  showCategoryFilter: !sidebarOpen,
+                  compactSystemFilters: true,
                 ),
                 Expanded(
                   child: Row(
@@ -1016,6 +1036,8 @@ final class _LibraryFilters extends ConsumerWidget {
     required this.onClear,
     this.showSystemFilters = true,
     this.showCategoryFilter = true,
+    this.compactSystemFilters = false,
+    this.leading,
   });
 
   final LibrarySystemFilter systemFilter;
@@ -1033,6 +1055,8 @@ final class _LibraryFilters extends ConsumerWidget {
   final VoidCallback onClear;
   final bool showSystemFilters;
   final bool showCategoryFilter;
+  final bool compactSystemFilters;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1067,8 +1091,27 @@ final class _LibraryFilters extends ConsumerWidget {
       );
     }
     return AppFilterBar(
+      leading: leading,
       children: [
-        if (showSystemFilters)
+        if (showSystemFilters && compactSystemFilters)
+          _FilterMenuButton<LibrarySystemFilter>(
+            icon: Icons.filter_list,
+            label: '阅读状态：${systemFilter.label}',
+            onClear: systemFilter == LibrarySystemFilter.all
+                ? null
+                : () => onSystemChanged(LibrarySystemFilter.all),
+            entries: LibrarySystemFilter.values
+                .map(
+                  (filter) => CheckedPopupMenuItem<LibrarySystemFilter>(
+                    value: filter,
+                    checked: filter == systemFilter,
+                    child: Text(filter.label),
+                  ),
+                )
+                .toList(growable: false),
+            onSelected: onSystemChanged,
+          ),
+        if (showSystemFilters && !compactSystemFilters)
           ...LibrarySystemFilter.values.map(
             (filter) => Padding(
               padding: const EdgeInsets.only(right: AppSpacing.x2),
@@ -1654,7 +1697,9 @@ final class _DesktopCategoryTreeState
             _CategoryTreeRow(
               label: '全部书架',
               icon: Icons.folder_copy_outlined,
-              selected: widget.categoryId == null,
+              selected:
+                  widget.categoryId == null &&
+                  widget.systemFilter != LibrarySystemFilter.all,
               onSelect: () => widget.onCategoryChanged(null),
             ),
             _CategoryTreeRow(
@@ -1988,23 +2033,13 @@ final class _EmptyLibrary extends StatelessWidget {
       illustrationAsset: 'assets/images/empty-states/empty-library.png',
       title: '还没有书籍',
       message: '导入 EPUB/PDF/Markdown 文件，或把一个 Markdown 文件夹作为一本书来读。',
-      action: FilledButton.icon(
+      action: _ImportMenuButton(
         key: const ValueKey('import-books-button'),
-        onPressed: isImporting ? null : onImport,
-        icon: isImporting
-            ? const SizedBox.square(
-                dimension: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.upload_file),
-        label: const Text('导入 EPUB/PDF/Markdown'),
-      ),
-      secondaryAction: _FolderImportButton(
-        keyName: 'import-folder-button',
         compact: false,
-        enabled: !isImporting,
+        isImporting: isImporting,
+        onImportFiles: onImport,
         onScanFolder: onScanFolder,
-        onOpenFolderAsBook: onImportFolderBook,
+        onImportFolderBook: onImportFolderBook,
       ),
     );
   }

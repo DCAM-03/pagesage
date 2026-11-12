@@ -12,14 +12,16 @@ import '../../../core/database/database_providers.dart';
 import '../../../domain/ai/ai_models.dart';
 import '../../../domain/books/reading_position.dart';
 import '../../../domain/notes/note.dart';
-import '../../../renderers/epub/epub_jump.dart';
+import '../../../domain/books/locator_excerpt.dart';
 import '../application/ai_context_range.dart';
-import '../application/ai_context_reference.dart';
 import '../application/ai_context_source.dart';
 import '../application/ai_providers.dart';
+import '../application/evidence_policy.dart';
 import '../../../domain/books/book.dart';
 import '../application/context_builder.dart';
 import '../application/retrieval_context_source.dart';
+import '../../settings/application/ai_settings_providers.dart';
+import '../../settings/presentation/settings_page.dart';
 
 /// Reader AI surface used as desktop right-rail body or mobile bottom sheet.
 final class AiPanel extends ConsumerStatefulWidget {
@@ -62,6 +64,8 @@ enum _AiPanelTab { compose, history }
 final class _AiPanelState extends ConsumerState<AiPanel> {
   final _promptController = TextEditingController(text: '解释这段内容');
   AiContextRange _contextRange = AiContextRange.selectedText;
+  bool _sourceQuestionMode = false;
+  AiAnswerMeta? _answerMeta;
 
   /// What the next request will carry, in the order it will be sent.
   ///
@@ -81,6 +85,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   /// reference list starts a new one: carrying turns across a changed context
   /// would ask the model to reason about a passage it was never shown.
   String? _threadId;
+  ReadingLocator? _threadLocator;
 
   /// Earlier turns in this thread, oldest first.
   final List<AiThreadTurn> _history = [];
@@ -90,6 +95,23 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   String _answer = '';
   String? _error;
   bool _loading = false;
+  bool _preparing = false;
+  bool _switchingProfile = false;
+  bool _savingNote = false;
+  int _requestVersion = 0;
+  String? _lastPrompt;
+  String? _savedAnswerNoteId;
+  String? _pendingAnswerNoteId;
+  List<AiThreadTurn>? _retryBaseHistory;
+  AiConversation? _regenerating;
+  AiContextSnapshot? _threadSnapshot;
+  final _promptFocus = FocusNode();
+  final Set<String> _savingHistoryNotes = {};
+  final Map<String, String> _historyNoteIds = {};
+  final Set<String> _linkedHistoryNotes = {};
+  bool get _busy => _loading || _preparing || _switchingProfile;
+  bool _restoringHistory = false;
+  int _restoreToken = 0;
   bool _contextExpanded = false;
 
   /// True while a page or chapter is being read for a wider context range.
@@ -165,8 +187,18 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   /// answer from a passage it was not given this time.
   void _startNewThread() {
     _threadId = null;
+    _threadLocator = null;
     _history.clear();
     _conversation = null;
+    _answer = '';
+    _answerMeta = null;
+    _sourceQuestionMode = false;
+    _lastPrompt = null;
+    _savedAnswerNoteId = null;
+    _pendingAnswerNoteId = null;
+    _retryBaseHistory = null;
+    _regenerating = null;
+    _threadSnapshot = null;
   }
 
   /// The selection currently in the list, if the reader has not dropped it.
@@ -180,6 +212,23 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
 
   /// Everything the request will carry, in list order.
   String get _payloadText => joinContextReferences(_references);
+
+  /// Adds this request's citation IDs without changing the stored thread
+  /// snapshot. A restored thread keeps its own references and metadata.
+  List<AiContextReference> _referencesForRequest() {
+    return AiContextSerializerV1().withCitationIds(_visibleReferences);
+  }
+
+  ReadingLocator? get _contextLocator => _threadId == null
+      ? _visibleReferences
+            .where(
+              (reference) =>
+                  reference.bookId == null || reference.bookId == widget.bookId,
+            )
+            .map((reference) => reference.locator)
+            .whereType<ReadingLocator>()
+            .firstOrNull
+      : _threadLocator;
 
   int get _payloadChars => _payloadText.length;
 
@@ -196,6 +245,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   @override
   void dispose() {
     _cancelToken?.cancel();
+    _requestVersion++;
+    _promptFocus.dispose();
     _promptController.dispose();
     super.dispose();
   }
@@ -207,12 +258,20 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     final oldContext = oldWidget.initialContext?.trim() ?? '';
     final nextLocator = widget.locator?.toJsonText();
     final oldLocator = oldWidget.locator?.toJsonText();
-    if (nextContext == oldContext && nextLocator == oldLocator) {
+    if (nextContext == oldContext &&
+        nextLocator == oldLocator &&
+        widget.bookId == oldWidget.bookId) {
       return;
     }
-    if (_loading) {
+    if (_loading && widget.bookId == oldWidget.bookId) {
       return;
     }
+    _requestVersion++;
+    _cancelToken?.cancel();
+    _loading = false;
+    _preparing = false;
+    _restoreToken++;
+    _restoringHistory = false;
     if (_loadingContext) {
       // The read in flight was for the page the reader has just left. Let it
       // finish into nothing rather than labelling the new selection with the
@@ -250,20 +309,30 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   ///
   /// The edited prompt is what gets sent, so a quick action has to replace
   /// the field, not just appear in it.
-  void _fillPrompt(String prompt) {
+  void _fillPrompt(String prompt, {bool preserveRetry = false}) {
+    if (_busy) return;
     setState(() {
+      if (!preserveRetry) {
+        _retryBaseHistory = null;
+        _regenerating = null;
+      }
       _editedPrompt = prompt;
       _promptController.text = prompt;
       _promptController.selection = TextSelection.collapsed(
         offset: prompt.length,
       );
     });
+    _promptFocus.requestFocus();
   }
 
   @override
   Widget build(BuildContext context) {
     final embedded = widget.embedded;
     final gap = embedded ? AppSpacing.x2 : AppSpacing.x3;
+    final settingsState = ref.watch(aiSettingsProvider);
+    final settings = settingsState.asData?.value;
+    final profiles =
+        ref.watch(aiProfilesProvider).asData?.value ?? const <AiProfile>[];
     return SafeArea(
       top: !embedded,
       child: Padding(
@@ -276,7 +345,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (!embedded) ...[
+            if (!embedded && MediaQuery.viewInsetsOf(context).bottom == 0) ...[
               Text(
                 'AI',
                 style: Theme.of(
@@ -285,10 +354,36 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
               ),
               SizedBox(height: gap),
             ],
-            _AiPanelTabBar(
-              tab: _tab,
-              onChanged: (tab) => setState(() => _tab = tab),
+            Row(
+              children: [
+                Expanded(
+                  child: _AiPanelTabBar(
+                    tab: _tab,
+                    onChanged: (tab) => setState(() => _tab = tab),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '新对话',
+                  onPressed: _busy || _loadingContext || _restoringHistory
+                      ? null
+                      : _newConversation,
+                  icon: const Icon(Icons.add_comment_outlined),
+                ),
+                IconButton(
+                  tooltip: 'AI 设置',
+                  onPressed: _busy ? null : _openSettings,
+                  icon: const Icon(Icons.settings_outlined),
+                ),
+              ],
             ),
+            if (profiles.isNotEmpty) ...[
+              SizedBox(height: gap),
+              _AiProfileStrip(
+                profiles: profiles,
+                activeProfileId: settings?.activeProfileId,
+                onSelected: _busy || _restoringHistory ? null : _selectProfile,
+              ),
+            ],
             SizedBox(height: gap),
             Expanded(
               child: switch (_tab) {
@@ -304,6 +399,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
                       Navigator.of(context).pop();
                     }
                   },
+                  savingNotes: _savingHistoryNotes,
+                  savedNotes: _linkedHistoryNotes,
                 ),
               },
             ),
@@ -314,191 +411,334 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   }
 
   Widget _buildCompose(BuildContext context) {
+    if (_restoringHistory) {
+      return const Center(child: CircularProgressIndicator());
+    }
     final embedded = widget.embedded;
     final sectionGap = embedded ? AppSpacing.x2 : AppSpacing.x3;
     final textTheme = Theme.of(context).textTheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: ListView(
-            children: [
-              _AiContextCard(
-                description: _contextDescription,
-                references: _references,
-                range: _contextRange,
-                rangeVersion: _rangeVersion,
-                truncated: _contextTruncated,
-                loadingSource: _loadingContext,
-                retrievalStatus: _retrievalStatus,
-                canLoadSource: widget.bookPath != null,
-                locationLabel: const ContextBuilder().locationLabel(
-                  widget.locator,
-                ),
-                expanded: _contextExpanded,
-                compact: embedded,
-                onToggleExpand: () =>
-                    setState(() => _contextExpanded = !_contextExpanded),
-                onReferenceChanged: _editReference,
-                onRemoveReference: _removeReference,
-                onOpenReference: (reference) =>
-                    _openReference(context, reference),
-                onRangeChanged: _applyContextRange,
-              ),
-              if (_contextNotice != null) ...[
-                const SizedBox(height: AppSpacing.x1),
-                Text(
-                  _contextNotice!,
-                  style: textTheme.labelSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: ListView(
+              children: [
+                AbsorbPointer(
+                  absorbing: _busy,
+                  child: _AiContextCard(
+                    description: _contextDescription,
+                    references: _references,
+                    range: _contextRange,
+                    rangeVersion: _rangeVersion,
+                    truncated: _contextTruncated,
+                    loadingSource: _loadingContext,
+                    retrievalStatus: _retrievalStatus,
+                    canLoadSource: widget.bookPath != null,
+                    locationLabel: const ContextBuilder().locationLabel(
+                      _contextLocator,
+                    ),
+                    expanded: _contextExpanded,
+                    compact: embedded,
+                    onToggleExpand: () =>
+                        setState(() => _contextExpanded = !_contextExpanded),
+                    onReferenceChanged: _editReference,
+                    onRemoveReference: _removeReference,
+                    onOpenReference: (reference) =>
+                        _openReference(context, reference),
+                    onRangeChanged: _applyContextRange,
                   ),
                 ),
-              ],
-              SizedBox(height: sectionGap),
-              // Six outlined chips were six more boxes for six phrases that
-              // only fill the prompt. Text buttons in a wrap say the same and
-              // leave the box count for things that hold a value.
-              Wrap(
-                // Tight enough that the six stay on one line in a rail this
-                // narrow; a lone word wrapping onto a second line reads as a
-                // layout bug, not as a set of choices.
-                spacing: AppSpacing.x1,
-                runSpacing: 0,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  for (final action in _kPromptActions)
-                    _AiPromptChip(
-                      label: action.label,
-                      compact: embedded,
-                      onPressed: () => _fillPrompt(action.prompt),
+                if (_contextNotice != null) ...[
+                  const SizedBox(height: AppSpacing.x1),
+                  Text(
+                    _contextNotice!,
+                    style: textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.error,
                     ),
-                  _AiPromptMoreMenu(
-                    actions: _kMorePromptActions,
-                    onSelected: _fillPrompt,
                   ),
                 ],
-              ),
-              SizedBox(height: sectionGap),
-              TextField(
-                controller: _promptController,
-                minLines: 1,
-                maxLines: embedded ? 2 : 3,
-                style: textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  height: 1.4,
-                ),
-                textInputAction: TextInputAction.send,
-                onChanged: (value) =>
-                    _editedPrompt = value.trim().isEmpty ? null : value.trim(),
-                onSubmitted: (_) {
-                  if (!_loading) {
-                    unawaited(_ask());
-                  }
-                },
-                decoration: InputDecoration(
-                  hintText: '解释、翻译或自定义提问…',
-                  isDense: embedded,
-                  // The box stays: this is the one thing in the rail that
-                  // really is an input. It is just not another card.
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-              if (_loading) ...[
                 SizedBox(height: sectionGap),
-                const _AiStatusBanner(
-                  icon: Icons.auto_awesome_outlined,
-                  message: '正在生成回答，可随时取消。',
-                  tone: AppStatusTone.ai,
-                ),
-              ],
-              if (_error != null) ...[
-                SizedBox(height: sectionGap),
-                _AiStatusBanner(
-                  icon: Icons.error_outline,
-                  message: _error!,
-                  tone: AppStatusTone.danger,
-                  actions: [
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        if (!widget.embedded &&
-                            Navigator.of(context).canPop()) {
-                          Navigator.of(context).pop();
-                        }
-                        context.go('/settings');
-                      },
-                      icon: const Icon(Icons.settings_outlined),
-                      label: const Text('设置'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _copyError,
-                      icon: const Icon(Icons.copy_outlined),
-                      label: const Text('复制'),
+                _buildConfigurationNotice(),
+                Row(
+                  children: [
+                    const Expanded(child: Text('书内事实问答')),
+                    Switch(
+                      key: const ValueKey('ai-source-question-mode'),
+                      value: _sourceQuestionMode,
+                      onChanged: _busy
+                          ? null
+                          : (value) => setState(() {
+                              _startNewThread();
+                              _sourceQuestionMode = value;
+                            }),
                     ),
                   ],
                 ),
-              ],
-              if (_answer.isNotEmpty) ...[
-                SizedBox(height: sectionGap),
                 Text(
-                  '回答',
-                  style: textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                  _sourceQuestionMode
+                      ? '依据所选范围查证，回答附来源；证据不足时会明确说明。'
+                      : '适合解释、翻译与总结；回答可能包含模型的补充知识。',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: AppSpacing.x1),
-                _AiAnswerBlock(answer: _answer, compact: embedded),
-                const SizedBox(height: AppSpacing.x2),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
+                SizedBox(height: sectionGap),
+                if (_loading) ...[
+                  SizedBox(height: sectionGap),
+                  const _AiStatusBanner(
+                    icon: Icons.auto_awesome_outlined,
+                    message: '正在生成回答，可随时取消。',
+                    tone: AppStatusTone.ai,
+                  ),
+                ],
+                if (_error != null) ...[
+                  SizedBox(height: sectionGap),
+                  _AiStatusBanner(
+                    icon: Icons.error_outline,
+                    message: _error!,
+                    tone: AppStatusTone.danger,
+                    actions: [
                       OutlinedButton.icon(
-                        onPressed: _copyAnswer,
-                        icon: const Icon(Icons.copy_outlined, size: 16),
+                        onPressed: _busy ? null : _ask,
+                        icon: const Icon(Icons.refresh_outlined),
+                        label: const Text('重新发送'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _copyError,
+                        icon: const Icon(Icons.copy_outlined),
                         label: const Text('复制'),
-                        style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                        ),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _loading ? null : _ask,
-                        icon: const Icon(Icons.refresh_outlined, size: 16),
-                        label: const Text('重试'),
-                        style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                        ),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _saveAsNote,
-                        icon: const Icon(Icons.note_add_outlined, size: 16),
-                        label: const Text('笔记'),
-                        style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                        ),
                       ),
                     ],
                   ),
+                ],
+                if (_history.length > 1) ...[
+                  SizedBox(height: sectionGap),
+                  ExpansionTile(
+                    key: ValueKey('thread-$_threadId-${_history.length}'),
+                    tilePadding: EdgeInsets.zero,
+                    title: Text('此前 ${_history.length - 1} 轮对话'),
+                    children: [
+                      for (final turn in _history.take(_history.length - 1))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.x3),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(turn.prompt, style: textTheme.titleSmall),
+                              const SizedBox(height: AppSpacing.x1),
+                              _AiAnswerBlock(
+                                answer: turn.answer,
+                                compact: embedded,
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+                if (_answer.isNotEmpty) ...[
+                  SizedBox(height: sectionGap),
+                  Text(
+                    '回答',
+                    style: textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.x1),
+                  if (_answerStatusLabel() != null) ...[
+                    Text(
+                      _answerStatusLabel()!,
+                      semanticsLabel: '回答状态：${_answerStatusLabel()}',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.x1),
+                  ],
+                  _AiAnswerBlock(answer: _answer, compact: embedded),
+                  const SizedBox(height: AppSpacing.x2),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _copyAnswer,
+                          icon: const Icon(Icons.copy_outlined, size: 16),
+                          label: const Text('复制'),
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _busy ? null : _retry,
+                          icon: const Icon(Icons.refresh_outlined, size: 16),
+                          label: const Text('重试'),
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed:
+                              _busy || _savingNote || _savedAnswerNoteId != null
+                              ? null
+                              : _saveAsNote,
+                          icon: const Icon(Icons.note_add_outlined, size: 16),
+                          label: Text(
+                            _savingNote
+                                ? '保存中'
+                                : _savedAnswerNoteId != null
+                                ? '已存笔记'
+                                : '笔记',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const Divider(height: AppSpacing.x3),
+          _buildPromptEditor(
+            context,
+            compactHeight: constraints.maxHeight < 360,
+          ),
+          SizedBox(height: sectionGap),
+          _buildActionBar(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConfigurationNotice() {
+    final state = ref.watch(aiSettingsProvider);
+    final settings = state.asData?.value;
+    if (state.hasError) {
+      return _AiStatusBanner(
+        icon: Icons.error_outline,
+        message: 'AI 配置读取失败，请检查系统安全存储后重试。',
+        tone: AppStatusTone.danger,
+        actions: [
+          TextButton(
+            onPressed: () {
+              ref.invalidate(aiSettingsProvider);
+              ref.invalidate(aiProfilesProvider);
+            },
+            child: const Text('重新读取'),
+          ),
+        ],
+      );
+    }
+    if (settings == null ||
+        (settings.enabled &&
+            settings.hasApiKey &&
+            settings.baseUrl.isNotEmpty &&
+            settings.model.isNotEmpty)) {
+      return const SizedBox.shrink();
+    }
+    return _AiStatusBanner(
+      icon: Icons.settings_outlined,
+      message: !settings.enabled
+          ? 'AI 尚未开启。先配置接口、模型和密钥，再开始提问。'
+          : '连接配置尚未完成，请补全接口、模型和密钥。',
+      tone: AppStatusTone.neutral,
+      actions: [
+        TextButton(onPressed: _openSettings, child: const Text('配置 AI')),
+      ],
+    );
+  }
+
+  Widget _buildPromptEditor(
+    BuildContext context, {
+    required bool compactHeight,
+  }) {
+    final embedded = widget.embedded;
+    final desktop = switch (Theme.of(context).platform) {
+      TargetPlatform.linux ||
+      TargetPlatform.windows ||
+      TargetPlatform.macOS => true,
+      _ => false,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!compactHeight)
+          IgnorePointer(
+            ignoring: _busy,
+            child: Wrap(
+              spacing: AppSpacing.x1,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                for (final action in _kPromptActions)
+                  _AiPromptChip(
+                    label: action.label,
+                    compact: embedded,
+                    onPressed: () => _fillPrompt(action.prompt),
+                  ),
+                _AiPromptMoreMenu(
+                  actions: _kMorePromptActions,
+                  onSelected: _fillPrompt,
                 ),
               ],
-            ],
+            ),
+          ),
+        CallbackShortcuts(
+          bindings: {
+            const SingleActivator(
+              LogicalKeyboardKey.enter,
+              control: true,
+            ): () =>
+                unawaited(_ask()),
+            const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
+                unawaited(_ask()),
+          },
+          child: TextField(
+            key: const ValueKey('ai-prompt'),
+            controller: _promptController,
+            focusNode: _promptFocus,
+            enabled: !_busy,
+            minLines: 1,
+            maxLines: compactHeight
+                ? 1
+                : embedded
+                ? 2
+                : 3,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.4),
+            textInputAction: TextInputAction.send,
+            onChanged: (value) {
+              _editedPrompt = value.trim().isEmpty ? null : value.trim();
+              _retryBaseHistory = null;
+              _regenerating = null;
+            },
+            onSubmitted: (_) => unawaited(_ask()),
+            decoration: InputDecoration(
+              helperText: desktop && !compactHeight
+                  ? 'Ctrl / ⌘ + Enter 发送'
+                  : null,
+              hintText: _threadId == null ? '解释、翻译或自定义提问…' : '继续追问，沿用本轮来源…',
+              isDense: embedded,
+              border: const OutlineInputBorder(),
+            ),
           ),
         ),
-        SizedBox(height: sectionGap),
-        _buildActionBar(),
       ],
     );
   }
@@ -506,7 +746,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   Widget _buildActionBar() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final busy = _loading || _loadingContext;
+        final busy = _busy || _loadingContext || _restoringHistory;
         final sendButton = FilledButton.icon(
           onPressed: busy ? null : _ask,
           icon: _loading
@@ -518,6 +758,8 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
           label: Text(
             _loading
                 ? '生成中'
+                : _preparing || _switchingProfile
+                ? '准备中'
                 : _loadingContext
                 ? '读取中'
                 : '发送',
@@ -532,14 +774,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
           label: const Text('取消'),
         );
         if (constraints.maxWidth < 360) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              cancelButton,
-              const SizedBox(height: AppSpacing.x2),
-              sendButton,
-            ],
-          );
+          return SizedBox(width: double.infinity, child: cancelButton);
         }
         return Row(
           children: [
@@ -553,16 +788,100 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   }
 
   Future<void> _ask() async {
-    if (_loading || _loadingContext) {
+    if (_busy || _loadingContext || _restoringHistory) return;
+    final version = ++_requestVersion;
+    setState(() => _preparing = true);
+    try {
+      await _performAsk(version);
+    } catch (_) {
+      if (mounted && version == _requestVersion) {
+        setState(() => _error = '无法读取 AI 配置或保存请求偏好，请重试');
+      }
+    } finally {
+      if (mounted && version == _requestVersion) {
+        setState(() => _preparing = false);
+      }
+    }
+  }
+
+  Future<void> _performAsk(int version) async {
+    if (_loading || _loadingContext || _restoringHistory) {
       return;
     }
-    final contextText = _payloadText;
+    final List<AiContextReference> citedReferences;
+    final String contextText;
+    final freshThread = _threadId == null;
+    final storedSnapshot = _conversation?.contextSnapshot ?? _threadSnapshot;
+    try {
+      citedReferences = freshThread
+          ? _referencesForRequest()
+          : storedSnapshot?.references ?? _visibleReferences;
+      final serialize = freshThread
+          ? _sourceQuestionMode
+          : storedSnapshot != null &&
+                storedSnapshot.version >= 2 &&
+                storedSnapshot.answerIntent == AnswerIntent.sourceQuestion.name;
+      contextText = serialize
+          ? AiContextSerializerV1().serialize(citedReferences)
+          : joinContextReferences(citedReferences);
+    } on AiContextSerializationException catch (error) {
+      setState(() => _error = error.message);
+      return;
+    }
+    final locator = _contextLocator;
     final prompt = _promptController.text.trim();
+    final intent = _intentFor(prompt, sourceQuestionMode: _sourceQuestionMode);
+    final scopeCompleteness = _scopeCompleteness();
+    final decision = EvidencePolicyV1().decide(
+      question: prompt,
+      intent: intent,
+      references: citedReferences,
+      scopeCompleteness: scopeCompleteness,
+      explicitSelection: _contextRange == AiContextRange.selectedText,
+      indexReady: _contextNotice == null,
+      readFailed: _contextNotice != null,
+      truncated: _contextTruncated,
+    );
+    final contextSnapshot = freshThread
+        ? AiContextSnapshot(
+            range: _contextRange.value,
+            references: citedReferences,
+            truncated: _contextTruncated,
+            version: 2,
+            evidenceState: decision.state.name,
+            answerIntent: intent.name,
+          )
+        : storedSnapshot;
+    if (freshThread &&
+        intent == AnswerIntent.sourceQuestion &&
+        (decision.state == EvidenceState.none ||
+            decision.state == EvidenceState.unavailable)) {
+      setState(() {
+        _answer = decision.state == EvidenceState.unavailable
+            ? '当前范围的索引尚未就绪，请刷新或选择可见文本后再提问。'
+            : '当前范围未检索到可用证据，请更改范围或选择可见文本。';
+        _answerMeta = AiAnswerMeta(
+          intent: intent.name,
+          evidenceState: decision.state.name,
+          answerStatus: AnswerStatus.insufficient.name,
+          policyVersion: EvidencePolicyV1.version,
+          reasonCodes: decision.reasonCodes,
+          citations: const [],
+          claimChecks: const [],
+          scopeCompleteness: decision.scopeCompleteness.name,
+          truncated: _contextTruncated,
+          producer: 'localPolicy',
+        );
+        _error = null;
+      });
+      return;
+    }
     if (contextText.isEmpty || prompt.isEmpty) {
       setState(() => _error = '请输入上下文和问题');
       return;
     }
     final settings = await ref.read(aiSettingsRepositoryProvider).getSettings();
+    if (!mounted || version != _requestVersion) return;
     if (!settings.enabled) {
       setState(() => _error = 'AI 功能未启用，请先在设置中打开并配置 Provider');
       return;
@@ -590,6 +909,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
         builder: (context) =>
             _ConfirmSendDialog(description: contextDescription),
       );
+      if (!mounted || version != _requestVersion) return;
       if (choice == null) {
         return;
       }
@@ -602,56 +922,81 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
             .saveSettings(settings.copyWith(confirmBeforeRequest: false));
       }
     }
+    if (!mounted || version != _requestVersion) return;
     // A thread is named by its first turn; every later turn in the same
     // context reuses it so the history can be regrouped.
     final threadId = _threadId ?? _newThreadId();
     final cancelToken = AiCancelToken();
+    final requestHistory = _retryBaseHistory ?? _threadHistory;
+    final regenerate = _regenerating;
     setState(() {
       _loading = true;
       _error = null;
       _answer = '';
       _conversation = null;
       _cancelToken = cancelToken;
+      _threadLocator = locator;
       _tab = _AiPanelTab.compose;
+      _answerMeta = null;
+      _lastPrompt = prompt;
+      _savedAnswerNoteId = null;
+      _pendingAnswerNoteId = null;
     });
     try {
       final conversation = await ref
           .read(aiChatServiceProvider)
           .ask(
             bookId: widget.bookId,
-            locator: widget.locator,
+            locator: locator,
             contextText: contextText,
             prompt: prompt,
             sourceText: contextText,
             threadId: threadId,
-            history: _threadHistory,
+            history: requestHistory,
+            contextSnapshot: contextSnapshot,
+            answerIntent: intent,
+            evidenceDecision: decision,
             cancelToken: cancelToken,
             onChunk: (chunk) {
-              if (!mounted) {
+              if (!mounted || version != _requestVersion) {
                 return;
               }
               setState(() => _answer += chunk);
             },
+            regenerate: regenerate,
           );
+      if (!mounted || version != _requestVersion) return;
       setState(() {
         _conversation = conversation;
+        _threadSnapshot = conversation.contextSnapshot;
         _answer = conversation.answer;
+        _answerMeta = conversation.answerMeta;
         // The service mints the thread on the first turn and reuses it after,
         // so this is the one place that learns the id.
         _threadId = conversation.threadId ?? threadId;
-        _history.add(AiThreadTurn(prompt: prompt, answer: conversation.answer));
+        _history
+          ..clear()
+          ..addAll(requestHistory)
+          ..add(AiThreadTurn(prompt: prompt, answer: conversation.answer));
+        _retryBaseHistory = null;
+        _regenerating = null;
+        _promptController.clear();
+        _editedPrompt = null;
       });
     } on AiChatCancelledException catch (error) {
+      if (!mounted || version != _requestVersion) return;
       setState(() {
         _answer = error.partialAnswer.isEmpty ? _answer : error.partialAnswer;
         _error = '请求已取消，可保存已生成内容或重新发送';
       });
     } on AiChatException catch (error) {
+      if (!mounted || version != _requestVersion) return;
       setState(() => _error = error.message);
     } catch (_) {
+      if (!mounted || version != _requestVersion) return;
       setState(() => _error = 'AI 请求失败');
     } finally {
-      if (mounted) {
+      if (mounted && version == _requestVersion) {
         setState(() {
           _loading = false;
           _cancelToken = null;
@@ -664,6 +1009,92 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     _cancelToken?.cancel();
   }
 
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const SettingsPage(initialAi: true),
+      ),
+    );
+  }
+
+  void _newConversation() {
+    setState(() {
+      _startNewThread();
+      _error = null;
+      _lastPrompt = null;
+      _savedAnswerNoteId = null;
+      _promptController.clear();
+      _editedPrompt = null;
+      _tab = _AiPanelTab.compose;
+    });
+    _promptFocus.requestFocus();
+  }
+
+  Future<void> _selectProfile(String? id) async {
+    if (_busy) return;
+    setState(() => _switchingProfile = true);
+    try {
+      await ref.read(aiSettingsControllerProvider).selectProfile(id);
+      if (!mounted) return;
+      ref.invalidate(aiSettingsProvider);
+      ref.invalidate(aiProfilesProvider);
+    } catch (_) {
+      if (mounted) setState(() => _error = '切换配置失败，请重试');
+    } finally {
+      if (mounted) setState(() => _switchingProfile = false);
+    }
+  }
+
+  Future<void> _retry() async {
+    if (_busy) return;
+    final prompt = _lastPrompt;
+    if (prompt != null) {
+      _fillPrompt(prompt, preserveRetry: true);
+      if (_conversation != null && _history.isNotEmpty) {
+        _retryBaseHistory = List.of(_history.take(_history.length - 1));
+        _regenerating = _conversation;
+      }
+    }
+    await _ask();
+  }
+
+  AnswerIntent _intentFor(String prompt, {bool sourceQuestionMode = false}) {
+    if (sourceQuestionMode) return AnswerIntent.sourceQuestion;
+    if (prompt.contains('翻译')) return AnswerIntent.translate;
+    if (prompt.contains('改写') || prompt.contains('润色')) {
+      return AnswerIntent.rewrite;
+    }
+    if (prompt.contains('解释') ||
+        prompt.contains('总结') ||
+        prompt.contains('要点') ||
+        prompt.contains('说明') ||
+        prompt.contains('生成')) {
+      return AnswerIntent.explain;
+    }
+    return AnswerIntent.explain;
+  }
+
+  String? _answerStatusLabel() {
+    final meta = _answerMeta;
+    if (meta == null) {
+      return _loading ? '生成中，引用待核对' : null;
+    }
+    return switch (meta.answerStatus) {
+      'insufficient' =>
+        meta.producer == 'localPolicy' ? '本地检索反馈 · 证据不足，未调用模型' : '证据不足',
+      'sourceLinked' => '已关联来源（未独立验证结论）',
+      'unverified' => '未核验：引用或证据状态不完整',
+      'interrupted' => '生成已中断，回答未完成',
+      'failed' => '生成失败',
+      _ => '历史回答，未执行本次核验',
+    };
+  }
+
+  ScopeCompleteness _scopeCompleteness() {
+    if (_contextNotice != null) return ScopeCompleteness.unavailable;
+    return ScopeCompleteness.ready;
+  }
+
   Future<void> _copyError() async {
     final error = _error?.trim();
     if (error == null || error.isEmpty) {
@@ -672,42 +1103,86 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
     await Clipboard.setData(ClipboardData(text: error));
   }
 
-  void _useConversation(AiConversation conversation) {
+  Future<void> _useConversation(AiConversation conversation) async {
+    if (_busy || _loadingContext || _restoringHistory) return;
+    final token = ++_restoreToken;
     setState(() {
       _tab = _AiPanelTab.compose;
-      _conversation = conversation;
-      _promptController.text = conversation.prompt;
-      // The stored conversation carries one block of context; show it as a
-      // single reference so the rows stay the one source of truth.
-      _references
-        ..clear()
-        ..add(
-          AiContextReference(
-            id: 'ref-${_nextReferenceId++}',
-            title: '上次的上下文',
-            text: conversation.contextText ?? conversation.sourceText ?? '',
-            locator: conversation.locator ?? widget.locator,
-            isSelection: true,
-          ),
-        );
-      _answer = conversation.answer;
+      _restoringHistory = true;
       _error = null;
-      _contextRange = AiContextRange.selectedText;
-      _contextTruncated = false;
-      _contextNotice = null;
-      // Continuing a stored thread keeps its name, so the follow-up is
-      // regrouped with the turns it belongs to. A conversation saved before
-      // threads existed has no id; the next question starts one.
-      _threadId = conversation.threadId;
-      _history
-        ..clear()
-        ..add(
-          AiThreadTurn(
-            prompt: conversation.prompt,
-            answer: conversation.answer,
-          ),
-        );
     });
+    try {
+      final turns = await ref
+          .read(aiChatServiceProvider)
+          .restoreThread(conversation);
+      if (!mounted || token != _restoreToken) return;
+      final latest = turns.last;
+      final snapshot = latest.contextSnapshot;
+      final range = snapshot == null
+          ? AiContextRange.selectedText
+          : AiContextRange.values.singleWhere(
+              (range) => range.value == snapshot.range,
+            );
+      setState(() {
+        _conversation = latest;
+        _threadSnapshot = latest.contextSnapshot;
+        _answerMeta = latest.answerMeta;
+        _sourceQuestionMode =
+            snapshot?.answerIntent == AnswerIntent.sourceQuestion.name;
+        _promptController.clear();
+        _editedPrompt = null;
+        _references
+          ..clear()
+          ..addAll(
+            snapshot?.references ??
+                [
+                  AiContextReference(
+                    id: 'ref-${_nextReferenceId++}',
+                    title: '旧版上下文（未记录分段来源）',
+                    text: latest.contextText ?? latest.sourceText ?? '',
+                    locator: latest.locator,
+                  ),
+                ],
+          );
+        for (final reference in _references) {
+          final number = int.tryParse(reference.id.replaceFirst('ref-', ''));
+          if (number != null && number >= _nextReferenceId) {
+            _nextReferenceId = number + 1;
+          }
+        }
+        _answer = latest.answer;
+        _lastPrompt = latest.prompt;
+        _savedAnswerNoteId = latest.noteId;
+        _pendingAnswerNoteId = null;
+        _regenerating = null;
+        _retryBaseHistory = null;
+        _contextRange = range;
+        _rangeVersion++;
+        _contextTruncated = snapshot?.truncated ?? false;
+        _contextNotice = snapshot == null ? '旧记录未保存分段来源；仅恢复当时的上下文和原有定位。' : null;
+        _threadId = latest.threadId ?? latest.id;
+        _threadLocator = latest.locator;
+        _history
+          ..clear()
+          ..addAll(
+            turns.map(
+              (turn) => AiThreadTurn(prompt: turn.prompt, answer: turn.answer),
+            ),
+          );
+      });
+    } on AiChatException catch (error) {
+      if (mounted && token == _restoreToken) {
+        setState(() => _error = error.message);
+      }
+    } catch (_) {
+      if (mounted && token == _restoreToken) {
+        setState(() => _error = '恢复历史失败，请重新打开历史列表后重试');
+      }
+    } finally {
+      if (mounted && token == _restoreToken) {
+        setState(() => _restoringHistory = false);
+      }
+    }
   }
 
   Future<void> _copyConversationAnswer(AiConversation conversation) async {
@@ -721,28 +1196,54 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   }
 
   Future<void> _saveConversationAsNote(AiConversation conversation) async {
-    await ref
-        .read(noteRepositoryProvider)
-        .saveNote(
-          bookId: widget.bookId,
+    if (!mounted ||
+        _savingHistoryNotes.contains(conversation.id) ||
+        _linkedHistoryNotes.contains(conversation.id) ||
+        conversation.noteId != null) {
+      return;
+    }
+    setState(() => _savingHistoryNotes.add(conversation.id));
+    final notes = ref.read(noteRepositoryProvider);
+    final conversations = ref.read(aiConversationRepositoryProvider);
+    try {
+      var noteId = _historyNoteIds[conversation.id];
+      if (noteId == null) {
+        final note = await notes.saveNote(
+          bookId: conversation.bookId,
           title: conversation.prompt,
           content: conversation.answer,
           sourceText: conversation.sourceText ?? conversation.contextText,
-          locator: conversation.locator ?? widget.locator,
+          locator: conversation.locator,
           noteType: NoteType.ai,
-        )
-        .then((note) async {
-          await ref
-              .read(aiConversationRepositoryProvider)
-              .linkNote(conversationId: conversation.id, noteId: note.id);
-        });
-    widget.onNoteSaved?.call();
-    if (!mounted) {
-      return;
+        );
+        noteId = note.id;
+        _historyNoteIds[conversation.id] = noteId;
+      }
+      await conversations.linkNote(
+        conversationId: conversation.id,
+        noteId: noteId,
+      );
+      if (!mounted || widget.bookId != conversation.bookId) return;
+      setState(() => _linkedHistoryNotes.add(conversation.id));
+      widget.onNoteSaved?.call();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('保存笔记失败，回答已保留'),
+            action: SnackBarAction(
+              label: '重试',
+              onPressed: () => unawaited(_saveConversationAsNote(conversation)),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingHistoryNotes.remove(conversation.id));
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
   }
 
   /// Switches the context range and loads the text that range needs.
@@ -752,6 +1253,7 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   /// Switching back to "仅选中文本" removes it and leaves the selection, which
   /// the list kept the whole time.
   Future<void> _applyContextRange(AiContextRange range) async {
+    if (_busy || _restoringHistory) return;
     // A failed read falls back to the range the panel was already on, which
     // leaves `initialValue` unchanged — and a `FormField` would keep showing
     // the range the reader just picked. A fresh key each attempt rebuilds it
@@ -991,14 +1493,18 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
 
   /// Applies an edit to the text of one reference.
   void _editReference(String id, String text) {
+    if (_busy || _restoringHistory) return;
     setState(() {
       final index = _references.indexWhere((reference) => reference.id == id);
       if (index < 0) return;
+      if (_references[index].text == text) return;
+      _startNewThread();
       _references[index] = _references[index].copyWith(text: text);
     });
   }
 
   void _removeReference(String id) {
+    if (_busy || _restoringHistory) return;
     setState(() {
       _startNewThread();
       _references.removeWhere((reference) => reference.id == id);
@@ -1025,33 +1531,63 @@ final class _AiPanelState extends ConsumerState<AiPanel> {
   }
 
   Future<void> _saveAsNote() async {
+    if (!mounted) return;
     final answer = _answer.trim();
-    if (answer.isEmpty) {
+    if (answer.isEmpty || _busy || _savingNote || _savedAnswerNoteId != null) {
       return;
     }
     final conversation = _conversation;
-    final note = await ref
-        .read(noteRepositoryProvider)
-        .saveNote(
-          bookId: widget.bookId,
-          title: conversation?.prompt ?? _promptController.text.trim(),
-          content: answer,
-          sourceText: conversation?.sourceText ?? _payloadText,
-          locator: widget.locator,
-          noteType: NoteType.ai,
-        );
     if (conversation != null) {
-      await ref
-          .read(aiConversationRepositoryProvider)
-          .linkNote(conversationId: conversation.id, noteId: note.id);
-    }
-    widget.onNoteSaved?.call();
-    if (!mounted) {
+      setState(() => _savingNote = true);
+      try {
+        await _saveConversationAsNote(conversation);
+        if (mounted &&
+            _conversation?.id == conversation.id &&
+            _linkedHistoryNotes.contains(conversation.id)) {
+          setState(() => _savedAnswerNoteId = _historyNoteIds[conversation.id]);
+        }
+      } finally {
+        if (mounted) setState(() => _savingNote = false);
+      }
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
+    setState(() => _savingNote = true);
+    final notes = ref.read(noteRepositoryProvider);
+    final version = _requestVersion;
+    try {
+      var noteId = _pendingAnswerNoteId;
+      if (noteId == null) {
+        final note = await notes.saveNote(
+          bookId: widget.bookId,
+          title: _lastPrompt ?? _promptController.text.trim(),
+          content: answer,
+          sourceText: _payloadText,
+          locator: _threadLocator,
+          noteType: NoteType.ai,
+        );
+        noteId = note.id;
+        if (mounted && version == _requestVersion) {
+          _pendingAnswerNoteId = noteId;
+        }
+      }
+      if (!mounted || version != _requestVersion) return;
+      setState(() => _savedAnswerNoteId = noteId);
+      widget.onNoteSaved?.call();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已保存为笔记')));
+    } catch (_) {
+      if (mounted && version == _requestVersion) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('保存笔记失败，回答已保留'),
+            action: SnackBarAction(label: '重试', onPressed: _saveAsNote),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingNote = false);
+    }
   }
 }
 
@@ -1082,6 +1618,54 @@ const _kMorePromptActions = <_PromptAction>[
   _PromptAction('简单说明', '用更简单的话说明这段内容'),
   _PromptAction('生成问题', '基于这段内容生成 3 个值得继续思考的问题'),
 ];
+
+final class _AiProfileStrip extends StatelessWidget {
+  const _AiProfileStrip({
+    required this.profiles,
+    required this.activeProfileId,
+    required this.onSelected,
+  });
+
+  final List<AiProfile> profiles;
+  final String? activeProfileId;
+  final ValueChanged<String?>? onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = profiles.any((profile) => profile.id == activeProfileId)
+        ? activeProfileId!
+        : profiles.first.id;
+    return Row(
+      children: [
+        Text('配置', style: Theme.of(context).textTheme.labelMedium),
+        const SizedBox(width: AppSpacing.x2),
+        Expanded(
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: selected,
+              isDense: true,
+              isExpanded: true,
+              items: [
+                for (final profile in profiles)
+                  DropdownMenuItem(
+                    value: profile.id,
+                    child: Tooltip(
+                      message: '${profile.name} · ${profile.model}',
+                      child: Text(
+                        '${profile.name} · ${profile.model.isEmpty ? '未设置模型' : profile.model}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+              ],
+              onChanged: onSelected,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 final class _AiPanelTabBar extends StatelessWidget {
   const _AiPanelTabBar({required this.tab, required this.onChanged});
@@ -2017,6 +2601,8 @@ final class _AiHistoryView extends ConsumerWidget {
     required this.onCopyAnswer,
     required this.onSaveAsNote,
     required this.onJumpTo,
+    required this.savingNotes,
+    required this.savedNotes,
   });
 
   final String bookId;
@@ -2024,75 +2610,95 @@ final class _AiHistoryView extends ConsumerWidget {
   final Future<void> Function(AiConversation) onCopyAnswer;
   final Future<void> Function(AiConversation) onSaveAsNote;
   final ValueChanged<ReadingLocator> onJumpTo;
+  final Set<String> savingNotes;
+  final Set<String> savedNotes;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return StreamBuilder<List<AiConversation>>(
-      stream: ref.watch(aiConversationRepositoryProvider).watchConversations(),
-      builder: (context, snapshot) {
-        final conversations = (snapshot.data ?? const <AiConversation>[])
-            .where((conversation) => conversation.bookId == bookId)
-            .toList(growable: false);
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (conversations.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.x6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.auto_awesome_outlined,
-                    size: 36,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(height: AppSpacing.x3),
-                  Text(
-                    '还没有当前书籍的 AI 历史',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: AppSpacing.x2),
-                  Text(
-                    '选中正文后提问，或在「提问」页直接发送。',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
+    return ref
+        .watch(aiConversationHistoryProvider(bookId))
+        .when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (error, stack) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('无法读取 AI 历史'),
+                TextButton.icon(
+                  onPressed: () =>
+                      ref.invalidate(aiConversationHistoryProvider(bookId)),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重新加载历史'),
+                ),
+              ],
             ),
-          );
-        }
-        return ListView.separated(
-          itemCount: conversations.length,
-          separatorBuilder: (context, index) =>
-              const SizedBox(height: AppSpacing.x2),
-          itemBuilder: (context, index) {
-            final conversation = conversations[index];
-            return _AiHistoryCard(
-              conversation: conversation,
-              onOpen: () => onUseConversation(conversation),
-              onCopy: () => unawaited(onCopyAnswer(conversation)),
-              onSaveNote: () => unawaited(onSaveAsNote(conversation)),
-              onJump: conversation.locator == null
-                  ? null
-                  : () => onJumpTo(
-                      enrichLocatorForJump(
-                        conversation.locator!,
-                        fallbackExcerpt:
-                            conversation.sourceText ?? conversation.contextText,
+          ),
+          data: (conversations) {
+            if (conversations.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.x6),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.auto_awesome_outlined,
+                        size: 36,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
-                    ),
+                      const SizedBox(height: AppSpacing.x3),
+                      Text(
+                        '还没有当前书籍的 AI 历史',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: AppSpacing.x2),
+                      Text(
+                        '选中正文后提问，或在「提问」页直接发送。',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            return ListView.separated(
+              itemCount: conversations.length,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(height: AppSpacing.x2),
+              itemBuilder: (context, index) {
+                final conversation = conversations[index];
+                return _AiHistoryCard(
+                  conversation: conversation,
+                  onOpen: () => onUseConversation(conversation),
+                  onCopy: () => unawaited(onCopyAnswer(conversation)),
+                  noteSaved:
+                      savedNotes.contains(conversation.id) ||
+                      conversation.noteId != null,
+                  onSaveNote:
+                      savingNotes.contains(conversation.id) ||
+                          savedNotes.contains(conversation.id) ||
+                          conversation.noteId != null
+                      ? null
+                      : () => unawaited(onSaveAsNote(conversation)),
+                  onJump: conversation.locator == null
+                      ? null
+                      : () => onJumpTo(
+                          enrichLocatorForJump(
+                            conversation.locator!,
+                            fallbackExcerpt:
+                                conversation.sourceText ??
+                                conversation.contextText,
+                          ),
+                        ),
+                );
+              },
             );
           },
         );
-      },
-    );
   }
 }
 
@@ -2102,14 +2708,29 @@ final class _AiHistoryCard extends StatelessWidget {
     required this.onOpen,
     required this.onCopy,
     required this.onSaveNote,
+    required this.noteSaved,
     this.onJump,
   });
 
   final AiConversation conversation;
   final VoidCallback onOpen;
   final VoidCallback onCopy;
-  final VoidCallback onSaveNote;
+  final VoidCallback? onSaveNote;
+  final bool noteSaved;
   final VoidCallback? onJump;
+
+  static String? _historyStatusLabel(AiConversation conversation) {
+    final status = conversation.answerMeta?.answerStatus;
+    if (status == null) return '历史回答，未执行本次核验';
+    return switch (status) {
+      'sourceLinked' => '已关联来源（未独立验证结论）',
+      'insufficient' => '证据不足',
+      'unverified' => '未核验引用',
+      'interrupted' => '生成未完成',
+      'failed' => '生成失败',
+      _ => '历史回答，未执行本次核验',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2170,6 +2791,15 @@ final class _AiHistoryCard extends StatelessWidget {
                   height: 1.4,
                 ),
               ),
+              if (_historyStatusLabel(conversation) != null) ...[
+                const SizedBox(height: AppSpacing.x1),
+                Text(
+                  _historyStatusLabel(conversation)!,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               const SizedBox(height: AppSpacing.x1),
               // The whole card already opens the question, so a separate
               // 「载入提问」 button only repeated the tap. What is left is the
@@ -2184,10 +2814,13 @@ final class _AiHistoryCard extends StatelessWidget {
                     icon: const Icon(Icons.copy_outlined, size: 18),
                   ),
                   IconButton(
-                    tooltip: '保存为笔记',
+                    tooltip: noteSaved ? '已保存为笔记' : '保存为笔记',
                     visualDensity: VisualDensity.compact,
                     onPressed: onSaveNote,
-                    icon: const Icon(Icons.note_add_outlined, size: 18),
+                    icon: Icon(
+                      noteSaved ? Icons.check : Icons.note_add_outlined,
+                      size: 18,
+                    ),
                   ),
                   IconButton(
                     tooltip: '跳回原文',

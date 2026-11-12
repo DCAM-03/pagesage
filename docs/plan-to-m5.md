@@ -19,9 +19,9 @@
 
 **原则（全程不变）**
 
-- 本地优先；AI 仅用户主动触发；不上传整书。  
-- 不实现：云同步、账号、MOBI/AZW、Calibre、OCR、在线书城、DRM 绕过。  
-- 文档默认中文；代码标识符英文。  
+- 本地优先；AI 上下文范围可见；不上传整书。
+- 不实现：云同步、账号、MOBI/AZW、Calibre、OCR、在线书城、DRM 绕过。
+- 文档默认中文；代码标识符英文。
 - 每阶段：小切片 + `flutter analyze` + 相关 `flutter test` + 必要手测。  
 - 每阶段结束回写 `docs/implementation-status.md` 与路线图勾选。
 
@@ -114,7 +114,7 @@
 ### Definition of Done
 
 - M3 文档验收句可手测勾完。  
-- AI 仅用户点击触发的断言保持。
+- AI 请求的上下文范围明确，不自动上传整本书。
 
 ---
 

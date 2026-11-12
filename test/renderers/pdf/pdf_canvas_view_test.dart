@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pagesage/domain/annotations/annotation.dart';
 import 'package:pagesage/domain/annotations/image_anchor.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/reader_settings.dart';
@@ -77,6 +78,9 @@ void main() {
     int clearSelectionVersion = 0,
     String? searchQuery,
     bool imageDragMode = false,
+    List<Annotation> annotations = const [],
+    int? ocrOverlayPage,
+    List<Map<String, Object?>> ocrOverlayBlocks = const [],
     void Function(RendererImageAreaSelected area)? onImageAreaSelected,
   }) async {
     final events = <RendererEvent>[];
@@ -111,7 +115,9 @@ void main() {
                           progress: savedLocator.progress,
                           updatedAt: 0,
                         ),
-                  annotations: const [],
+                  annotations: annotations,
+                  ocrOverlayPage: ocrOverlayPage,
+                  ocrOverlayBlocks: ocrOverlayBlocks,
                   onEvent: events.add,
                   onZoomChanged: onZoomChanged,
                   clearSelectionVersion: clearVersion,
@@ -217,6 +223,174 @@ void main() {
     expect(capability.textSelection, isTrue);
     expect(capability.search, isTrue);
     expect(capability.nativeTextLayer, isTrue);
+  });
+
+  testWidgets('an OCR overlay enables selection without claiming search', (
+    tester,
+  ) async {
+    final result = await pumpReader(
+      tester,
+      'image-only.pdf',
+      viewport: const Size(1000, 900),
+      ocrOverlayPage: 1,
+      ocrOverlayBlocks: const [
+        {
+          'text': 'Scanned line text',
+          'left': 0.1,
+          'top': 0.1,
+          'width': 0.6,
+          'height': 0.05,
+        },
+      ],
+    );
+
+    final capability = result.events
+        .whereType<RendererCapabilityChanged>()
+        .last;
+    expect(capability.textSelection, isTrue);
+    expect(capability.search, isFalse);
+    expect(capability.nativeTextLayer, isFalse);
+    expect(capability.ocrTextLayer, isTrue);
+    expect(capability.reason, isNull);
+  });
+
+  testWidgets('a tap on an OCR line emits the standard selection event', (
+    tester,
+  ) async {
+    final result = await pumpReader(
+      tester,
+      'image-only.pdf',
+      viewport: const Size(1000, 900),
+      ocrOverlayPage: 1,
+      ocrOverlayBlocks: const [
+        {
+          'text': 'Scanned line text',
+          'left': 0.1,
+          'top': 0.1,
+          'width': 0.6,
+          'height': 0.05,
+        },
+      ],
+    );
+    final rect = pageBox(tester);
+    await tester.runAsync(() async {
+      await tester.tapAt(
+        Offset(rect.left + rect.width * 0.22, rect.top + rect.height * 0.125),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+    });
+
+    final selection = result.events.whereType<RendererTextSelected>().last;
+    expect(selection.text, 'Scanned');
+    expect(selection.locator.page, 1);
+    expect(selection.locator.excerpt, 'Scanned');
+    expect(selection.selectionRects, isNotEmpty);
+    expect(selection.selectionRects.first.page, 1);
+    expect(selection.sourceRect, isNotNull);
+    expect(selection.sourceRect!.x, greaterThan(rect.left));
+    expect(selection.sourceRect!.width, greaterThan(1));
+  });
+
+  testWidgets('a drag across OCR lines selects both lines', (tester) async {
+    final result = await pumpReader(
+      tester,
+      'image-only.pdf',
+      viewport: const Size(1000, 900),
+      ocrOverlayPage: 1,
+      ocrOverlayBlocks: const [
+        {
+          'text': 'Scanned line text',
+          'left': 0.1,
+          'top': 0.1,
+          'width': 0.6,
+          'height': 0.05,
+        },
+        {
+          'text': 'Second OCR line',
+          'left': 0.1,
+          'top': 0.2,
+          'width': 0.6,
+          'height': 0.05,
+        },
+      ],
+    );
+    final rect = pageBox(tester);
+    final start = Offset(
+      rect.left + rect.width * 0.11,
+      rect.top + rect.height * 0.125,
+    );
+    final delta = Offset(rect.width * 0.39, rect.height * 0.1);
+    await tester.runAsync(() async {
+      final gesture = await tester.startGesture(
+        start,
+        kind: PointerDeviceKind.mouse,
+      );
+      for (var i = 1; i <= 20; i++) {
+        await gesture.moveTo(start + delta * (i / 20));
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+    });
+
+    final selection = result.events.whereType<RendererTextSelected>().last;
+    expect(selection.text, contains('Scanned'));
+    expect(selection.text, contains('Second OCR'));
+    expect(selection.selectionRects, hasLength(2));
+    expect({for (final r in selection.selectionRects) r.page}, {1});
+  });
+
+  testWidgets('a stored annotation on an OCR page stays clickable', (
+    tester,
+  ) async {
+    final annotation = Annotation(
+      id: 'ocr-annotation',
+      bookId: 'test',
+      locator: ReadingLocator.pdf(
+        page: 1,
+        selectionRects: [
+          ReaderRect(page: 1, x: 0.1, y: 0.1, width: 0.6, height: 0.05),
+        ],
+      ),
+      selectedText: 'Scanned line text',
+      color: AnnotationColor.yellow,
+      style: AnnotationStyle.highlight,
+      createdAt: 0,
+      updatedAt: 0,
+    );
+    final result = await pumpReader(
+      tester,
+      'image-only.pdf',
+      viewport: const Size(1000, 900),
+      annotations: [annotation],
+      ocrOverlayPage: 1,
+      ocrOverlayBlocks: const [
+        {
+          'text': 'Scanned line text',
+          'left': 0.1,
+          'top': 0.1,
+          'width': 0.6,
+          'height': 0.05,
+        },
+      ],
+    );
+    final rect = pageBox(tester);
+    await tester.runAsync(() async {
+      await tester.tapAt(
+        Offset(rect.left + rect.width * 0.4, rect.top + rect.height * 0.125),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+    });
+
+    final selected = result.events.whereType<RendererAnnotationSelected>().last;
+    expect(selected.annotationId, 'ocr-annotation');
+    expect(selected.sourceRect, isNotNull);
   });
 
   testWidgets('emits RendererFailed for a broken file', (tester) async {
@@ -457,6 +631,9 @@ void main() {
       final location = result.events.whereType<RendererLocationChanged>().last;
       expect(location.pageNumber, 1);
       expect(location.locator.scrollOffset, greaterThan(0));
+      expect(location.locator.pageOffsetFraction, isNotNull);
+      expect(location.locator.pageOffsetFraction, greaterThan(0));
+      expect(location.locator.pageOffsetFraction, lessThanOrEqualTo(1));
     });
 
     testWidgets('a wheel notch scrolls instead of turning a page', (
@@ -797,6 +974,95 @@ void main() {
         // A vertical run of rotated text is tall and narrow in display space.
         expect(r.height, greaterThan(r.width));
       }
+    });
+
+    testWidgets('a stored annotation is clickable on a rotated page', (
+      tester,
+    ) async {
+      final first = await pumpReader(
+        tester,
+        'rotated-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+      );
+      final firstPage = pageBox(tester, aspect: 792 / 612);
+      await tester.runAsync(() async {
+        await dragBy(
+          tester,
+          Offset(
+            firstPage.left + firstPage.width * 0.903,
+            firstPage.top + firstPage.height * 0.163,
+          ),
+          Offset(0, firstPage.height * 0.245),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+      final selection = first.events.whereType<RendererTextSelected>().last;
+      expect(selection.selectionRects, isNotEmpty);
+      final saved = selection.selectionRects.first;
+      final annotation = Annotation(
+        id: 'rotated-annotation',
+        bookId: 'test',
+        locator: ReadingLocator.pdf(page: 1, selectionRects: [saved]),
+        selectedText: selection.text,
+        color: AnnotationColor.yellow,
+        style: AnnotationStyle.highlight,
+        createdAt: 0,
+        updatedAt: 0,
+      );
+
+      final second = await pumpReader(
+        tester,
+        'rotated-text.pdf',
+        viewport: const Size(1000, 900),
+        settings: const ReaderSettings(pdfZoomMode: PdfZoomMode.fitPage),
+        session: 1,
+        annotations: [annotation],
+      );
+      final page = pageBox(tester, aspect: 792 / 612);
+      final inside =
+          page.topLeft +
+          Offset(
+            (saved.x + saved.width / 2) * page.width,
+            (saved.y + saved.height / 2) * page.height,
+          );
+      await tester.runAsync(() async {
+        await tester.tapAt(inside);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+
+      final hits = second.events
+          .whereType<RendererAnnotationSelected>()
+          .where((event) => event.annotationId == annotation.id)
+          .toList();
+      expect(
+        hits,
+        hasLength(1),
+        reason:
+            'saved=(${saved.x},${saved.y},${saved.width},${saved.height}) '
+            'inside=$inside page=$page',
+      );
+      expect(hits.single.sourceRect?.page, 1);
+      expect(hits.single.sourceRect?.width, greaterThan(0));
+      expect(hits.single.sourceRect?.height, greaterThan(0));
+
+      // A point away from the stored band must not reuse the annotation's
+      // rotated position.
+      await tester.runAsync(() async {
+        await tester.tapAt(
+          page.topLeft + Offset(page.width * 0.5, page.height * 0.8),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await tester.pump();
+      });
+      expect(
+        second.events.whereType<RendererAnnotationSelected>().where(
+          (event) => event.annotationId == annotation.id,
+        ),
+        hasLength(1),
+      );
     });
 
     testWidgets('the end handle drags the selection further', (tester) async {

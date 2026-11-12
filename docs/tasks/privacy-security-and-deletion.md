@@ -8,7 +8,14 @@
 
 - 来源：`AGENTS.md`、`docs/01-product-requirements.md`、`docs/03-interaction-spec.md`、`docs/05-technical-architecture.md`、`docs/06-data-model.md`。
 - 不做：账号、云同步、端到端加密同步。
-- 约束：AI 用户主动触发；不自动上传整本书；API key 仅 secure storage。
+- 约束：AI 上下文范围可见；不自动上传整本书；API key 仅 secure storage。
+
+### AI 触发规则更新（2026-11-09）
+
+- 按用户要求，取消将「每次必须由用户主动点击」作为所有 AI 功能的实现前提。摘要生成、模型辅助索引和其他后台 AI 能力可按具体功能设计实现，不再受这条全局限制阻挡。
+- 保留上下文范围明确、不自动上传整本书、AI 启用开关和现有请求确认设置；自动触发的功能也须遵守这些设置与请求范围。
+- 本次同步产品文档，不新增自动任务，不改变现有请求流程或用户设置。验证选择：检索旧约束残留、运行具名文档链接检查并检查差异空白；无需应用构建安装。
+- 验证结果：全局「仅用户触发」限制的旧表述已清除；`release_readiness_test.dart` 的 `documentation links and release assets stay valid` 用例通过（1 项），日志 `/tmp/pagesage-ai-trigger-rule-doc-check.log`；本轮 6 份文档相对开工快照无新增空白错误，`lib/`、`test/`、`assets/` 文件哈希保持不变。
 
 ## 功能范围
 

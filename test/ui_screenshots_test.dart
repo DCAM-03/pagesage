@@ -28,6 +28,7 @@ import 'package:pagesage/domain/search/search_models.dart';
 import 'package:pagesage/features/library/presentation/library_page.dart';
 import 'package:pagesage/features/notes/presentation/notes_page.dart';
 import 'package:pagesage/features/reader/presentation/reader_page.dart';
+import 'package:pagesage/features/reader/presentation/reader_renderer_host.dart';
 import 'package:pagesage/features/search/presentation/search_page.dart';
 import 'package:pagesage/features/settings/presentation/settings_page.dart';
 import 'package:pagesage/features/tasks/presentation/task_center_page.dart';
@@ -208,6 +209,41 @@ void main() {
         settings: const ReaderSettings(desktopContextOpen: true),
       ),
       settle: const Duration(seconds: 2),
+    );
+    await _captureIfSelected(
+      tester,
+      fileName: 'reader-settings-desktop.png',
+      size: const Size(1440, 960),
+      route: '/book/book-epub/reader',
+      outputDir: outputDir,
+      data: data,
+      afterPump: (tester) async {
+        await tester.tap(find.widgetWithText(TextButton, '设置'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(find.text('阅读设置'), findsOneWidget);
+        expect(find.text('长时间阅读'), findsOneWidget);
+      },
+    );
+    await _captureIfSelected(
+      tester,
+      fileName: 'reader-settings-mobile.png',
+      size: const Size(390, 844),
+      route: '/book/book-epub/reader',
+      outputDir: outputDir,
+      data: data,
+      afterPump: (tester) async {
+        await tester.tap(find.text('更多'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+        final settingsAction = find.widgetWithText(ListTile, '阅读设置');
+        await tester.ensureVisible(settingsAction);
+        await tester.tap(settingsAction);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(find.text('阅读设置'), findsOneWidget);
+        expect(find.text('长时间阅读'), findsOneWidget);
+      },
     );
     await _captureIfSelected(
       tester,
@@ -517,7 +553,9 @@ Future<void> _captureAppPage(
   expect(tester.takeException(), isNull);
   // ignore: avoid_print
   print('Write $fileName');
-  await _writeBoundaryPng(key, File('${outputDir.path}/$fileName'));
+  await tester.runAsync(
+    () => _writeBoundaryPng(key, File('${outputDir.path}/$fileName')),
+  );
   // ignore: avoid_print
   print('Done $fileName');
 }
@@ -1351,6 +1389,9 @@ final class _FakeAnnotationRepository implements AnnotationRepository {
   }) async {}
 
   @override
+  Future<void> unlinkNote({required String annotationId}) async {}
+
+  @override
   Future<Annotation> saveAnnotation({
     String? id,
     required String bookId,
@@ -1538,6 +1579,7 @@ final class _FakeAiConversationRepository implements AiConversationRepository {
     required String answer,
     String? sourceText,
     String? threadId,
+    AiContextSnapshot? contextSnapshot,
   }) async {
     return AiConversation(
       id: id ?? 'ai-new',
@@ -1549,6 +1591,8 @@ final class _FakeAiConversationRepository implements AiConversationRepository {
       contextText: contextText,
       answer: answer,
       sourceText: sourceText,
+      threadId: threadId,
+      contextSnapshot: contextSnapshot,
       createdAt: 1,
     );
   }

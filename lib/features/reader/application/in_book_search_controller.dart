@@ -73,7 +73,8 @@ final class InBookSearchController extends ChangeNotifier {
       clear();
       return;
     }
-    _setState(_state.copyWith(query: query, isSearching: false, error: null));
+    _searchGeneration++;
+    _setState(InBookSearchState(query: query, isSearching: true));
     _debounceTimer = Timer(debounceDuration, () {
       unawaited(searchNow(query));
     });
@@ -90,20 +91,22 @@ final class InBookSearchController extends ChangeNotifier {
     final generation = ++_searchGeneration;
     _setState(_state.copyWith(query: query, isSearching: true, error: null));
     try {
-      final results = await repository.search(
+      final response = await repository.searchResponse(
         SearchQuery(
           query: query,
           bookId: bookId,
           typeFilters: const {SearchResultType.content},
+          requestEpoch: generation,
         ),
       );
-      if (generation != _searchGeneration) {
+      if (generation != _searchGeneration ||
+          response.requestEpoch != generation) {
         return;
       }
       _setState(
         _state.copyWith(
-          results: results,
-          selectedIndex: _initialSelectedIndex(results),
+          results: response.results,
+          selectedIndex: _initialSelectedIndex(response.results),
           isSearching: false,
           error: null,
         ),
@@ -202,6 +205,7 @@ final class InBookSearchController extends ChangeNotifier {
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _searchGeneration++;
     super.dispose();
   }
 

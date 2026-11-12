@@ -4,23 +4,41 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../../core/database/database_providers.dart';
+import '../../../core/ocr/linux_tesseract_ocr_engine.dart';
 import '../../../core/ocr/method_channel_ocr_engine.dart';
 import '../../../core/ocr/method_channel_pdf_page_rasterizer.dart';
+import '../../../core/ocr/native_pdf_page_rasterizer.dart';
 import '../../../core/ocr/stub_ocr_engine.dart';
 import '../../../core/ocr/stub_pdf_page_rasterizer.dart';
+import '../../../core/database/drift_ocr_job_repository.dart';
+import '../../../core/ocr/ocr_execution_gate.dart';
 import '../../../domain/ocr/ocr_engine.dart';
+import '../../../domain/ocr/ocr_jobs.dart';
 import '../../../domain/ocr/pdf_page_rasterizer.dart';
 import '../../../renderers/pdf/pdf_page_image_source.dart';
 import 'ocr_current_page_use_case.dart';
 import 'ocr_page_store.dart';
+import 'ocr_pipeline_policy.dart';
 import 'ocr_session_cache.dart';
 
 final ocrSessionCacheProvider = Provider<OcrSessionCache>((ref) {
   return OcrSessionCache();
 });
 
+final ocrExecutionGateProvider = Provider<OcrExecutionGate>((ref) {
+  return OcrExecutionGate();
+});
+
 final ocrPageStoreProvider = Provider<OcrPageStore>((ref) {
   return DriftOcrPageStore(ref.watch(ocrPageDaoProvider));
+});
+
+final ocrJobRepositoryProvider = Provider<OcrJobRepository>((ref) {
+  return DriftOcrJobRepository(ref.watch(appDatabaseProvider));
+});
+
+final ocrPipelinePolicyProvider = Provider<OcrPipelinePolicy>((ref) {
+  return defaultOcrPipelinePolicy;
 });
 
 /// Active PDF renderer for display-space OCR export.
@@ -34,6 +52,11 @@ final activePdfRendererControllerProvider = StateProvider<PdfPageImageSource?>(
 );
 
 final pdfPageRasterizerProvider = Provider<PdfPageRasterizer>((ref) {
+  if (Platform.isLinux) {
+    final rasterizer = NativePdfPageRasterizer();
+    ref.onDispose(rasterizer.dispose);
+    return rasterizer;
+  }
   if (Platform.isAndroid || Platform.isWindows) {
     return MethodChannelPdfPageRasterizer();
   }
@@ -41,6 +64,9 @@ final pdfPageRasterizerProvider = Provider<PdfPageRasterizer>((ref) {
 });
 
 final ocrEngineProvider = Provider<OcrEngine>((ref) {
+  if (Platform.isLinux) {
+    return LinuxTesseractOcrEngine();
+  }
   if (Platform.isAndroid) {
     return MethodChannelOcrEngine(id: 'mlkit');
   }
@@ -51,10 +77,14 @@ final ocrEngineProvider = Provider<OcrEngine>((ref) {
 });
 
 final ocrCurrentPageUseCaseProvider = Provider<OcrCurrentPageUseCase>((ref) {
+  final policy = ref.watch(ocrPipelinePolicyProvider);
   return OcrCurrentPageUseCase(
     rasterizer: ref.watch(pdfPageRasterizerProvider),
     engine: ref.watch(ocrEngineProvider),
     cache: ref.watch(ocrSessionCacheProvider),
+    executionGate: ref.watch(ocrExecutionGateProvider),
     store: ref.watch(ocrPageStoreProvider),
+    dpi: policy.dpi,
+    maxEdge: policy.maxEdge,
   );
 });

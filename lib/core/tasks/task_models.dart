@@ -3,9 +3,11 @@ enum PageSageTaskType {
   metadata('metadata'),
   indexBook('index'),
   rebuildIndex('rebuildIndex'),
+  ocrPages('ocrPages'),
   exportNotes('exportNotes'),
   backup('backup'),
-  restore('restore');
+  restore('restore'),
+  unknown('unsupported');
 
   const PageSageTaskType(this.value);
 
@@ -14,7 +16,7 @@ enum PageSageTaskType {
   static PageSageTaskType fromValue(String value) {
     return values.firstWhere(
       (type) => type.value == value,
-      orElse: () => PageSageTaskType.importBook,
+      orElse: () => PageSageTaskType.unknown,
     );
   }
 }
@@ -23,6 +25,8 @@ enum PageSageTaskStatus {
   queued('queued'),
   running('running'),
   indexing('indexing'),
+  paused('paused'),
+  partial('partial'),
   done('done'),
   failed('failed'),
   cancelled('cancelled');

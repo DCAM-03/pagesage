@@ -22,6 +22,7 @@ final class StubOcrEngine implements OcrEngine {
   Future<OcrPageResult> recognize({
     required Uint8List imageBytes,
     required String languageHint,
+    Future<void>? cancelled,
   }) async {
     throw const OcrUnavailableException();
   }

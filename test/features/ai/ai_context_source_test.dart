@@ -195,4 +195,33 @@ void main() {
 
     expect(loaded, isNull);
   });
+
+  test('a folder chapter is read from its own file', () async {
+    final dir = await Directory.systemTemp.createTemp('pagesage_ai_folder_');
+    addTearDown(() => dir.delete(recursive: true));
+    await File('${dir.path}/a.md').writeAsString('# 甲\n\n甲篇正文。');
+    final sub = Directory('${dir.path}/sub')..createSync();
+    await File('${sub.path}/b.md').writeAsString('# 乙\n\n乙篇正文。');
+
+    final loaded = await source.load(
+      range: AiContextRange.currentChapter,
+      bookPath: dir.path,
+      locator: ReadingLocator.markdown(
+        href: 'sub/b.md',
+        chapterIndex: 0,
+        chapterOffset: 0,
+        progress: 0.8,
+        folderFileLocal: true,
+      ),
+      format: BookFormat.markdown,
+    );
+
+    expect(loaded, isNotNull);
+    expect(loaded!.title, contains('乙'));
+    expect(loaded.text, contains('乙篇正文'));
+    expect(loaded.text, isNot(contains('甲篇正文')));
+    expect(loaded.locator?.href, 'sub/b.md');
+    expect(loaded.locator?.folderFileLocal, isTrue);
+    expect(loaded.locator?.progress, greaterThan(0));
+  });
 }

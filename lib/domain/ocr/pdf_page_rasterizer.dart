@@ -32,5 +32,7 @@ abstract interface class PdfPageRasterizer {
     required String filePath,
     required int pageNumber,
     int dpi = defaultDpi,
+    int maxEdge = defaultMaxEdge,
+    int maxPixels = 5000000,
   });
 }

@@ -9,7 +9,7 @@
 | 阶段 | 目标 | 重点 |
 | --- | --- | --- |
 | M0 | 项目初始化 | Flutter 工程、基础结构、CI 雏形 |
-| M1 MVP | 基础阅读闭环 | 导入 EPUB/PDF、阅读、保存进度 |
+| M1 MVP | 基础阅读闭环 | 导入 EPUB/PDF/Markdown、阅读、保存进度 |
 | M2 Alpha | 阅读管理闭环 | 分类、书签、笔记、搜索 |
 | M3 Beta | 智能和导出 | AI 问答、导出 |
 | M4 v1.0 | 稳定发布 | 性能、备份、打包、辅助功能 |
@@ -24,19 +24,20 @@
 - Flutter 工程已在仓库根目录创建。
 - Android 和 Windows 平台目录已生成。
 - 已有最小书库空状态页面和 widget test。
+- **状态校正（2026-11-08）**：本节的 unchecked 项是 2026-06-13 的初始 backlog，不代表当前待办。Riverpod / go_router / 分层目录 / 日志服务 / 错误模型均已在代码中落地；PDF.js Spike 已被 2026-10-21 的 Flutter Canvas 渲染迁移取代，见 `docs/10-pdf-renderer-migration.md`。仍需人工勾选的验收集中在 `docs/implementation-status.md`、`docs/v1-experience-freeze.md` 与 `docs/testing-ui-ux-checklist.md`。
 
 任务：
 
 - [x] 创建 Flutter 工程。
 - [x] 保留 `docs/` 文档目录。
 - [x] 配置 Android 和 Windows。
-- [ ] 配置 Riverpod。
-- [ ] 配置 go_router。
+- [x] 配置 Riverpod。
+- [x] 配置 go_router。
 - [x] 配置 lint。
-- [ ] 建立目录结构。
+- [x] 建立目录结构。
 - [x] 建立基础主题。
-- [ ] 建立日志服务。
-- [ ] 建立错误模型。
+- [x] 建立日志服务。
+- [x] 建立错误模型。
 
 验收：
 
@@ -47,7 +48,7 @@
 
 ## 3. M1 MVP
 
-目标：用户可以导入 EPUB/PDF，打开阅读，关闭后恢复进度。
+目标：用户可以导入 EPUB/PDF/Markdown，打开阅读，关闭后恢复进度。
 
 ### 3.1 数据库基础
 
@@ -74,14 +75,16 @@
 - 实现 FileRepository。
 - 实现 hash 计算。
 - 支持复制文件到应用目录。
-- 支持 EPUB/PDF 格式识别。
+- 支持 EPUB/PDF/Markdown 格式识别。
+- 支持 Markdown 文件夹作为一本书原地读取：侧栏保留文件/子目录树，当前文件单独显示大纲。
 - 重复导入提示。
 
 验收：
 
-- EPUB/PDF 可导入。
+- EPUB/PDF/Markdown 可导入。
 - 重启后书籍仍存在。
 - 重复文件可识别。
+- 移除 Markdown 文件夹书不删除用户目录。
 
 ### 3.3 书库 UI
 
@@ -341,7 +344,7 @@
 | Windows PDF WebView 与移动 PDF WebView 差异 | M1 | 提前做 PDF renderer spike |
 | EPUB CFI 恢复不稳定 | M1 | 保存 href/chapter/progress 作为备用 |
 | PDF 文本层缺失 | M2 | 明确提示，OCR 后续 |
-| AI 隐私担忧 | M3 | 主动触发和上下文确认 |
+| AI 隐私担忧 | M3 | 上下文范围确认 |
 | FTS 中文分词效果一般 | M2 | 先用基础 FTS，后续评估 tokenizer |
 | MOBI/AZW 兼容范围膨胀 | 后续 | 当前版本明确暂缓，不接入 Calibre |
 | UI 只局部换皮导致不一致 | M5 | 先落地 token 和公共组件，再逐页迁移 |

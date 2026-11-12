@@ -1,52 +1,35 @@
 ---
 name: api-contract-sync
-description: Reconcile API, schema, or event contracts across the authoritative source and every backend, frontend, mock, generated-client, documentation, and SDK consumer. Use when endpoints, DTOs, schemas, fields, enums, errors, pagination, authentication, behavior semantics, generated types, mocks, or public SDK signatures change or drift across components.
+description: 对齐 PageSage 领域接口、Dart 序列化、Drift 数据迁移、阅读定位、渲染事件、AI 来源与导出契约；用于字段、枚举、状态、默认值或错误语义跨模块变化。
 ---
 
-# API Contract Sync
+# PageSage 契约同步
 
-Read `docs/PROJECT_PROFILE.md`, the nearest applicable `AGENTS.md`, the active task, and only the contract sources and consumers relevant to the requested change.
+这里的契约包含本地模型和持久化，不要求存在 HTTP 后端。先读任务和根 `AGENTS.md`，
+再读 [数据与契约规范](../pagesage-dart-engineering/references/data-contracts.md)。
 
-## Establish Authority
+## 确定权威与影响
 
-Identify the authoritative contract before editing. It may be accepted design documentation, OpenAPI or another schema, backend controller and DTO code, an event schema, database contract, or a task-specific decision. Do not assume the backend implementation is authoritative when an accepted contract says otherwise. Report conflicts instead of silently choosing one source.
+从用户已确认行为、相关设计和实际代码确定权威来源；发生矛盾先明确，不让数据库现状
+或 mock 自动定义产品行为。追踪真实生产者与消费者，不限于预期修改文件：
 
-If the contract is unresolved, use `project-coordination` to create or dispatch only the prerequisite decision or owning-component task. Do not make downstream consumers guess.
+| 变化 | 应检查的链路 |
+| --- | --- |
+| 领域字段 / 枚举 / JSON | 模型 → repository 接口 → Drift 映射 / 设置存储 → controller / UI → 导出 / 测试替身 |
+| 数据库结构 / FTS | 表 / schemaVersion → 迁移 / 生成代码 → DAO / repository → 新建与升级 → 搜索 / 删除 / 备份消费 |
+| locator / 渲染事件 | 解析与偏移 → 渲染器 → Dart 持久化 → 搜索 / 书签 / 批注 / 历史来源 → 跳转与重开 |
+| AI / 检索上下文 | 选定范围 → 检索与预算 → 实际请求 / 来源快照 → 历史恢复 → 引用跳转 / 笔记关联 / 导出 |
+| 平台与配置 | 声明 / 默认值 → adapter / 构建入口 → Android / Windows / 本地 Linux 安装 |
 
-## Build The Contract Ledger
+只列本次有影响的链路。多文件共用一个不变量时可合并一行。
 
-Record every applicable surface:
+## 实施和核对
 
-- operation name, route or topic, method, and version;
-- path, query, header, body, and event inputs;
-- response or event fields, optional/nullable semantics, enum values, dates, and numeric precision;
-- status codes, error identifiers, error shape, and retry/idempotency behavior;
-- pagination, sorting, filtering, lifecycle transitions, and soft-delete visibility;
-- authentication, authorization, tenant or ownership boundaries, and secret/token handling;
-- frontend types, forms, clients, hooks, caches, and user-visible state;
-- mocks, fixtures, generated clients, SDK methods, examples, and compatibility guarantees.
+1. 记录字段类型、可空/缺省语义、单位、排序、来源身份和兼容策略；用 `validation-harness` 声明行为证明。
+2. 修改权威契约及所有实际消费者，保留已持久化用户数据。生成产物通过生成器更新。
+3. 为旧值、新值、错误值或取消等本次相关边界补验证，不凭空增加兼容分支。
+4. 在任务中用 `已验证`、`不受影响（具体原因）`、`待验证/阻塞` 记录链路。
+5. 存在受影响但仍用旧契约的生产入口或未解决数据安全缺口时，不声明全链路完成。
 
-Read `references/contract-checklist.md` for the detailed cross-surface audit.
-
-## Synchronize
-
-1. Declare the contract validation harness with the installed `validation-harness` skill before editing.
-2. Capture the current authoritative source and list every affected consumer.
-3. Change the owning contract surface first, unless the task explicitly follows a schema-first or compatibility-first sequence.
-4. Update all affected consumers. Preserve protocol-mandated naming and do not invent envelopes, defaults, nullability, or compatibility aliases.
-5. Update mocks and fixtures to model real success and failure behavior. Do not let mocks define a different product contract.
-6. Update generated artifacts through their generator and record before/after scope. Do not hand-edit generated output unless project instructions explicitly require it.
-7. Add shared behavior vectors when several implementations must agree, especially for permissions, lifecycle, boundary, serialization, retry, or token semantics.
-8. Run focused checks for every changed consumer, then exercise the real owning runtime path for strict writes or behavior claims.
-9. Record lane-specific evidence and unresolved compatibility or rollout risks in the canonical task.
-
-## Compatibility And Sequencing
-
-- Treat removals, renames, stricter validation, narrowed enums, changed defaults, and altered error semantics as compatibility risks even when code compiles.
-- Sequence additive producer support before consumer adoption, then remove compatibility paths only after consumers and rollout evidence permit it.
-- For multi-repository delivery, require accepted upstream contract evidence before dispatching dependent implementation.
-- Do not claim parity from type generation, static scans, or mock tests alone when behavior is observable at runtime.
-
-## Output
-
-Report the authoritative source, affected consumers, contract deltas, compatibility classification, changed surfaces, validation matrix, and remaining rollout gates. Separate confirmed parity from unverified or blocked lanes.
+已有明确“未知版本拒绝”等契约必须保留；默认值只能处理已定义的历史缺字段，不能掩盖损坏。
+仅生成代码、analyze 或 mock 通过，不足以证明真实 SQLite 升级、来源跳转或平台协议正常。

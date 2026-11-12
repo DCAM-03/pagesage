@@ -1,7 +1,9 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart' as selector;
+import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 final class PickedPlatformFile {
   const PickedPlatformFile({required this.path, required this.name});
@@ -41,9 +43,6 @@ final class FileSaveRequest {
   final String fileName;
   final List<String> allowedExtensions;
 
-  /// file_picker 12 no longer writes the file for us: the caller supplies the
-  /// bytes up front and we write them once the destination is chosen. Defaults
-  /// to empty so callers that only need a destination path keep working.
   final List<int> bytes;
 }
 
@@ -56,7 +55,19 @@ abstract interface class FilePickerAdapter {
 }
 
 final class FilePickerPluginAdapter implements FilePickerAdapter {
-  const FilePickerPluginAdapter();
+  const FilePickerPluginAdapter({this.pickSaveLocation = _pickSaveLocation});
+
+  final Future<String?> Function(FileSaveRequest) pickSaveLocation;
+
+  static Future<String?> _pickSaveLocation(FileSaveRequest request) async {
+    final location = await selector.getSaveLocation(
+      suggestedName: request.fileName,
+      acceptedTypeGroups: [
+        selector.XTypeGroup(extensions: request.allowedExtensions),
+      ],
+    );
+    return location?.path;
+  }
 
   @override
   Future<List<PickedPlatformFile>> pickFiles(FilePickerRequest request) async {
@@ -88,8 +99,10 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
 
   @override
   Future<String?> saveFile(FileSaveRequest request) async {
-    // file_picker 12 returns a Uri and requires the bytes up front, so the
-    // caller writes the file itself after the destination is chosen.
+    if (request.bytes.isEmpty &&
+        (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
+      return pickSaveLocation(request);
+    }
     final uri = await FilePicker.saveFile(
       dialogTitle: request.dialogTitle,
       fileName: request.fileName,
@@ -101,11 +114,7 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
     );
     if (uri == null) return null;
 
-    // On native platforms toFilePath() is non-null; web returns a blob URI
-    // with no local path, which Web-only builds handle separately.
-    final path = uri.toFilePath();
-    await File(path).writeAsBytes(request.bytes, flush: true);
-    return path;
+    return uri.scheme == 'file' ? uri.toFilePath() : uri.toString();
   }
 
   @override
@@ -121,13 +130,39 @@ final class FilePickerPluginAdapter implements FilePickerAdapter {
 final class FilePickerService {
   factory FilePickerService({
     FilePickerAdapter adapter = const FilePickerPluginAdapter(),
+    bool? isAndroid,
+    MethodChannel filesChannel = const MethodChannel('pagesage/files'),
   }) {
-    return FilePickerService._(adapter);
+    return FilePickerService._(
+      adapter,
+      isAndroid ?? Platform.isAndroid,
+      filesChannel,
+    );
   }
 
-  const FilePickerService._(this._adapter);
+  const FilePickerService._(this._adapter, this._isAndroid, this._filesChannel);
 
   final FilePickerAdapter _adapter;
+  final bool _isAndroid;
+  final MethodChannel _filesChannel;
+
+  bool get supportsExportPathSelection => !_isAndroid;
+
+  Future<String?> saveExportedFile(File file) async {
+    if (!_isAndroid) return file.path;
+    final name = p.basename(file.path);
+    return _filesChannel.invokeMethod<String>('saveExport', {
+      'sourcePath': file.absolute.path,
+      'name': name,
+      'mimeType': switch (p.extension(name).toLowerCase()) {
+        '.zip' => 'application/zip',
+        '.json' => 'application/json',
+        '.csv' => 'text/csv',
+        '.md' => 'text/markdown',
+        _ => 'application/octet-stream',
+      },
+    });
+  }
 
   Future<PickedBookFile?> pickBookFile() async {
     final files = await _adapter.pickFiles(

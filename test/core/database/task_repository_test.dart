@@ -1,7 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_task_repository.dart';
 import 'package:pagesage/core/tasks/task_models.dart';
 
 void main() {

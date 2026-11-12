@@ -38,7 +38,7 @@ PageSage 是一个可以管理、搜索、标注和询问书籍内容的本地�
    用户在阅读中产生的划线、书签、笔记、AI 回答会沉淀成可复习、可导出的知识库。
 
 5. 可控 AI  
-   AI 功能由用户主动触发，默认不会自动上传书籍内容。每次 AI 请求都可以明确看到上下文范围。
+   AI 请求会明确展示将发送的上下文范围，默认不会自动上传书籍内容。
 
 ## 4. 文档地图
 
@@ -85,6 +85,8 @@ PageSage 是一个可以管理、搜索、标注和询问书籍内容的本地�
 
 原始总纲保留在 [product-technical-document.md](product-technical-document.md)，作为早期启动稿参考。
 
+2026-11-10 Linux 优先的下一批六项功能见 [统一规格](specs/linux-reader-six-features-2026-11-10/README.md) 与 [联合验收](specs/linux-reader-six-features-2026-11-10/07-validation-and-acceptance.md)。该入口是待实施规划，不改变本页历史平台验证记录，也不表示功能已经完成。
+
 ## 5. 首版技术决策
 
 | 方向 | 决策 |
@@ -97,10 +99,11 @@ PageSage 是一个可以管理、搜索、标注和询问书籍内容的本地�
 | ORM | Drift |
 | 全文搜索 | SQLite FTS5 |
 | EPUB 阅读 | Flutter-native renderer |
-| PDF 阅读 | PDF.js in WebView |
+| PDF 阅读 | `pdf_graphics` + Flutter Canvas（见 `10-pdf-renderer-migration.md`） |
+| Markdown 阅读 | 复用 EPUB 文档模型与 Flutter-native renderer（见 `tasks/markdown-reading.md`） |
 | MOBI/AZW | 暂缓，不进入当前首版实现 |
 | AI | Provider 抽象，支持 OpenAI-compatible API 和本地模型 |
-| 数据策略 | 本地优先，AI 主动触发 |
+| 数据策略 | 本地优先，AI 上下文范围可见 |
 
 ## 6. 当前开发环境
 
@@ -136,7 +139,7 @@ PageSage 是一个可以管理、搜索、标注和询问书籍内容的本地�
 首版必须做：
 
 - 书库
-- EPUB/PDF 导入
+- EPUB/PDF/Markdown 导入
 - 阅读器
 - 阅读进度
 - 分类
@@ -170,10 +173,10 @@ PageSage 是一个可以管理、搜索、标注和询问书籍内容的本地�
    不把进度、书签、笔记只存在内存或 WebView 状态里。
 
 3. 阅读器和业务状态解耦。  
-   EPUB/PDF 渲染层只负责呈现和回传事件，业务数据由 Dart 层统一保存。
+   EPUB/PDF/Markdown 渲染层只负责呈现和回传事件，业务数据由 Dart 层统一保存。
 
 4. AI 不能阻塞基础阅读。  
    没有配置 AI 时，应用仍然是完整阅读器。
 
 5. 平台差异通过平台层隔离。  
-   文件选择、PDF WebView、外部命令、窗口行为都放到平台适配层。
+   文件选择、原生 PDF 渲染、外部命令、窗口行为都放到平台适配层。

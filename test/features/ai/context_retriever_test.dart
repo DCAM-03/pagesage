@@ -9,6 +9,11 @@ SearchChunk _chunk(
   String title = '第一章',
   int sortOrder = 0,
   int? page,
+  ReadingLocator? locator,
+  String? parentId,
+  String? parentTitle,
+  String? parentText,
+  ReadingLocator? parentLocator,
 }) {
   return SearchChunk(
     id: id,
@@ -16,12 +21,24 @@ SearchChunk _chunk(
     title: title,
     text: text,
     sortOrder: sortOrder,
-    locator: page == null ? null : ReadingLocator.pdf(page: page),
+    locator: locator ?? (page == null ? null : ReadingLocator.pdf(page: page)),
+    parentId: parentId,
+    parentTitle: parentTitle,
+    parentText: parentText,
+    parentLocator: parentLocator,
   );
 }
 
 SearchBookChunks _book(List<SearchChunk> chunks, {String id = 'book-1'}) {
   return SearchBookChunks(bookId: id, chunks: chunks);
+}
+
+ReadingLocator _markdownRange(int start, int end) {
+  return ReadingLocator.markdown(
+    chapterIndex: 0,
+    chapterOffset: start,
+    chapterEndOffset: end,
+  );
 }
 
 void main() {
@@ -153,6 +170,455 @@ void main() {
       );
     });
 
+    test('only joins a sibling that belongs to the same parent', () {
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'c1',
+              '${'前文。' * 20}链表的关键说明到这里',
+              sortOrder: 1,
+              parentId: 'p1',
+              parentTitle: '第一章 › 链表',
+              parentText: '${'前文。' * 20}链表的关键说明到这里。下一步解释节点。',
+            ),
+            _chunk(
+              'c2',
+              '下一步解释节点。',
+              sortOrder: 2,
+              parentId: 'p1',
+              parentTitle: '第一章 › 链表',
+              parentText: '${'前文。' * 20}链表的关键说明到这里。下一步解释节点。',
+            ),
+            _chunk(
+              'c3',
+              '另一个小节讨论附录，但和上一段没有结构关系。',
+              sortOrder: 3,
+              parentId: 'p2',
+              parentTitle: '第一章 › 附录',
+            ),
+          ]),
+        ],
+        query: '链表',
+        limit: 1,
+      );
+
+      expect(references, hasLength(1));
+      expect(references.single.text, contains('下一步解释节点'));
+      expect(references.single.text, isNot(contains('另一个小节')));
+      expect(references.single.title, '第一章 › 链表');
+    });
+
+    test('does not guess a neighbour from the chunk id', () {
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'b:md:1:0',
+              '${'说明。' * 60}链表在这里结束',
+              sortOrder: 1,
+              parentId: 'p1',
+              parentText: '${'说明。' * 60}链表在这里结束',
+            ),
+            _chunk(
+              'b:md:1:1',
+              '这一段属于新的小节，不应该根据编号被拉进来。',
+              sortOrder: 2,
+              parentId: 'p2',
+              parentText: '这一段属于新的小节，不应该根据编号被拉进来。',
+            ),
+          ]),
+        ],
+        query: '链表',
+        limit: 1,
+      );
+
+      expect(references.single.text, contains('链表在这里结束'));
+      expect(references.single.text, isNot(contains('新的小节')));
+    });
+
+    test('uses the parent text as bounded context for one child hit', () {
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'c1',
+              '第二句给出结论。',
+              sortOrder: 1,
+              parentId: 'p1',
+              parentTitle: '第二章 › 因果',
+              parentText: '第一句给出条件。第二句给出结论。',
+            ),
+          ]),
+        ],
+        query: '结论',
+      );
+
+      expect(references.single.text, contains('第一句给出条件'));
+      expect(references.single.text, contains('第二句给出结论'));
+      expect(references.single.title, '第二章 › 因果');
+    });
+
+    test(
+      'keeps a complete bounded parent instead of cutting earlier facts',
+      () {
+        final earlyFact = '示例仓库设有三个独立货架。';
+        final parentText =
+            '$earlyFact${'这一段是虚构的仓库布置和货架编号说明。' * 18}'
+            '示例仓库使用独立货架，每个货架对应一个配送区域；'
+            '某个货架盘点时，其他货架仍然可以继续出库。';
+        final references = retriever.retrieve(
+          books: [
+            _book([
+              _chunk(
+                'c1',
+                parentText,
+                sortOrder: 1,
+                parentId: 'p1',
+                parentTitle: '第三章 › 示例仓库',
+                parentText: parentText,
+              ),
+            ]),
+          ],
+          query: '仓库 货架 盘点',
+        );
+
+        expect(parentText.length, greaterThan(380));
+        expect(parentText.length, lessThan(ContextRetriever.maxBlockChars));
+        expect(references.single.text, startsWith(earlyFact));
+        expect(references.single.text, contains('其他货架仍然可以继续出库'));
+      },
+    );
+
+    test('uses a complete parent even when sibling expansion was selected', () {
+      final earlyFact = '示例仓库设有三个独立货架。';
+      final parentText =
+          '$earlyFact${'这一段是虚构的仓库布置和货架编号说明。' * 18}'
+          '示例仓库使用独立货架，每个货架对应一个配送区域。';
+      final splitAt = parentText.indexOf('示例仓库使用');
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'c1',
+              parentText.substring(0, splitAt + 12),
+              sortOrder: 1,
+              parentId: 'p1',
+              parentTitle: '第三章 › 示例仓库',
+              parentText: parentText,
+            ),
+            _chunk(
+              'c2',
+              parentText.substring(splitAt + 12),
+              sortOrder: 2,
+              parentId: 'p1',
+              parentTitle: '第三章 › 示例仓库',
+              parentText: parentText,
+            ),
+          ]),
+        ],
+        query: '仓库 货架 盘点',
+      );
+
+      expect(references.single.text, startsWith(earlyFact));
+      expect(references.single.text, contains('示例仓库使用'));
+    });
+
+    test('uses a bounded parent window when the parent exceeds the budget', () {
+      final childText = '${'前文铺垫。' * 156}链表定位词在这里。';
+      final continuation = '续文完整答案就在这里。${'后文说明。' * 200}';
+      final parentText = '$childText$continuation';
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'c1',
+              childText,
+              sortOrder: 1,
+              parentId: 'p1',
+              parentTitle: '第四章 › 链表',
+              parentText: parentText,
+            ),
+            _chunk(
+              'c2',
+              continuation,
+              sortOrder: 2,
+              parentId: 'p1',
+              parentTitle: '第四章 › 链表',
+              parentText: parentText,
+            ),
+          ]),
+        ],
+        query: '链表定位词',
+        limit: 1,
+      );
+
+      expect(parentText.length, greaterThan(ContextRetriever.maxBlockChars));
+      expect(references.single.text, contains('链表定位词'));
+      expect(references.single.text, contains('续文完整答案就在这里'));
+      expect(
+        references.single.text.length,
+        lessThanOrEqualTo(ContextRetriever.maxBlockChars),
+      );
+    });
+
+    test(
+      'deduplicates a complete parent selected by non-adjacent siblings',
+      () {
+        final first = 'needle ${List.filled(125, 'a ').join()}';
+        final middle = List.filled(400, 'b ').join();
+        final last = 'needle ${List.filled(125, 'c ').join()}';
+        final parentText = '$first\n$middle\n$last';
+        final lastOffset = parentText.indexOf(last);
+
+        final references = retriever.retrieve(
+          books: [
+            _book([
+              _chunk(
+                'first',
+                first,
+                sortOrder: 0,
+                locator: _markdownRange(0, first.length),
+                parentId: 'p1',
+                parentText: parentText,
+                parentLocator: _markdownRange(0, parentText.length),
+              ),
+              _chunk(
+                'middle',
+                middle,
+                sortOrder: 1,
+                locator: _markdownRange(
+                  first.length + 1,
+                  first.length + 1 + middle.length,
+                ),
+                parentId: 'p1',
+                parentText: parentText,
+                parentLocator: _markdownRange(0, parentText.length),
+              ),
+              _chunk(
+                'last',
+                last,
+                sortOrder: 2,
+                locator: _markdownRange(lastOffset, lastOffset + last.length),
+                parentId: 'p1',
+                parentText: parentText,
+                parentLocator: _markdownRange(0, parentText.length),
+              ),
+            ]),
+          ],
+          query: 'needle',
+        );
+
+        expect(parentText.length, lessThan(ContextRetriever.maxBlockChars));
+        expect(references, hasLength(1));
+        expect(references.single.text, parentText);
+      },
+    );
+
+    test('keeps non-overlapping evidence from adjacent siblings', () {
+      final first = 'alpha ${List.filled(60, 'a ').join()}';
+      final second = 'beta ${List.filled(60, 'b ').join()}';
+      final middle = List.filled(1500, 'm ').join();
+      final parentText = '$first\n$middle\n$second';
+      final secondOffset = parentText.indexOf(second);
+
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'first',
+              first,
+              sortOrder: 0,
+              locator: _markdownRange(0, first.length),
+              parentId: 'p1',
+              parentTitle: '长父块',
+              parentText: parentText,
+              parentLocator: _markdownRange(0, parentText.length),
+            ),
+            _chunk(
+              'second',
+              second,
+              sortOrder: 1,
+              locator: _markdownRange(
+                secondOffset,
+                secondOffset + second.length,
+              ),
+              parentId: 'p1',
+              parentTitle: '长父块',
+              parentText: parentText,
+              parentLocator: _markdownRange(0, parentText.length),
+            ),
+          ]),
+        ],
+        query: 'alpha beta',
+      );
+
+      expect(parentText.length, greaterThan(ContextRetriever.maxBlockChars));
+      expect(references, hasLength(2));
+      expect(references[0].text, contains('alpha'));
+      expect(references[0].text, isNot(contains('beta')));
+      expect(references[1].text, contains('beta'));
+      expect(references[1].text, isNot(contains('alpha')));
+      expect(references[1].locator?.chapterOffset, secondOffset - 180);
+    });
+
+    test('splits overlapping same-parent windows between their hits', () {
+      final before = List.filled(300, 'q').join();
+      final first = 'alpha ${List.filled(20, 'a ').join()}';
+      final second = 'beta ${List.filled(20, 'b ').join()}';
+      final secondTargetOffset = before.length + 1700;
+      final between = List.filled(
+        secondTargetOffset - before.length - first.length,
+        'm',
+      ).join();
+      final after = List.filled(900, 'z ').join();
+      final parentText = '$before$first$between$second$after';
+      final firstOffset = parentText.indexOf(first);
+      final secondOffset = parentText.indexOf(second);
+
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'first',
+              first,
+              sortOrder: 0,
+              locator: _markdownRange(firstOffset, firstOffset + first.length),
+              parentId: 'p1',
+              parentTitle: '重叠父块',
+              parentText: parentText,
+              parentLocator: _markdownRange(0, parentText.length),
+            ),
+            _chunk(
+              'second',
+              second,
+              sortOrder: 1,
+              locator: _markdownRange(
+                secondOffset,
+                secondOffset + second.length,
+              ),
+              parentId: 'p1',
+              parentTitle: '重叠父块',
+              parentText: parentText,
+              parentLocator: _markdownRange(0, parentText.length),
+            ),
+          ]),
+        ],
+        query: 'alpha beta',
+      );
+
+      expect(parentText.length, greaterThan(ContextRetriever.maxBlockChars));
+      expect(references, hasLength(2));
+      expect(references[0].text, contains('alpha'));
+      expect(references[1].text, contains('beta'));
+      expect(
+        references[0].locator!.chapterEndOffset,
+        lessThanOrEqualTo(references[1].locator!.chapterOffset!),
+      );
+    });
+
+    test('uses the stored offset when the child text occurs twice', () {
+      final repeated = 'needle ${List.filled(150, 'x ').join()}';
+      final parentText =
+          'FIRST_CONTEXT $repeated ${List.filled(1800, 'z').join()} '
+          'SECOND_CONTEXT $repeated';
+      final actualOffset = parentText.lastIndexOf(repeated);
+
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'repeated',
+              repeated,
+              locator: _markdownRange(
+                actualOffset,
+                actualOffset + repeated.length,
+              ),
+              parentId: 'p1',
+              parentText: parentText,
+              parentLocator: _markdownRange(0, parentText.length),
+            ),
+          ]),
+        ],
+        query: 'needle',
+      );
+
+      final reference = references.single;
+      expect(parentText.indexOf(repeated), isNot(actualOffset));
+      expect(reference.text, contains('SECOND_CONTEXT'));
+      expect(reference.text, isNot(contains('FIRST_CONTEXT')));
+      expect(reference.locator?.chapterOffset, actualOffset - 180);
+      expect(
+        reference.locator?.chapterEndOffset,
+        reference.locator!.chapterOffset! + reference.text.length,
+      );
+    });
+
+    test('never splits a surrogate pair at the window end', () {
+      final prefix = 'needle ${List.filled(1592, 'a').join()}';
+      final parentText = '$prefix😀${List.filled(300, 'b').join()}';
+
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'unicode-end',
+              prefix.substring(0, 300),
+              locator: _markdownRange(0, 300),
+              parentId: 'p1',
+              parentText: parentText,
+              parentLocator: _markdownRange(0, parentText.length),
+            ),
+          ]),
+        ],
+        query: 'needle',
+      );
+
+      final text = references.single.text;
+      final lastUnit = text.codeUnitAt(text.length - 1);
+      expect(lastUnit >= 0xD800 && lastUnit <= 0xDBFF, isFalse);
+      expect(text.length, lessThanOrEqualTo(ContextRetriever.maxBlockChars));
+    });
+
+    test('never splits a surrogate pair at the window start', () {
+      final beforeEmoji = List.filled(179, 'a').join();
+      final afterEmoji = List.filled(179, 'b').join();
+      final childText = 'needle ${List.filled(500, 'c ').join()}';
+      final parentText =
+          '$beforeEmoji😀$afterEmoji$childText${List.filled(3000, 'd').join()}';
+      const childOffset = 360;
+      const rawWindowStart = childOffset - 180;
+
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'unicode-start',
+              childText,
+              locator: _markdownRange(
+                childOffset,
+                childOffset + childText.length,
+              ),
+              parentId: 'p1',
+              parentText: parentText,
+              parentLocator: _markdownRange(0, parentText.length),
+            ),
+          ]),
+        ],
+        query: 'needle',
+      );
+
+      final reference = references.single;
+      final text = reference.text;
+      final firstUnit = text.codeUnitAt(0);
+      final secondUnit = text.codeUnitAt(1);
+      expect(parentText.codeUnitAt(rawWindowStart) >= 0xDC00, isTrue);
+      expect(firstUnit >= 0xD800 && firstUnit <= 0xDBFF, isTrue);
+      expect(secondUnit >= 0xDC00 && secondUnit <= 0xDFFF, isTrue);
+      expect(reference.locator?.chapterOffset, rawWindowStart - 1);
+      expect(text.length, lessThanOrEqualTo(ContextRetriever.maxBlockChars));
+    });
+
     test('no book takes more than two slots', () {
       final references = retriever.retrieve(
         books: [
@@ -223,6 +689,146 @@ void main() {
       final text = references.single.text;
       expect(text.length, lessThanOrEqualTo(ContextRetriever.maxBlockChars));
       expect(text, contains('链表'));
+    });
+
+    test('legacy excerpt keeps a whole surrogate and shifts its locator', () {
+      final text =
+          '${List.filled(209, 'a').join()}😀'
+          '${List.filled(179, 'b').join()}needle '
+          '${List.filled(500, 'c').join()}';
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'legacy-start',
+              text,
+              locator: _markdownRange(1000, 1000 + text.length),
+            ),
+          ]),
+        ],
+        query: 'needle',
+      );
+
+      final reference = references.single;
+      final start = reference.startOffset!;
+      final end = reference.endOffset!;
+      expect(reference.text.codeUnitAt(0), inInclusiveRange(0xD800, 0xDBFF));
+      expect(reference.text.codeUnitAt(1), inInclusiveRange(0xDC00, 0xDFFF));
+      expect(text.substring(start, end), reference.text);
+      expect(end - start, reference.text.length);
+      expect(reference.locator?.chapterOffset, 1000 + start);
+      expect(reference.locator?.chapterEndOffset, 1000 + end);
+      expect(
+        reference.text.length,
+        lessThanOrEqualTo(ContextRetriever.maxBlockChars),
+      );
+    });
+
+    test('legacy excerpt never ends on a high surrogate', () {
+      final text =
+          'needle ${List.filled(1592, 'a').join()}😀'
+          '${List.filled(300, 'b').join()}';
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'legacy-end',
+              text,
+              locator: _markdownRange(1000, 1000 + text.length),
+            ),
+          ]),
+        ],
+        query: 'needle',
+      );
+
+      final reference = references.single;
+      final end = reference.endOffset!;
+      expect(
+        reference.text.codeUnitAt(reference.text.length - 1),
+        isNot(inInclusiveRange(0xD800, 0xDBFF)),
+      );
+      expect(text.substring(reference.startOffset!, end), reference.text);
+      expect(end - reference.startOffset!, reference.text.length);
+      expect(reference.locator?.chapterEndOffset, 1000 + end);
+      expect(
+        reference.text.length,
+        lessThanOrEqualTo(ContextRetriever.maxBlockChars),
+      );
+    });
+
+    test('ambiguous PDF fallback keeps a whole start surrogate', () {
+      final text =
+          '${List.filled(209, 'a').join()}😀'
+          '${List.filled(179, 'b').join()}needle '
+          '${List.filled(500, 'c').join()}';
+      final parentText = '$text\n$text';
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'pdf-start',
+              text,
+              page: 3,
+              parentId: 'parent',
+              parentText: parentText,
+              parentLocator: ReadingLocator.pdf(page: 3),
+            ),
+          ]),
+        ],
+        query: 'needle',
+      );
+
+      final reference = references.single;
+      final start = reference.startOffset!;
+      final end = reference.endOffset!;
+      expect(reference.text.codeUnitAt(0), inInclusiveRange(0xD800, 0xDBFF));
+      expect(text.substring(start, end), reference.text);
+      expect(end - start, reference.text.length);
+      expect(reference.locator?.type, ReadingLocatorType.pdf);
+      expect(reference.locator?.page, 3);
+      expect(reference.locator?.chapterOffset, isNull);
+      expect(
+        reference.text.length,
+        lessThanOrEqualTo(ContextRetriever.maxBlockChars),
+      );
+    });
+
+    test('ambiguous PDF fallback never ends on a high surrogate', () {
+      final text =
+          'needle ${List.filled(1592, 'a').join()}😀'
+          '${List.filled(300, 'b').join()}';
+      final parentText = '$text\n$text';
+      final references = retriever.retrieve(
+        books: [
+          _book([
+            _chunk(
+              'pdf-end',
+              text,
+              page: 3,
+              parentId: 'parent',
+              parentText: parentText,
+              parentLocator: ReadingLocator.pdf(page: 3),
+            ),
+          ]),
+        ],
+        query: 'needle',
+      );
+
+      final reference = references.single;
+      final start = reference.startOffset!;
+      final end = reference.endOffset!;
+      expect(
+        reference.text.codeUnitAt(reference.text.length - 1),
+        isNot(inInclusiveRange(0xD800, 0xDBFF)),
+      );
+      expect(text.substring(start, end), reference.text);
+      expect(end - start, reference.text.length);
+      expect(reference.locator?.type, ReadingLocatorType.pdf);
+      expect(reference.locator?.page, 3);
+      expect(
+        reference.text.length,
+        lessThanOrEqualTo(ContextRetriever.maxBlockChars),
+      );
     });
   });
 }

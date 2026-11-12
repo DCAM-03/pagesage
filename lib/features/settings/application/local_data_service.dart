@@ -18,6 +18,7 @@ final class LocalDataService {
 
   Future<void> deleteAllLocalData() async {
     final databaseFile = await _appPaths.databaseFile();
+    await _clearSecrets?.call();
     await _database.transaction(() async {
       await _database.customStatement('DELETE FROM search_chunks');
       await _database.customStatement('DELETE FROM ai_conversations');
@@ -33,7 +34,6 @@ final class LocalDataService {
       await _database.customStatement('DELETE FROM books');
       await _database.customStatement('DELETE FROM app_settings');
     });
-    await _clearSecrets?.call();
     await _database.close();
     await _deleteFile(databaseFile);
     await _deleteFile(File('${databaseFile.path}-wal'));

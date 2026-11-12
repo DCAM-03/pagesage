@@ -1,6 +1,6 @@
 interface:
-  display_name: "Project Coordination"
-  short_description: "Coordinate delivery and independent contract closure"
-  default_prompt: "Use $project-coordination to plan, dispatch, or independently accept this project work with a Contract Closure Matrix."
+  display_name: "PageSage 交付协调"
+  short_description: "按实际风险组织纵向交付、任务续接、契约核对和已授权的协作"
+  default_prompt: "使用 $project-coordination 推进当前交付，核对任务边界、依赖和实际验证结果。"
 policy:
   allow_implicit_invocation: true

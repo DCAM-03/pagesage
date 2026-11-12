@@ -26,7 +26,8 @@
 ## 实现任务
 
 - [x] 定义 `TaskModel` 和 `TaskStatus`。
-- [x] 实现 `TaskQueue`，串行或有限并发执行任务。
+- [x] 多文件导入由用例逐项 await，任务状态、取消与启动恢复由现有 repository / registry / controller 管理；未接入的 `TaskQueue` 骨架已于 2026-11-09 清理。
+- [x] OCR 页码范围任务由跨任务 FIFO 单 worker 串行执行；排队任务可暂停/取消，并持有本进程取消令牌以避免启动恢复误判。
 - [x] 实现 `TaskDao` 持久化任务状态。
 - [x] 导入任务写入 queued/running/indexing/done/failed/cancelled。
 - [ ] 索引任务支持重建单书和重建全部。
@@ -40,9 +41,10 @@
 
 ## 涉及模块和文件
 
-- `lib/core/tasks/task_queue.dart`
+- `lib/core/tasks/task_cancellation.dart`
 - `lib/core/tasks/task_models.dart`
 - `lib/core/tasks/task_runner.dart`
+- `lib/features/ocr/application/ocr_job_controller.dart`
 - `lib/core/database/daos/task_dao.dart`
 - `lib/features/tasks/presentation/task_center_page.dart`
 - `lib/features/import/application/import_use_case.dart`
@@ -88,3 +90,10 @@
 - 依赖：TASK-02 import_tasks，TASK-03 导入，TASK-14 索引，TASK-17 导出备份。
 - 风险：长任务并发写数据库可能导致状态错乱，需要事务和状态机保护。
 - 风险：取消任务如果不清理临时文件会产生孤立文件。
+
+## 2026-11-11 增量：OCR 任务控制
+
+- 部分完成或失败 OCR 任务提供“重试失败页”，只重置 failed 页；完成页不会再次 OCR。
+- 非运行中 OCR 任务提供“清除 OCR 结果”，确认后清理关联页文本、任务 checkpoint、内存缓存与搜索索引。
+- 清除不会删除原 PDF、原生文字、笔记或批注；运行中任务必须先暂停或取消。
+- 证据：OCR/任务/索引器 53 项聚焦、全仓 961 项通过 / 5 skipped、静态分析无问题；Linux 安装 bundle 一致。

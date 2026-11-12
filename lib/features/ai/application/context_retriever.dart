@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 
+import '../../../domain/ai/ai_context_reference.dart';
+import '../../../domain/books/reading_position.dart';
 import '../../../domain/search/search_models.dart';
-import 'ai_context_reference.dart';
 
 /// Picks the passages of a book that a question is about.
 ///
@@ -113,18 +114,26 @@ final class ContextRetriever {
       return const [];
     }
 
-    final selected = _select(hits, allById: allById, limit: limit);
+    final selected = _select(
+      hits,
+      allById: allById,
+      limit: limit,
+      terms: terms,
+    );
     return [
-      for (final hit in selected)
+      for (final group in selected)
         AiContextReference(
-          id: 'retrieved-${hit.chunk.id}',
-          title: _titleFor(hit.chunk),
-          text: _excerpt(hit.chunk.text, terms),
-          locator: hit.chunk.locator,
-          bookTitle: hit.bookTitle,
+          id: 'retrieved-${group.primary.chunk.id}',
+          title: _titleForGroup(group),
+          text: group.context.text,
+          locator: group.context.locator,
+          bookTitle: group.primary.bookTitle,
           // Set only when the passage came from another book: reaching the
           // current book's passages is a scroll, not a navigation.
-          bookId: hit.bookTitle == null ? null : hit.bookId,
+          bookId: group.primary.bookTitle == null ? null : group.primary.bookId,
+          sourceKey: group.context.sourceKey,
+          startOffset: group.context.startOffset,
+          endOffset: group.context.endOffset,
         ),
     ];
   }
@@ -286,10 +295,11 @@ final class ContextRetriever {
   /// 3. **Adjacency collapse.** Two nearby chunks out of one book are usually
   ///    one passage already taken, and offering them separately spends two of
   ///    five slots on text the reader has already seen.
-  List<_Candidate> _select(
+  List<_CandidateGroup> _select(
     List<_Candidate> hits, {
     required Map<String, _Candidate> allById,
     required int limit,
+    required List<String> terms,
   }) {
     final ranked = [...hits]
       ..sort((a, b) {
@@ -302,12 +312,12 @@ final class ContextRetriever {
         return a.chunk.sortOrder.compareTo(b.chunk.sortOrder);
       });
 
-    final chosen = <_Candidate>[];
+    final chosen = <_CandidateGroup>[];
     final perBook = <String, int>{};
 
-    void add(_Candidate candidate) {
-      chosen.add(candidate);
-      perBook[candidate.bookId] = (perBook[candidate.bookId] ?? 0) + 1;
+    void add(_CandidateGroup group) {
+      chosen.add(group);
+      perBook[group.primary.bookId] = (perBook[group.primary.bookId] ?? 0) + 1;
     }
 
     // A table of contents mentions a topic a dozen times without saying
@@ -327,47 +337,196 @@ final class ContextRetriever {
       // Already covered: either this chunk was pulled in as a neighbour, or a
       // chunk next to it was selected and the reader would be seeing the same
       // passage twice.
-      if (chosen.any((picked) => picked.chunk.id == hit.chunk.id)) {
-        continue;
-      }
       if (chosen.any(
-        (picked) =>
-            picked.bookId == hit.bookId &&
-            (picked.position - hit.position).abs() <= 1,
+        (group) =>
+            group.members.any((member) => member.chunk.id == hit.chunk.id),
       )) {
         continue;
       }
-
-      add(hit);
-
-      if (chosen.length >= limit) break;
-      // Pull in the following chunk when the match sits at the very end of
-      // this one: the sentence that explains it is in the next.
-      final next = allById[_neighbourId(hit.chunk.id)];
+      final members = <_Candidate>[hit];
+      final next = _nextSibling(hit, allById);
       if (next != null &&
-          next.bookId == hit.bookId &&
-          next.score == 0 &&
-          !chosen.any((picked) => picked.chunk.id == next.chunk.id)) {
-        add(
-          _Candidate(
-            bookId: next.bookId,
-            bookTitle: next.bookTitle,
-            chunk: next.chunk,
-            position: next.position,
-            score: 0,
-          ),
-        );
+          _matchNearEnd(hit.chunk.text, terms) &&
+          hit.chunk.text.length + next.chunk.text.length <= maxBlockChars) {
+        members.add(next);
       }
+      final context = _contextForGroup(
+        primary: hit,
+        members: members,
+        terms: terms,
+      );
+      if (chosen.any(
+        (group) =>
+            group.context.hasSourceRange &&
+            context.hasSourceRange &&
+            group.context.sourceKey == context.sourceKey &&
+            group.context.contains(context.focusStart, context.focusEnd),
+      )) {
+        continue;
+      }
+      if (hit.chunk.parentId == null &&
+          chosen.any(
+            (group) =>
+                group.primary.bookId == hit.bookId &&
+                group.primary.chunk.parentId == null &&
+                (group.primary.position - hit.position).abs() <= 1,
+          )) {
+        continue;
+      }
+      add(_CandidateGroup(primary: hit, members: members, context: context));
     }
 
     // Reading order within each book reads more naturally than score order,
     // and the reader is going to check these against the book.
     chosen.sort((a, b) {
-      final byBook = a.bookId.compareTo(b.bookId);
+      final byBook = a.primary.bookId.compareTo(b.primary.bookId);
       if (byBook != 0) return byBook;
-      return a.chunk.sortOrder.compareTo(b.chunk.sortOrder);
+      return a.primary.chunk.sortOrder.compareTo(b.primary.chunk.sortOrder);
     });
-    return chosen;
+    // A complete parent selected by two different child hits is one source
+    // range, not two references. Keep distinct, non-overlapping windows.
+    final deduplicated = <_CandidateGroup>[];
+    for (final group in chosen) {
+      final duplicate = deduplicated.indexWhere(
+        (existing) =>
+            existing.context.hasSourceRange &&
+            group.context.hasSourceRange &&
+            existing.context.sourceKey == group.context.sourceKey &&
+            existing.context.startOffset == group.context.startOffset &&
+            existing.context.endOffset == group.context.endOffset,
+      );
+      if (duplicate >= 0) {
+        final existing = deduplicated[duplicate];
+        deduplicated[duplicate] = _CandidateGroup(
+          primary: existing.primary,
+          members: [
+            ...existing.members,
+            for (final member in group.members)
+              if (!existing.members.any(
+                (existingMember) => existingMember.chunk.id == member.chunk.id,
+              ))
+                member,
+          ],
+          context: existing.context,
+        );
+      } else {
+        deduplicated.add(group);
+      }
+    }
+    return _removeOverlappingWindows(deduplicated);
+  }
+
+  List<_CandidateGroup> _removeOverlappingWindows(
+    List<_CandidateGroup> groups,
+  ) {
+    final consolidated = <_CandidateGroup>[];
+    for (final group in groups) {
+      var candidate = group;
+      var covered = false;
+      for (var index = 0; index < consolidated.length; index += 1) {
+        final existing = consolidated[index];
+        if (!existing.context.hasSourceRange ||
+            !candidate.context.hasSourceRange ||
+            existing.context.sourceKey != candidate.context.sourceKey ||
+            existing.context.sourceText == null ||
+            candidate.context.sourceText == null) {
+          continue;
+        }
+        final existingStart = existing.context.startOffset!;
+        final existingEnd = existing.context.endOffset!;
+        final candidateStart = candidate.context.startOffset!;
+        final candidateEnd = candidate.context.endOffset!;
+        final overlapStart = math.max(existingStart, candidateStart);
+        final overlapEnd = math.min(existingEnd, candidateEnd);
+        if (overlapStart >= overlapEnd) {
+          continue;
+        }
+
+        if (candidate.context.contains(
+          existing.context.focusStart,
+          existing.context.focusEnd,
+        )) {
+          if (candidate.context.contains(existingStart, existingEnd)) {
+            consolidated[index] = candidate;
+            covered = true;
+            break;
+          }
+          continue;
+        }
+        if (existing.context.contains(
+          candidate.context.focusStart,
+          candidate.context.focusEnd,
+        )) {
+          covered = true;
+          break;
+        }
+
+        if (existing.context.focusStart <= candidate.context.focusStart) {
+          final boundary = math.max(
+            candidateStart,
+            (existing.context.focusEnd + candidate.context.focusStart) ~/ 2,
+          );
+          if (boundary <= existingStart || boundary >= candidateEnd) {
+            continue;
+          }
+          consolidated[index] = _rebaseGroup(existing, existingStart, boundary);
+          candidate = _rebaseGroup(candidate, boundary, candidateEnd);
+        } else {
+          final boundary = math.max(
+            existingStart,
+            (candidate.context.focusEnd + existing.context.focusStart) ~/ 2,
+          );
+          consolidated[index] = _rebaseGroup(existing, boundary, existingEnd);
+          candidate = _rebaseGroup(candidate, candidateStart, boundary);
+        }
+      }
+      if (!covered) {
+        consolidated.add(candidate);
+      }
+    }
+    return consolidated;
+  }
+
+  _CandidateGroup _rebaseGroup(_CandidateGroup group, int start, int end) {
+    final context = group.context;
+    final sourceText = context.sourceText;
+    if (sourceText == null ||
+        start < 0 ||
+        end > sourceText.length ||
+        end <= start) {
+      return group;
+    }
+    start = _safeStartBoundary(sourceText, start);
+    end = _safeEndBoundary(sourceText, end);
+    if (end <= start) {
+      return group;
+    }
+    final sourceLocator = context.sourceLocator;
+    final locator =
+        sourceLocator != null && sourceLocator.type != ReadingLocatorType.pdf
+        ? _windowLocator(
+            parentText: sourceText,
+            parentLocator: sourceLocator,
+            childLocator: context.locator,
+            start: start,
+            end: end,
+          )
+        : context.locator;
+    return _CandidateGroup(
+      primary: group.primary,
+      members: group.members,
+      context: _ContextSlice(
+        text: sourceText.substring(start, end),
+        locator: locator,
+        sourceKey: context.sourceKey,
+        startOffset: start,
+        endOffset: end,
+        focusStart: context.focusStart,
+        focusEnd: context.focusEnd,
+        sourceText: sourceText,
+        sourceLocator: sourceLocator,
+      ),
+    );
   }
 
   /// Whether a chunk is dense enough in dots and numbers to be navigation.
@@ -389,18 +548,302 @@ final class ContextRetriever {
     return dots / text.length > 0.15 && digits / text.length > 0.03;
   }
 
-  /// The id of the chunk that follows [id] in the same book.
-  ///
-  /// `SearchIndexer` builds ids as `<bookId>:<format>:<pageOrChapter>:<index>`;
-  /// only the trailing position is bumped here, and a miss simply returns an
-  /// id nobody has, which the caller treats as "no neighbour".
-  String _neighbourId(String id) {
-    final parts = id.split(':');
-    if (parts.length < 2) return id;
-    final last = int.tryParse(parts.last);
-    if (last == null) return id;
-    parts[parts.length - 1] = '${last + 1}';
-    return parts.join(':');
+  _Candidate? _nextSibling(_Candidate hit, Map<String, _Candidate> allById) {
+    final parentId = hit.chunk.parentId;
+    if (parentId == null) {
+      return null;
+    }
+    _Candidate? next;
+    for (final candidate in allById.values) {
+      if (candidate.bookId != hit.bookId ||
+          candidate.chunk.parentId != parentId ||
+          candidate.position <= hit.position) {
+        continue;
+      }
+      if (next == null || candidate.position < next.position) {
+        next = candidate;
+      }
+    }
+    return next;
+  }
+
+  bool _matchNearEnd(String text, List<String> terms) {
+    final lower = text.toLowerCase();
+    var lastEnd = -1;
+    for (final term in terms) {
+      final index = lower.lastIndexOf(term);
+      if (index >= 0) {
+        final end = index + term.length;
+        if (end > lastEnd) {
+          lastEnd = end;
+        }
+      }
+    }
+    return lastEnd >= 0 && text.length - lastEnd <= 160;
+  }
+
+  _ContextSlice _contextForGroup({
+    required _Candidate primary,
+    required List<_Candidate> members,
+    required List<String> terms,
+  }) {
+    final chunk = primary.chunk;
+    final parentText = chunk.parentText;
+    if (parentText != null && parentText.trim().isNotEmpty) {
+      final childOffset = _childOffsetInParent(chunk, parentText);
+      final sourceKey = '${chunk.bookId ?? ''}|${chunk.parentId ?? chunk.id}';
+      if (parentText.length <= maxBlockChars) {
+        return _ContextSlice(
+          text: parentText,
+          locator: chunk.parentLocator,
+          sourceKey: sourceKey,
+          startOffset: 0,
+          endOffset: parentText.length,
+          focusStart: childOffset ?? 0,
+          focusEnd: childOffset == null
+              ? parentText.length
+              : math.min(parentText.length, childOffset + chunk.text.length),
+          sourceText: parentText,
+          sourceLocator: chunk.parentLocator,
+        );
+      }
+      if (childOffset != null) {
+        final range = _boundedWindow(parentText, childOffset);
+        return _ContextSlice(
+          text: parentText.substring(range.start, range.end),
+          locator: _windowLocator(
+            parentText: parentText,
+            parentLocator: chunk.parentLocator,
+            childLocator: chunk.locator,
+            start: range.start,
+            end: range.end,
+          ),
+          sourceKey: sourceKey,
+          startOffset: range.start,
+          endOffset: range.end,
+          focusStart: childOffset,
+          focusEnd: math.min(
+            parentText.length,
+            childOffset + chunk.text.length,
+          ),
+          sourceText: parentText,
+          sourceLocator: chunk.parentLocator,
+        );
+      }
+    }
+
+    if (members.length == 1) {
+      final excerpt = _excerpt(chunk.text, terms);
+      return _ContextSlice(
+        text: excerpt.text,
+        locator: _windowLocator(
+          parentText: chunk.text,
+          parentLocator: chunk.locator,
+          childLocator: chunk.locator,
+          start: excerpt.start,
+          end: excerpt.end,
+        ),
+        sourceKey: '${chunk.bookId ?? ''}|${chunk.id}',
+        startOffset: excerpt.start,
+        endOffset: excerpt.end,
+        focusStart: excerpt.start,
+        focusEnd: excerpt.end,
+        sourceText: chunk.text,
+        sourceLocator: chunk.locator,
+      );
+    }
+    final joined = members.map((member) => member.chunk.text).join('\n\n');
+    final locators = members
+        .map((member) => member.chunk.locator)
+        .whereType<ReadingLocator>()
+        .toList(growable: false);
+    final locator = locators.length == members.length
+        ? _combineLocators(locators)
+        : chunk.locator;
+    final excerpt = _excerpt(joined, terms);
+    return _ContextSlice(
+      text: excerpt.text,
+      locator: locator,
+      sourceKey: null,
+      startOffset: null,
+      endOffset: null,
+      focusStart: 0,
+      focusEnd: joined.length,
+    );
+  }
+
+  int? _childOffsetInParent(SearchChunk chunk, String parentText) {
+    final childText = chunk.text.trim();
+    if (childText.isEmpty) {
+      return null;
+    }
+
+    final childLocator = chunk.locator;
+    final parentLocator = chunk.parentLocator;
+    final childOffset = childLocator?.chapterOffset;
+    final parentOffset = parentLocator?.chapterOffset;
+    if (childLocator != null &&
+        parentLocator != null &&
+        childLocator.type == parentLocator.type &&
+        childLocator.href == parentLocator.href &&
+        childLocator.chapterIndex == parentLocator.chapterIndex &&
+        childOffset != null &&
+        parentOffset != null &&
+        childOffset >= parentOffset) {
+      final candidate = childOffset - parentOffset;
+      if (candidate <= parentText.length - childText.length &&
+          parentText.substring(candidate, candidate + childText.length) ==
+              childText) {
+        return candidate;
+      }
+    }
+
+    // PDF does not store a character offset. A unique occurrence is still
+    // unambiguous; when it repeats, keep the exact child locator instead of
+    // guessing that the first occurrence is the hit.
+    final first = parentText.indexOf(childText);
+    if (first >= 0 && parentText.indexOf(childText, first + 1) < 0) {
+      return first;
+    }
+    return null;
+  }
+
+  ({int start, int end}) _boundedWindow(String text, int focusOffset) {
+    return _safeWindow(
+      text,
+      start: math.max(0, focusOffset - _excerptLead),
+      end: text.length,
+    );
+  }
+
+  ({int start, int end}) _safeWindow(
+    String text, {
+    required int start,
+    required int end,
+  }) {
+    var safeStart = start.clamp(0, end);
+    if (safeStart > 0 &&
+        safeStart < text.length &&
+        _isLowSurrogate(text.codeUnitAt(safeStart)) &&
+        _isHighSurrogate(text.codeUnitAt(safeStart - 1))) {
+      safeStart -= 1;
+    }
+    var safeEnd = math.min(end, safeStart + maxBlockChars);
+    if (safeEnd > 0 &&
+        safeEnd < text.length &&
+        _isHighSurrogate(text.codeUnitAt(safeEnd - 1)) &&
+        _isLowSurrogate(text.codeUnitAt(safeEnd))) {
+      safeEnd -= 1;
+    }
+    return (start: safeStart, end: safeEnd);
+  }
+
+  int _safeStartBoundary(String text, int offset) {
+    if (offset > 0 &&
+        offset < text.length &&
+        _isLowSurrogate(text.codeUnitAt(offset)) &&
+        _isHighSurrogate(text.codeUnitAt(offset - 1))) {
+      return offset - 1;
+    }
+    return offset;
+  }
+
+  int _safeEndBoundary(String text, int offset) {
+    if (offset > 0 &&
+        offset < text.length &&
+        _isHighSurrogate(text.codeUnitAt(offset - 1)) &&
+        _isLowSurrogate(text.codeUnitAt(offset))) {
+      return offset - 1;
+    }
+    return offset;
+  }
+
+  ReadingLocator? _windowLocator({
+    required String parentText,
+    required ReadingLocator? parentLocator,
+    required ReadingLocator? childLocator,
+    required int start,
+    required int end,
+  }) {
+    final chapterOffset = parentLocator?.chapterOffset;
+    if (parentLocator != null &&
+        parentLocator.type != ReadingLocatorType.pdf &&
+        chapterOffset != null) {
+      final previewEnd = _safeEndBoundary(
+        parentText,
+        math.min(end, start + 80),
+      );
+      final excerpt = parentText.substring(start, previewEnd).trim();
+      return ReadingLocator(
+        type: parentLocator.type,
+        href: parentLocator.href,
+        chapterIndex: parentLocator.chapterIndex,
+        chapterOffset: chapterOffset + start,
+        chapterEndOffset: chapterOffset + end,
+        progress: parentLocator.progress,
+        excerpt: excerpt.isEmpty ? null : '$excerpt…',
+        folderFileLocal: parentLocator.folderFileLocal,
+      );
+    }
+    // A PDF locator has no character offset from which to rebuild the window
+    // start. The child locator is exact for the match inside that window.
+    return childLocator ?? parentLocator;
+  }
+
+  bool _isHighSurrogate(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
+
+  bool _isLowSurrogate(int unit) => unit >= 0xDC00 && unit <= 0xDFFF;
+
+  ReadingLocator? _combineLocators(List<ReadingLocator> locators) {
+    final first = locators.first;
+    if (locators.every(
+      (locator) =>
+          locator.type == first.type &&
+          locator.href == first.href &&
+          locator.chapterIndex == first.chapterIndex,
+    )) {
+      if (first.type == ReadingLocatorType.pdf) {
+        if (locators.every((locator) => locator.page == first.page)) {
+          return ReadingLocator.pdf(
+            page: first.page ?? 1,
+            scrollOffset: locators
+                .map((locator) => locator.scrollOffset ?? 0)
+                .reduce((a, b) => a < b ? a : b),
+            zoom: first.zoom ?? 1,
+            progress: locators
+                .map((locator) => locator.progress)
+                .reduce((a, b) => a < b ? a : b),
+            excerpt: first.excerpt,
+          );
+        }
+        return first;
+      }
+      return ReadingLocator(
+        type: first.type,
+        href: first.href,
+        chapterIndex: first.chapterIndex,
+        chapterOffset: locators
+            .map((locator) => locator.chapterOffset ?? 0)
+            .reduce((a, b) => a < b ? a : b),
+        chapterEndOffset: locators
+            .map((locator) => locator.chapterEndOffset ?? 0)
+            .reduce((a, b) => a > b ? a : b),
+        progress: locators
+            .map((locator) => locator.progress)
+            .reduce((a, b) => a < b ? a : b),
+        excerpt: first.excerpt,
+        folderFileLocal: first.folderFileLocal,
+      );
+    }
+    return first;
+  }
+
+  String _titleForGroup(_CandidateGroup group) {
+    final parentTitle = group.primary.chunk.parentTitle?.trim();
+    if (parentTitle != null && parentTitle.isNotEmpty) {
+      return parentTitle;
+    }
+    return _titleFor(group.primary.chunk);
   }
 
   String _titleFor(SearchChunk chunk) {
@@ -417,26 +860,38 @@ final class ContextRetriever {
   /// character chunk whose match is on its last line reads as unrelated text
   /// followed by the thing they asked about, if they scroll far enough. A
   /// lead of ~15% keeps the sentence before the match for context.
-  String _excerpt(String text, List<String> terms) {
-    final trimmed = text.trim();
-    if (trimmed.length <= _excerptLead + 200) return trimmed;
-    final lower = trimmed.toLowerCase();
-    var first = -1;
-    for (final term in terms) {
-      final index = lower.indexOf(term);
-      if (index >= 0 && (first < 0 || index < first)) {
-        first = index;
+  ({String text, int start, int end}) _excerpt(
+    String text,
+    List<String> terms,
+  ) {
+    final trimmedStart = text.length - text.trimLeft().length;
+    final trimmedEnd = text.length - text.trimRight().length;
+    final sourceEnd = text.length - trimmedEnd;
+    final trimmed = text.substring(trimmedStart, sourceEnd);
+    if (trimmed.isEmpty) {
+      return (text: '', start: trimmedStart, end: trimmedStart);
+    }
+    var start = trimmedStart;
+    if (trimmed.length > _excerptLead + 200) {
+      final lower = trimmed.toLowerCase();
+      var first = -1;
+      for (final term in terms) {
+        final index = lower.indexOf(term);
+        if (index >= 0 && (first < 0 || index < first)) {
+          first = index;
+        }
+      }
+      // Already near the top: nothing to cut from the front.
+      if (first > _excerptLead) {
+        start = trimmedStart + first - _excerptLead;
       }
     }
-    // Already near the top: nothing to cut from the front.
-    if (first <= _excerptLead) {
-      return trimmed.length <= maxBlockChars
-          ? trimmed
-          : trimmed.substring(0, maxBlockChars).trim();
-    }
-    final start = first - _excerptLead;
-    final end = (start + maxBlockChars).clamp(0, trimmed.length);
-    return trimmed.substring(start, end).trim();
+    final range = _safeWindow(text, start: start, end: sourceEnd);
+    return (
+      text: text.substring(range.start, range.end),
+      start: range.start,
+      end: range.end,
+    );
   }
 
   /// Characters kept before the first match in an excerpt.
@@ -554,4 +1009,55 @@ final class _Candidate {
   /// Index in the book's chunk list, used for adjacency checks.
   final int position;
   final double score;
+}
+
+final class _CandidateGroup {
+  const _CandidateGroup({
+    required this.primary,
+    required this.members,
+    required this.context,
+  });
+
+  final _Candidate primary;
+  final List<_Candidate> members;
+  final _ContextSlice context;
+}
+
+final class _ContextSlice {
+  const _ContextSlice({
+    required this.text,
+    required this.locator,
+    required this.sourceKey,
+    required this.startOffset,
+    required this.endOffset,
+    required this.focusStart,
+    required this.focusEnd,
+    this.sourceText,
+    this.sourceLocator,
+  });
+
+  final String text;
+  final ReadingLocator? locator;
+  final String? sourceKey;
+  final int? startOffset;
+  final int? endOffset;
+  final int focusStart;
+  final int focusEnd;
+  final String? sourceText;
+  final ReadingLocator? sourceLocator;
+
+  bool get hasSourceRange =>
+      sourceKey != null &&
+      startOffset != null &&
+      endOffset != null &&
+      endOffset! > startOffset!;
+
+  bool contains(int start, int end) {
+    final rangeStart = startOffset;
+    final rangeEnd = endOffset;
+    return rangeStart != null &&
+        rangeEnd != null &&
+        rangeStart <= start &&
+        end <= rangeEnd;
+  }
 }

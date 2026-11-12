@@ -127,15 +127,13 @@ final class AppThemeModeSelector extends ConsumerWidget {
   }
 }
 
-/// Small caption for the quick theme sheet, explaining why the page colour and
-/// the interface colour are two settings.
 final class AppThemeHint extends StatelessWidget {
   const AppThemeHint({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Text(
-      '上面的主题只改书页纸色；界面颜色用下面这一行单独设置。',
+      '阅读主题同时应用于书页、目录和阅读工具；下面的设置用于书库等其他页面。',
       style: Theme.of(context).textTheme.bodySmall?.copyWith(
         color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),

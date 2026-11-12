@@ -1,7 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_annotation_repository.dart';
 import 'package:pagesage/domain/annotations/annotation.dart';
 import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
@@ -81,6 +81,22 @@ void main() {
     expect(restored.locator.type, ReadingLocatorType.pdf);
     expect(restored.locator.selectionRects, hasLength(1));
     expect(restored.locator.selectionRects.single.y, 0.34);
+  });
+
+  test('unlinking a note keeps the annotation and clears note_id', () async {
+    final annotation = await repository.saveAnnotation(
+      bookId: 'book-1',
+      locator: ReadingLocator.epub(chapterIndex: 2),
+      selectedText: 'keep this mark',
+    );
+    await repository.linkNote(annotationId: annotation.id, noteId: 'note-1');
+
+    await repository.unlinkNote(annotationId: annotation.id);
+
+    final restored = (await repository.getByBook('book-1')).single;
+    expect(restored.id, annotation.id);
+    expect(restored.selectedText, 'keep this mark');
+    expect(restored.noteId, isNull);
   });
 
   test('returns all annotations for export', () async {

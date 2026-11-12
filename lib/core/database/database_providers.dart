@@ -16,11 +16,22 @@ import '../../domain/books/tag.dart';
 import '../../domain/notes/note.dart';
 import '../../domain/search/search_models.dart';
 import '../../features/settings/application/local_data_service.dart';
+import '../../features/ocr/application/ocr_page_store.dart';
+import '../../features/ocr/application/stored_ocr_search_source.dart';
 import '../security/security_keys.dart';
 import 'app_database.dart';
 import 'drift_book_repository.dart';
-import 'drift_content_repositories.dart';
+import 'drift_category_repository.dart';
+import 'drift_tag_repository.dart';
+import 'drift_bookmark_repository.dart';
+import 'drift_annotation_repository.dart';
+import 'drift_note_repository.dart';
+import 'drift_search_repository.dart';
+import 'drift_ai_profile_repository.dart';
+import 'drift_ai_conversation_repository.dart';
+import 'drift_task_repository.dart';
 import 'drift_settings_repository.dart';
+import 'drift_ocr_job_repository.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
   final database = AppDatabase();
@@ -99,6 +110,7 @@ final bookRepositoryProvider = Provider<BookRepository>((ref) {
     aiConversationDao: ref.watch(aiConversationDaoProvider),
     searchDao: ref.watch(searchDaoProvider),
     ocrPageDao: ref.watch(ocrPageDaoProvider),
+    ocrJobRepository: DriftOcrJobRepository(ref.watch(appDatabaseProvider)),
   );
 });
 
@@ -137,10 +149,22 @@ final noteRepositoryProvider = Provider<NoteRepository>((ref) {
 });
 
 final aiSettingsRepositoryProvider = Provider<AiSettingsRepository>((ref) {
-  return DriftAiSettingsRepository(
-    ref.watch(settingsDaoProvider),
+  return ref.watch(_driftAiProfileRepositoryProvider);
+});
+
+final aiProfileRepositoryProvider = Provider<AiProfileRepository>((ref) {
+  return ref.watch(_driftAiProfileRepositoryProvider);
+});
+
+final _driftAiProfileRepositoryProvider = Provider<DriftAiProfileRepository>((
+  ref,
+) {
+  final repository = DriftAiProfileRepository(
+    ref.watch(appDatabaseProvider),
     ref.watch(secureStoreProvider),
   );
+  ref.onDispose(repository.dispose);
+  return repository;
 });
 
 final aiConversationRepositoryProvider = Provider<AiConversationRepository>((
@@ -166,14 +190,24 @@ final searchIndexerProvider = Provider<SearchIndexer>((ref) {
   return SearchIndexer(
     searchRepository: ref.watch(searchRepositoryProvider),
     bookRepository: ref.watch(bookRepositoryProvider),
+    ocrSearchSource: StoredOcrSearchSource(
+      DriftOcrPageStore(ref.watch(ocrPageDaoProvider)),
+    ),
   );
 });
 
 final localDataServiceProvider = Provider<LocalDataService>((ref) {
+  final database = ref.watch(appDatabaseProvider);
+  final secureStore = ref.watch(secureStoreProvider);
   return LocalDataService(
-    database: ref.watch(appDatabaseProvider),
+    database: database,
     appPaths: ref.watch(appPathsProvider),
-    clearSecrets: () =>
-        ref.read(secureStoreProvider).delete(aiApiKeyStorageKey),
+    clearSecrets: () async {
+      final profiles = await database.select(database.aiProfiles).get();
+      for (final profile in profiles) {
+        await secureStore.delete(aiProfileApiKeyStorageKey(profile.id));
+      }
+      await secureStore.delete(aiApiKeyStorageKey);
+    },
   );
 });

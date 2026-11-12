@@ -39,7 +39,7 @@ annotations 0/1 - 1 notes
 | title | text | not null | 展示标题 |
 | original_title | text | nullable | 原始元数据标题 |
 | author | text | nullable | 作者 |
-| format | text | not null | epub/pdf |
+| format | text | not null | epub/pdf/md |
 | original_format | text | nullable | 原始文件格式 |
 | original_file_path | text | nullable | 用户选择的原始路径 |
 | library_file_path | text | not null | 应用内文件路径 |
@@ -68,6 +68,7 @@ annotations 0/1 - 1 notes
 - `file_hash` 默认用于重复检测。
 - `title` 可以被用户修改。
 - `original_title` 不随用户修改。
+- Markdown 目录书的 `file_hash` 以规范化目录路径为指纹，不读取目录内容；`library_file_path` 指向用户选择的目录，应用不写入该目录，也不在移除书籍时删除它。
 
 ## 4. categories
 
@@ -154,12 +155,28 @@ PDF locator：
 }
 ```
 
+Markdown locator：
+
+```json
+{
+  "type": "markdown",
+  "href": "notes/chapter-01.md",
+  "chapterIndex": 3,
+  "chapterOffset": 1280,
+  "chapterEndOffset": 1368,
+  "progress": 0.42,
+  "excerpt": "nearby text",
+  "folderFileLocal": true
+}
+```
+
 规则：
 
 - 每本书只有一条主记录。
 - 阅读器位置变化 debounce 保存。
 - 应用进入后台时立即保存。
-- EPUB 分页、搜索跳转和标注优先使用 `href + chapterIndex + chapterOffset/chapterEndOffset` 恢复位置；旧数据没有 offset 时继续回退到 chapter/progress/excerpt。
+- EPUB/Markdown 分页、搜索跳转和标注优先使用 `href + chapterIndex + chapterOffset/chapterEndOffset` 恢复位置；旧数据没有 offset 时继续回退到 chapter/progress/excerpt。Markdown 的 `cfi` 字段为空。
+- 文件夹书的 `href` 是文件夹内相对路径，`chapterIndex` / `chapterOffset` 属于该文件，`progress` 是按文件大小加权的全书进度；`folderFileLocal: true` 标记这套 P7 语义。旧版「合并文档」locator 在打开时映射一次，映射失败则提示重新选择目录，不静默跳错章节。
 
 ## 8. bookmarks
 
@@ -206,7 +223,8 @@ PDF locator：
 
 规则：
 
-- 删除 annotation 不一定删除 note，需要用户确认。
+- 删除 annotation 时，若关联 note 的类型为 `comment`，该批注随标注一并删除；普通关联笔记保留，并在确认框中说明。
+- 只删除批注时保留 annotation，并清空其 `note_id`；从笔记页删除关联笔记也执行同样的解除关联。
 - EPUB 高亮定位以 CFI 为主。
 - PDF 高亮坐标后续增强。
 - 图片批注的主键是锚点里的「哪张图」（页 + 序号 + 资源名），坐标只作兜底；不要用矩形当主键，同一张图在不同 `/Rotate` 下矩形不同。
@@ -226,7 +244,7 @@ PDF locator：
 | content | text | not null | Markdown 内容 |
 | source_text | text | nullable | 原文 |
 | locator | text | nullable | JSON locator |
-| note_type | text | not null | text/excerpt/ai/question |
+| note_type | text | not null | text/excerpt/comment/ai/question |
 | created_at | integer | not null | 创建时间 |
 | updated_at | integer | not null | 更新时间 |
 
@@ -235,6 +253,8 @@ PDF locator：
 - `idx_notes_book_id`
 - `idx_notes_annotation_id`
 - `idx_notes_updated_at`
+
+`comment` 表示附着在划线上的短批注，复用既有文本列，无 schema 变更。只有该类型会被当作标注批注展示和删除；其它关联笔记仍按普通笔记保留。
 
 ## 11. ai_conversations
 
@@ -253,6 +273,7 @@ PDF locator：
 | source_text | text | nullable | 选中文本 |
 | note_id | text | nullable | 保存为笔记后的 id |
 | thread_id | text | nullable | 同一上下文下的多轮对话归组；升级前旧行为 null，按单轮展示 |
+| context_snapshot | text | nullable | v1 JSON：范围、截断状态与有序结构化来源，含引用 id、正文、书籍、locator、来源区间；null 表示旧记录未保存来源快照 |
 | created_at | integer | not null | 创建时间 |
 
 索引：
@@ -269,6 +290,9 @@ PDF locator：
 
 - schemaVersion 3 → 4 新增 `thread_id`（`migrator.addColumn`），不清数据。
 - 旧会话不回填线程 id：事后按时间或文本相近度归组只是猜测，猜错比不归组更糟。
+- schemaVersion 6 → 7 新增 nullable `context_snapshot`，保留原始上下文、线程及笔记关联；旧记录不伪造分段来源。
+- 同一创建时间的轮次以 SQLite rowid 保持保存先后顺序。恢复同书同线程的完整历史后从最新轮继续；无 thread_id 的历史单轮使用其 id 作为后续续问的线程键。
+- 每轮快照保存当时实际发送的引用正文，不以重新检索替代历史证据；编辑正文后清除精确来源区间，保留原定位用于查看来源。文件日后发生变化时，历史快照不保证仍与当前文件逐字一致。
 
 ## 12. search_chunks
 
@@ -278,6 +302,7 @@ PDF locator：
 | --- | --- | --- | --- |
 | id | text | primary key | UUID |
 | book_id | text | nullable | 书籍 |
+| parent_id | text | nullable | 所属父块的稳定索引 id；旧行或非正文来源为空 |
 | source_type | text | not null | book/note/bookmark/ai |
 | source_id | text | nullable | 来源 id |
 | locator | text | nullable | JSON locator |
@@ -290,8 +315,30 @@ PDF locator：
 索引：
 
 - `idx_search_chunks_book_id`
+- `idx_search_chunks_parent_id`
 - `idx_search_chunks_source_type`
 - `idx_search_chunks_source_id`
+
+### 12.1 search_parent_chunks
+
+用途：保存可选的父块上下文。父块不进入 FTS；正文检索仍以 `search_chunks` 子块为入口，命中后通过 `parent_id` 读取同一父块。
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| id | text | primary key | 稳定父块 id（同一书、格式和索引位置） |
+| book_id | text | nullable | 书籍 |
+| source_type | text | not null | 当前为 book |
+| source_id | text | nullable | 父块索引键 |
+| locator | text | nullable | 父块 locator JSON |
+| title | text | nullable | 章节标题路径 |
+| text | text | not null | 父块原文 |
+| sort_order | integer | default 0 | 排序 |
+| created_at | integer | not null | 创建时间 |
+| updated_at | integer | not null | 更新时间 |
+
+索引：`idx_search_parent_chunks_book_id`。
+
+迁移：schemaVersion 5 → 6 新建 `search_parent_chunks`，并给 `search_chunks` 增加可空 `parent_id`。旧索引不猜测父块关联，保留原搜索能力；重建索引后才会生成父子块。删除书籍时同时删除父块与子块。
 
 FTS5：
 

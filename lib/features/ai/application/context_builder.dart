@@ -60,9 +60,6 @@ final class ContextBuilder {
     return _boundedChapter(selected: selected.trim(), source: text.trim());
   }
 
-  /// Whether [text] has to be cut before a request can carry it.
-  static bool exceedsBudget(String text) => text.trim().length > maxSourceChars;
-
   /// A whole page or chapter, trimmed to fit a request rather than rejected.
   ///
   /// A long chapter runs past any sane request size, and the panel used to

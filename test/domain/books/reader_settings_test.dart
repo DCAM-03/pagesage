@@ -16,6 +16,7 @@ void main() {
       pdfZoomMode: PdfZoomMode.fitWidth,
       themePreset: ReaderThemePreset.night,
       reduceMotion: true,
+      desktopContextTab: ReaderContextTab.ai,
     );
 
     final restored = ReaderSettings.fromJsonText(settings.toJsonText());
@@ -31,6 +32,11 @@ void main() {
     expect(restored.pdfZoomMode, PdfZoomMode.fitWidth);
     expect(restored.themePreset, ReaderThemePreset.night);
     expect(restored.reduceMotion, isTrue);
+    expect(restored.desktopContextTab, ReaderContextTab.ai);
+    expect(
+      settings.copyWith(fontSize: 19).desktopContextTab,
+      ReaderContextTab.ai,
+    );
   });
 
   test('restores defaults for older reader settings json', () {
@@ -48,6 +54,13 @@ void main() {
     expect(restored.pdfScale, 1.0);
     expect(restored.pdfZoomMode, PdfZoomMode.fitWidth);
     expect(restored.reduceMotion, isFalse);
+    expect(restored.desktopContextTab, ReaderContextTab.search);
+    expect(
+      ReaderSettings.fromJsonText(
+        '{"desktopContextTab":"future-tab"}',
+      ).desktopContextTab,
+      ReaderContextTab.search,
+    );
   });
 
   test('serializes additional warm eye-care and ink themes', () {

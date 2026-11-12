@@ -1,8 +1,8 @@
+import '../../../domain/ai/ai_context_reference.dart';
 import '../../../domain/books/book.dart';
 import '../../../domain/books/book_repository.dart';
 import '../../../domain/search/search_models.dart';
 import 'ai_context_range.dart';
-import 'ai_context_reference.dart';
 import 'context_retriever.dart';
 
 /// What retrieval found, and what to tell the reader when it found nothing.

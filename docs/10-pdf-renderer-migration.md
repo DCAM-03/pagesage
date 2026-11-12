@@ -190,6 +190,7 @@ lib/renderers/pdf/pdf_canvas_view.dart           WebView 视图的替代者（�
 lib/renderers/pdf/pdf_canvas_renderer.dart      页面解释、缓存、导出位图
 lib/renderers/pdf/pdf_page_tint.dart            主题纸色与夜间滤镜
 lib/renderers/pdf/pdf_annotation_lines.dart     F-02 跨行裁剪（自 bridge.js 移植）
+lib/renderers/pdf/pdf_annotation_colors.dart    PDF 昼夜标注色板
 lib/renderers/pdf/pdf_outline.dart              大纲
 lib/renderers/pdf/pdf_links.dart                GoTo / URI 链接
 lib/renderers/pdf/pdf_renderer_view.dart        已删除
@@ -206,7 +207,7 @@ lib/features/reader/presentation/reader_page.dart PDF 分支直接构造 PdfCanv
 ### 7.2 未验证项（迁移期间需覆盖）
 
 - 大文档（数百页）滚动性能 — Linux 已有基线（§23.4），**真机帧时间仍缺**
-- 注释 overlay 在 Canvas 上的叠加与命中测试 — 已实现并有 widget 测试；旋转页投影待 S8 手工确认
+- 注释 overlay 在 Canvas 上的叠加与命中测试 — 已实现并有 widget 测试；旋转页投影与夜间配色见 `11-pdf-canvas-implementation-plan.md` §26
 - 扫描版 PDF（现有 OCR 链路与新渲染器的衔接）— 导出接口已就绪；Linux 无真实 OCR 引擎，真实识别待 Android/Windows
 - Windows / Android 平台回归 — **待 S8 手工矩阵**（Linux 可用不代表另两端无回归）
 - 表格、公式、复杂版式的还原度 — 待人工目视

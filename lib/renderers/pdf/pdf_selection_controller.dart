@@ -19,7 +19,7 @@ typedef PagePoint = ({double x, double y});
 /// PDF page space (y-up, points). Everything here converts widget -> page before
 /// calling `pdf_graphics`, and page -> widget when reporting rects, because the
 /// renderer contract (`ReaderRect`) is expressed in the reader's own space.
-final class PdfSelectionController {
+final class PdfSelectionController implements PdfTextSelectionSource {
   PdfSelectionController({
     required this.renderer,
     required this.pageIndex,
@@ -32,6 +32,7 @@ final class PdfSelectionController {
   });
 
   final PdfCanvasRenderer renderer;
+  @override
   final int pageIndex;
   final PdfRect box;
 
@@ -156,11 +157,15 @@ final class PdfSelectionController {
   /// A drag across pages tracks one caret per page and orders them in reading
   /// order, so this deliberately ignores the pointer's closeness to the page
   /// edge: the page the pointer is over is the page the caret belongs to.
-  PdfCaret? caretAt(Offset widgetPoint) {
+  @override
+  PdfCaret? caretAt(Offset widgetPoint, {bool snapToNearest = true}) {
     // Overshoot the page by a few points: a drag reaching for the end of a
     // paragraph runs off the bottom edge, and the caret should follow to the
     // edge rather than stop dead outside it.
-    final page = clampedPagePoint(widgetPoint, overshoot: _dragOvershoot);
+    final page = clampedPagePoint(
+      widgetPoint,
+      overshoot: snapToNearest ? _dragOvershoot : 0,
+    );
     if (page == null) return null;
     final index = caretIndexAt(
       page.x,
@@ -172,7 +177,7 @@ final class PdfSelectionController {
       // outside the page to scroll toward the next one. Declining there would
       // freeze the selection mid-document; snapping to the nearest line keeps
       // it moving and is what every desktop reader does.
-      snapToNearest: true,
+      snapToNearest: snapToNearest,
     );
     if (index < 0) return null;
     return (page: pageIndex, index: index);
@@ -463,10 +468,8 @@ final class PdfSelectionController {
     return run.startIndex + (logicalFraction * run.text.length).round();
   }
 
-  /// The length of this page's extracted text, for cross-page segment maths.
-  int get textLength => _text.text.length;
-
   /// The extracted text of this page.
+  @override
   String get pageText => _text.text;
 
   RendererTextSelected _buildEvent(int start, int end, String text) {
@@ -577,6 +580,7 @@ final class PdfSelectionController {
   /// Cross-page selections clip their per-page ranges before calling this, so
   /// the same geometry that produces a single-page selection produces each
   /// page's share of a multi-page one.
+  @override
   List<ReaderRect> readerRectsFor(int start, int end) =>
       _readerRectsFor(start, end);
 
@@ -584,6 +588,7 @@ final class PdfSelectionController {
   ///
   /// Selection chrome (drag feedback, touch handles) is painted inside the
   /// page box, so it works in the same view coordinates as pointer input.
+  @override
   List<Rect> viewRectsFor(int start, int end) => [
     for (final rect in _readerRectsFor(start, end))
       Rect.fromLTWH(

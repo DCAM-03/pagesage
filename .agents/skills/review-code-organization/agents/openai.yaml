@@ -1,6 +1,6 @@
 interface:
-  display_name: "Review Code Organization"
-  short_description: "Audit project structure and language conventions"
-  default_prompt: "Use $review-code-organization to assess this repository structure and propose incremental improvements."
+  display_name: "PageSage 代码组织审查"
+  short_description: "评估 Flutter 功能归属、领域依赖、Riverpod 状态及渲染边界"
+  default_prompt: "使用 $review-code-organization 检查相关模块的职责与依赖，提出有证据的最小改进。"
 policy:
   allow_implicit_invocation: true

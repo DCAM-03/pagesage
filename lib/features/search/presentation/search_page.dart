@@ -14,7 +14,7 @@ import '../../../domain/books/book.dart';
 import '../../../domain/books/reading_position.dart';
 import '../../../domain/notes/note.dart';
 import '../../../domain/search/search_models.dart';
-import '../../../renderers/epub/epub_jump.dart';
+import '../../../domain/books/locator_excerpt.dart';
 import '../../ai/application/ai_providers.dart';
 import '../../library/application/library_providers.dart';
 
@@ -251,6 +251,11 @@ final class _SearchPageState extends ConsumerState<SearchPage> {
 
   void _debouncedSearch() {
     _debounceTimer?.cancel();
+    _searchGeneration += 1;
+    setState(() {
+      _future = null;
+      _previewResult = null;
+    });
     _debounceTimer = Timer(const Duration(milliseconds: 250), () {
       if (!mounted) {
         return;
@@ -262,6 +267,7 @@ final class _SearchPageState extends ConsumerState<SearchPage> {
   void _search() {
     _debounceTimer?.cancel();
     final query = _controller.text.trim();
+    final generation = ++_searchGeneration;
     if (query.isEmpty) {
       setState(() {
         _future = null;
@@ -269,7 +275,6 @@ final class _SearchPageState extends ConsumerState<SearchPage> {
       });
       return;
     }
-    final generation = ++_searchGeneration;
     setState(() {
       _future = _loadResults(query, generation);
       _previewResult = null;
@@ -848,6 +853,10 @@ final class _SearchResultTile extends ConsumerWidget {
                       Row(
                         children: [
                           _SearchMetaChip(label: _searchTypeLabel(result.type)),
+                          if (result.isOcrText) ...[
+                            const SizedBox(width: AppSpacing.x2),
+                            const _SearchMetaChip(label: '识别文本'),
+                          ],
                           if (result.locator != null) ...[
                             const SizedBox(width: AppSpacing.x2),
                             Flexible(

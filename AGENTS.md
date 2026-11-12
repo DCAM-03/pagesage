@@ -7,7 +7,7 @@ PageSage is a local-first, cross-platform intelligent reader for EPUB, PDF, and 
 Primary product constraints:
 
 - Local-first by default: books, notes, annotations, progress, and search data stay on device.
-- AI is user-triggered only. Never upload a whole book automatically, and always make the AI context range explicit.
+- AI requests must make their context range explicit. Never upload a whole book automatically.
 - The MVP is the reading loop: import EPUB/PDF, open, read, save progress, reopen at the saved location.
 - Markdown reading was added by explicit request (2026-11-05, `docs/tasks/markdown-reading.md`): a single `.md` file is a book, and a folder of Markdown files is also one book (P2, read in place — see the exception below). Its reading, progress, and search behavior follow the EPUB path rather than getting its own reader.
 - Read-in-place exception: a folder book is a view over the folder the writer keeps, so it is **not** copied into the library. PageSage never writes to that folder, and removing the book never deletes it. Every other import still copies into the library directory.
@@ -29,6 +29,29 @@ Read the project docs before changing behavior:
 - `docs/assets-plan.md` for image asset policy.
 
 If implementation and docs disagree, pause and update the relevant doc or call out the mismatch before expanding the behavior.
+
+## Project Skills
+
+当前仓库的工作流入口位于 `.agents/skills/`，按本次任务选择，不要求每次加载全部 skill：
+
+| 任务 | Skill |
+| --- | --- |
+| 剩余工作、下一步、继续既有任务 | `workstream-triage` |
+| Dart/Flutter 功能实现、修复、编码规范 | `pagesage-dart-engineering` |
+| 多阶段交付、任务拆分、已授权的协作和交接 | `project-coordination` |
+| 选择验证、证明修复、检查构建安装证据 | `validation-harness` |
+| 领域模型、Drift、定位、渲染事件或导出契约变更 | `api-contract-sync` |
+| Dart 变更质量审查、异步和资源泄漏检查 | `code-quality-audit` |
+| 目录、模块归属和依赖方向审查 | `review-code-organization` |
+
+先读取所选 skill 的 `SKILL.md`，再按其路由读取相关 reference。状态依据沿用
+`docs/implementation-status.md`、`docs/tasks/` 与相关设计文档；不要求创建
+`PROJECT_TASKS.md`、`PROJECT_PROFILE.md` 或迁移历史任务格式。
+
+现存 `iam-*` skill 及未被上述入口引用的 IAM 模板、脚本和 reference 保留作历史参考，
+不适用于 PageSage 的默认任务；不得据此套用 Java/Go、三角色会话、模型降档、
+自动提交或 IAM 专用机器门禁。本项目不因引入工作流而取得创建会话、委派、提交、
+推送、修改全局配置等额外授权。
 
 ## Architecture Rules
 
@@ -55,13 +78,19 @@ If implementation and docs disagree, pause and update the relevant doc or call o
 ## Verification
 
 - `flutter pub get`
-- `dart format .`
+- `dart format <changed Dart files>`; use `dart format .` only for an intentional repository-wide formatting pass.
 - `flutter analyze`
-- `flutter test`
+- `flutter test <named test files> --concurrency=4`; choose affected behavior and dependents first. Use the full suite for an explicit full regression or release gate.
 - `flutter doctor -v` for environment checks.
+- After every app-affecting change, immediately rebuild and reinstall the local Linux build with `bash tool/install_linux.sh`; do not wait for a separate reminder. Do not launch a new window, and leave any already-running PageSage instance alone while telling the user to restart it.
 - For platform changes, manually verify at least Windows plus one Android target when available.
 
 For renderer work, add focused manual validation with real EPUB/PDF samples: open, navigate, receive location events, save progress, close, and reopen at the same location.
+
+Tests and builds run silently in the existing tool session, with bounded logs and no new terminal or app window.
+Use offscreen widget captures for layout checks; do not start desktop `integration_test` or a visible app without
+explicit user authorization. Record unavailable real-window or platform checks as unverified. Skills/docs-only
+changes do not require rebuilding the app; the reinstall rule still applies to every app-affecting change.
 
 ## MCP Usage
 
@@ -82,6 +111,7 @@ MCP tools may require a new agent session after installation or configuration ch
 ## Collaboration Rules
 
 - Keep documentation in Chinese unless a file already uses English for a specific purpose. Code identifiers should remain English.
+- 完成汇报聚焦本轮结果和影响交付的未决问题；已解决内容不作例行提醒。用户追问或出现新证据时按需说明相关变化。批注中引用的旧回复用于定位评论，不自动成为新增待办。
 - Keep implementation changes scoped to the current milestone. For now, prefer M0 and M1 work unless the user asks otherwise.
 - Do not overwrite `docs/` when running Flutter scaffolding. If using `flutter create .`, inspect generated file conflicts first.
 - Prefer small, verifiable slices: one feature path, its data model, and its tests/manual checks.

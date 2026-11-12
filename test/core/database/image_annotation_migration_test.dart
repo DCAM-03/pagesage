@@ -1,7 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_annotation_repository.dart';
 import 'package:pagesage/domain/annotations/annotation.dart';
 import 'package:pagesage/domain/annotations/image_anchor.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
@@ -36,6 +36,9 @@ void main() {
         sqlite.execute('ALTER TABLE annotations DROP COLUMN target');
         sqlite.execute('ALTER TABLE annotations DROP COLUMN image_anchor');
         sqlite.execute('PRAGMA user_version = 4');
+        sqlite.execute(
+          'ALTER TABLE ai_conversations DROP COLUMN context_snapshot',
+        );
 
         final database = AppDatabase.forTesting(
           NativeDatabase.opened(sqlite, closeUnderlyingOnClose: true),
@@ -121,6 +124,27 @@ void main() {
         throwsArgumentError,
       );
     });
+
+    for (final rect in [
+      const ReaderRect(x: 0, y: 0, width: 0, height: 0.5),
+      const ReaderRect(x: 0, y: 0, width: 0.5, height: 0),
+      const ReaderRect(x: 0, y: 0, width: -0.1, height: 0.5),
+      const ReaderRect(x: 0, y: 0, width: double.nan, height: 0.5),
+      const ReaderRect(x: double.infinity, y: 0, width: 0.5, height: 0.5),
+    ]) {
+      test('invalid image geometry is rejected: ${rect.toJson()}', () async {
+        await expectLater(
+          repository.saveAnnotation(
+            bookId: 'book-1',
+            locator: ReadingLocator.pdf(page: 2),
+            selectedText: '',
+            imageAnchor: PdfImageAnchor(page: 2, rect: rect),
+          ),
+          throwsArgumentError,
+        );
+        expect(await repository.getByBook('book-1'), isEmpty);
+      });
+    }
 
     test(
       'updating a text annotation into an image one flips its target',

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pagesage/app/pagesage_app.dart';
+import 'package:pagesage/app/theme/app_theme.dart';
 import 'package:pagesage/app/widgets/app_chrome.dart';
 import 'package:pagesage/core/database/database_providers.dart';
 import 'package:pagesage/core/files/app_paths.dart';
@@ -31,12 +33,379 @@ import 'package:pagesage/domain/search/search_models.dart';
 import 'package:pagesage/features/ai/application/ai_context_range.dart';
 import 'package:pagesage/features/ocr/application/ocr_providers.dart';
 import 'package:pagesage/features/reader/presentation/reader_page.dart';
+import 'package:pagesage/features/reader/presentation/reader_desktop_toolbar.dart';
+import 'package:pagesage/features/reader/presentation/reader_pdf_toolbar.dart';
+import 'package:pagesage/features/reader/presentation/reader_renderer_host.dart';
 import 'package:pagesage/features/library/presentation/library_page.dart';
+import 'package:pagesage/features/notes/presentation/notes_page.dart';
 import 'package:pagesage/features/search/presentation/search_page.dart';
+import 'package:pagesage/features/settings/application/ai_settings_providers.dart';
 import 'package:pagesage/renderers/common/renderer_event.dart';
 import 'package:pagesage/renderers/pdf/pdf_page_image_source.dart';
 
+import 'support/reader_workbench_capture.dart';
+
 void main() {
+  setUpAll(() async {
+    if (captureWorkbench) {
+      await loadWorkbenchCaptureFonts();
+    }
+  });
+  testWidgets('compact notes open inline and return to the list', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(700, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final note = Note(
+      id: 'inline-note',
+      bookId: 'notes-book',
+      title: '页内笔记详情',
+      content: '用于验证内嵌详情，不应打开弹层。',
+      noteType: NoteType.text,
+      createdAt: 1,
+      updatedAt: 1,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          noteRepositoryProvider.overrideWithValue(
+            _FakeNoteRepository(notes: [note]),
+          ),
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [_libraryBook(id: 'notes-book', title: '笔记所属书籍')],
+            ),
+          ),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+        ],
+        child: const MaterialApp(home: NotesPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('页内笔记详情'), findsOneWidget);
+    await tester.tap(find.text('页内笔记详情'));
+    await tester.pumpAndSettle();
+    expect(find.text('用于验证内嵌详情，不应打开弹层。'), findsOneWidget);
+    expect(find.byType(Dialog), findsNothing);
+    expect(find.text('返回笔记列表'), findsOneWidget);
+    await tester.tap(find.text('返回笔记列表'));
+    await tester.pumpAndSettle();
+    expect(find.text('页内笔记详情'), findsOneWidget);
+    expect(find.text('返回笔记列表'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('desktop notes are grouped under book categories', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final category = BookCategory(
+      id: 'study-folder',
+      name: '学习资料',
+      sortOrder: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    );
+    final note = Note(
+      id: 'grouped-note',
+      bookId: 'study-book',
+      title: '分类中的笔记',
+      content: '分类树下的笔记内容。',
+      noteType: NoteType.excerpt,
+      createdAt: 1,
+      updatedAt: 1,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          noteRepositoryProvider.overrideWithValue(
+            _FakeNoteRepository(notes: [note]),
+          ),
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [
+                _libraryBook(
+                  id: 'study-book',
+                  title: '学习用书',
+                  categoryId: category.id,
+                ),
+              ],
+            ),
+          ),
+          categoryRepositoryProvider.overrideWithValue(
+            _FakeCategoryRepository(categories: [category]),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+        ],
+        child: const MaterialApp(home: NotesPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('学习资料'), findsOneWidget);
+    await tester.tap(find.text('学习资料'));
+    await tester.pumpAndSettle();
+    expect(find.text('学习用书'), findsOneWidget);
+    expect(find.text('分类中的笔记'), findsNWidgets(2));
+    await tester.tap(find.byTooltip('查看此文件夹的笔记'));
+    await tester.pumpAndSettle();
+    expect(find.text('分类中的笔记'), findsNWidgets(2));
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  Future<void> pumpToolbarReader(
+    WidgetTester tester, {
+    BookFormat format = BookFormat.pdf,
+    BookmarkRepository? bookmarks,
+    ReaderSettings initialSettings = const ReaderSettings(
+      desktopTocOpen: false,
+    ),
+  }) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 960);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final settings = _RecordingSettingsRepository(initialSettings);
+    addTearDown(settings.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [
+                _libraryBook(
+                  id: 'toolbar-reader',
+                  title: '阅读工具栏验证',
+                  format: format,
+                  progress: 0.2,
+                ),
+              ],
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(settings),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            bookmarks ?? const _FakeBookmarkRepository(),
+          ),
+          annotationRepositoryProvider.overrideWithValue(
+            const _FakeAnnotationRepository(),
+          ),
+          noteRepositoryProvider.overrideWithValue(const _FakeNoteRepository()),
+          searchRepositoryProvider.overrideWithValue(
+            const _FakeSearchRepository(),
+          ),
+          aiSettingsRepositoryProvider.overrideWithValue(
+            const _FakeAiSettingsRepository(),
+          ),
+          aiConversationRepositoryProvider.overrideWithValue(
+            const _FakeAiConversationRepository(),
+          ),
+          readerRendererHostProvider.overrideWithValue(
+            (config) =>
+                _FakeRendererHost(config: config, event: const RendererReady()),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          builder: (context, child) =>
+              RepaintBoundary(key: workbenchCaptureKey, child: child!),
+          home: const ReaderPage(bookId: 'toolbar-reader'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      MediaQuery.sizeOf(tester.element(find.byType(ReaderPage))).width,
+      1440,
+    );
+  }
+
+  for (final format in [BookFormat.epub, BookFormat.markdown, BookFormat.pdf]) {
+    testWidgets('desktop $format toolbar connects panels bookmark and theme', (
+      tester,
+    ) async {
+      final bookmarks = _RecordingBookmarkRepository();
+      await pumpToolbarReader(tester, format: format, bookmarks: bookmarks);
+      final toolbar = find.byType(ReaderDesktopToolbar);
+      Finder action(String label) =>
+          find.descendant(of: toolbar, matching: find.byTooltip(label));
+      await tester.tap(action('笔记'));
+      await tester.pumpAndSettle();
+      expect(find.text('书签、标注与笔记'), findsOneWidget);
+      expect(
+        tester.widget<ReaderDesktopToolbar>(toolbar).activeContextTab,
+        ReaderContextTab.notebook,
+      );
+      await tester.tap(action('搜索'));
+      await tester.pumpAndSettle();
+      expect(find.text('在本书内查找并跳转'), findsOneWidget);
+      expect(
+        tester.widget<ReaderDesktopToolbar>(toolbar).activeContextTab,
+        ReaderContextTab.search,
+      );
+      await tester.tap(find.byTooltip('收起侧栏'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<ReaderDesktopToolbar>(toolbar).activeContextTab,
+        isNull,
+      );
+      await tester.tap(action('加书签'));
+      await tester.pumpAndSettle();
+      expect(bookmarks.saved, hasLength(1));
+      expect(bookmarks.saved.single.bookId, 'toolbar-reader');
+      if (format == BookFormat.pdf) {
+        final quick = find.byType(PdfQuickToolbar);
+        expect(
+          find.descendant(of: quick, matching: find.byIcon(Icons.search)),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: quick, matching: find.byIcon(Icons.bookmark)),
+          findsNothing,
+        );
+      }
+      await tester.tap(action('更多阅读操作'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('阅读主题与界面颜色'));
+      await tester.pumpAndSettle();
+      expect(find.text('阅读主题'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'PDF toolbar recedes when keyboard focus gives way to the mouse',
+    (tester) async {
+      await pumpToolbarReader(tester);
+      final toolbar = find.byType(PdfQuickToolbar);
+      bool hasFocus() => Focus.of(tester.element(toolbar)).hasFocus;
+      for (var attempt = 0; attempt < 20 && !hasFocus(); attempt += 1) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+      }
+      expect(hasFocus(), isTrue);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      final position = tester.getCenter(find.byIcon(Icons.fit_screen_outlined));
+      await mouse.addPointer(location: position);
+      await mouse.down(position);
+      await mouse.up();
+      await tester.pumpAndSettle();
+      expect(
+        Focus.of(tester.element(find.byType(PdfQuickToolbar))).hasFocus,
+        isTrue,
+      );
+      await mouse.moveTo(const Offset(800, 600));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+      expect(find.byType(PdfQuickToolbarReveal), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('PDF toolbar stays visible during keyboard use then recedes', (
+    tester,
+  ) async {
+    await pumpToolbarReader(tester);
+    final toolbar = find.byType(PdfQuickToolbar);
+    bool hasFocus() => Focus.of(tester.element(toolbar)).hasFocus;
+    for (var attempt = 0; attempt < 20 && !hasFocus(); attempt += 1) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+    }
+    expect(hasFocus(), isTrue);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.byType(PdfQuickToolbarReveal), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    expect(hasFocus(), isFalse);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byType(PdfQuickToolbarReveal), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('PDF OCR menu suspends auto hide until dismissed', (
+    tester,
+  ) async {
+    await pumpToolbarReader(tester);
+    await tester.tap(find.byTooltip('更多识别操作'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 6));
+    expect(find.byType(PdfQuickToolbarReveal), findsNothing);
+    expect(find.text('识别范围'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: const Offset(800, 600));
+    await mouse.moveTo(const Offset(810, 610));
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byType(PdfQuickToolbarReveal), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final preset in [ReaderThemePreset.night, ReaderThemePreset.paper]) {
+    testWidgets('reader chrome and dialogs follow ${preset.name}', (
+      tester,
+    ) async {
+      await pumpToolbarReader(
+        tester,
+        initialSettings: ReaderSettings(
+          themePreset: preset,
+          appThemeMode: ThemeMode.light,
+        ),
+      );
+      final toolbarContext = tester.element(find.byType(ReaderDesktopToolbar));
+      expect(Theme.of(toolbarContext).colorScheme.surface, preset.background);
+      expect(
+        Theme.of(tester.element(find.byType(ReaderPage))).brightness,
+        Brightness.light,
+        reason: 'the surrounding application preference stays unchanged',
+      );
+      await captureWorkbenchWidget(tester, 'reader-theme-${preset.name}');
+      await tester.tap(find.byTooltip('更多识别操作'));
+      await tester.pumpAndSettle();
+      expect(
+        Theme.of(tester.element(find.text('识别范围'))).colorScheme.surface,
+        preset.background,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('跳转页码'));
+      await tester.pumpAndSettle();
+      expect(
+        Theme.of(tester.element(find.byType(AlertDialog))).colorScheme.surface,
+        preset.background,
+      );
+      await captureWorkbenchWidget(
+        tester,
+        'reader-theme-dialog-${preset.name}',
+      );
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('shows the empty library screen', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -141,7 +510,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.byIcon(Icons.upload_file).first);
-    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('导入文件（EPUB/PDF/Markdown）'));
+    await tester.pumpAndSettle();
     expect(adapter.pickRequests, hasLength(1));
     expect(adapter.pickRequests.single.allowMultiple, isTrue);
     expect(adapter.pickRequests.single.allowedExtensions, [
@@ -160,9 +531,7 @@ void main() {
     expect(adapter.pickRequests.last.dialogTitle, '导入 EPUB/PDF/Markdown');
   });
 
-  testWidgets('the folder menu asks which kind of folder import it is', (
-    tester,
-  ) async {
+  testWidgets('the import menu names the three import shapes', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final adapter = _RecordingFilePickerAdapter();
@@ -192,8 +561,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    await tester.tap(find.byKey(const ValueKey('import-folder-button')));
+    await tester.tap(find.byKey(const ValueKey('header-import-books-button')));
     await tester.pumpAndSettle();
+    expect(find.text('导入文件（EPUB/PDF/Markdown）'), findsOneWidget);
     expect(find.text('扫描文件夹（每个文件一本书）'), findsOneWidget);
     expect(find.text('把文件夹作为一本书'), findsOneWidget);
 
@@ -202,7 +572,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(adapter.directoryRequests, hasLength(1));
 
-    await tester.tap(find.byKey(const ValueKey('import-folder-button')));
+    await tester.tap(find.byKey(const ValueKey('header-import-books-button')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('扫描文件夹（每个文件一本书）'));
     await tester.pumpAndSettle();
@@ -249,6 +619,8 @@ void main() {
       await tester.tap(
         find.byKey(const ValueKey('header-import-books-button')),
       );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('导入文件（EPUB/PDF/Markdown）'));
       await tester.pumpAndSettle();
       expect(adapter.pickRequests, hasLength(1));
 
@@ -805,8 +1177,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byTooltip('返回设置'), findsOneWidget);
-    expect(find.text('默认阅读模式、字体、排版和主题'), findsWidgets);
-    expect(find.text('默认字号'), findsOneWidget);
+    expect(find.text('所有书籍共用的阅读模式、字体、排版和主题'), findsWidgets);
+    expect(find.text('字号'), findsOneWidget);
   });
 
   testWidgets(
@@ -824,6 +1196,9 @@ void main() {
             ),
             aiSettingsRepositoryProvider.overrideWithValue(
               const _FakeAiSettingsRepository(),
+            ),
+            aiProfilesProvider.overrideWith(
+              (ref) => Stream.value(const <AiProfile>[]),
             ),
             taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
             categoryRepositoryProvider.overrideWithValue(
@@ -860,7 +1235,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('Base URL'), findsOneWidget);
-      expect(find.text('连接测试'), findsOneWidget);
+      expect(find.text('保存并测试'), findsOneWidget);
       expect(find.text('保存 AI 设置'), findsOneWidget);
 
       await tester.tap(find.byTooltip('返回设置'));
@@ -1062,7 +1437,7 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
   });
 
-  testWidgets('reader shows PDF no-text-layer capability notice', (
+  testWidgets('reader shows PDF notice and auto-hides the quick toolbar', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1280, 800));
@@ -1124,6 +1499,162 @@ void main() {
     expect(tester.takeException(), isNull);
     // Quiet status in the PDF toolbar (not a floating toast).
     expect(find.textContaining('无文本层'), findsWidgets);
+    expect(find.byType(PdfQuickToolbarReveal), findsNothing);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PdfQuickToolbarReveal), findsOneWidget);
+
+    await tester.tap(find.byType(PdfQuickToolbarReveal));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PdfQuickToolbarReveal), findsNothing);
+    expect(find.textContaining('无文本层'), findsWidgets);
+  });
+
+  testWidgets('a folder book restores its saved file and own outline', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    late Directory dir;
+    late File first;
+    late File second;
+    await tester.runAsync(() async {
+      dir = await Directory.systemTemp.createTemp('pagesage_folder_reader_');
+      first = File('${dir.path}/a.md')..writeAsStringSync('# 甲章\n\n甲篇正文。');
+      final sub = Directory('${dir.path}/sub')..createSync();
+      second = File('${sub.path}/b.md')
+        ..writeAsStringSync('# 乙章\n\n## 乙小节\n\n乙篇正文。');
+    });
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final book = Book(
+      id: 'folder-reader',
+      title: '笔记库',
+      format: BookFormat.markdown,
+      libraryFilePath: dir.path,
+      fileHash: 'hash-folder-reader',
+      fileSize: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    );
+    final progress = ReadingProgressSnapshot(
+      bookId: book.id,
+      locator: ReadingLocator.markdown(
+        href: 'sub/b.md',
+        chapterIndex: 0,
+        chapterOffset: 0,
+        progress: 0.75,
+        folderFileLocal: true,
+      ),
+      progress: 0.75,
+      updatedAt: 1,
+    );
+    ReaderRendererHostConfig? captured;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(
+            _FakeBookRepository(
+              books: [LibraryBook(book: book, progress: progress)],
+            ),
+          ),
+          settingsRepositoryProvider.overrideWithValue(
+            _FakeSettingsRepository(),
+          ),
+          taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+          categoryRepositoryProvider.overrideWithValue(
+            const _FakeCategoryRepository(),
+          ),
+          tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+          bookmarkRepositoryProvider.overrideWithValue(
+            const _FakeBookmarkRepository(),
+          ),
+          annotationRepositoryProvider.overrideWithValue(
+            const _FakeAnnotationRepository(),
+          ),
+          noteRepositoryProvider.overrideWithValue(const _FakeNoteRepository()),
+          searchRepositoryProvider.overrideWithValue(
+            const _FakeSearchRepository(),
+          ),
+          aiSettingsRepositoryProvider.overrideWithValue(
+            const _FakeAiSettingsRepository(),
+          ),
+          readerRendererHostProvider.overrideWithValue(
+            (config) => _FakeRendererHost(
+              config: config,
+              event: const RendererReady(),
+              exportConfig: (value) => captured = value,
+            ),
+          ),
+        ],
+        child: MaterialApp(home: ReaderPage(bookId: book.id)),
+      ),
+    );
+    await tester.pump();
+    for (var attempt = 0; attempt < 20 && captured == null; attempt += 1) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+    }
+
+    expect(captured, isNotNull);
+    expect(captured!.folderRelativePath, 'sub/b.md');
+    expect(captured!.documentPath, second.path);
+    expect(captured!.progress?.locator.href, 'sub/b.md');
+
+    // The saved file is open. Its outline names only that file's headings.
+    await tester.tap(find.text('大纲').first);
+    await tester.pump();
+    for (var attempt = 0; attempt < 20; attempt += 1) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      if (find.text('乙章').evaluate().isNotEmpty) {
+        break;
+      }
+    }
+    expect(find.text('乙章'), findsOneWidget);
+    expect(find.text('甲章'), findsNothing);
+
+    // The file tree keeps the folder boundary, and selecting a file switches
+    // the renderer to that file rather than merging both.
+    await tester.tap(find.text('文件').first);
+    await tester.pump();
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('a.md'), findsNothing);
+    expect(find.text('sub'), findsOneWidget);
+    await tester.tap(find.text('a'));
+    await tester.pump();
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    });
+    await tester.pump();
+    expect(captured!.folderRelativePath, 'a.md');
+    expect(captured!.documentPath, first.path);
+    expect(captured!.progress?.locator.href, 'a.md');
+
+    // Selecting a file leaves the tree in place; the outline is explicit.
+    expect(find.text('过滤文件路径'), findsOneWidget);
+    expect(find.text('过滤当前文件标题'), findsNothing);
+
+    await tester.tap(find.text('大纲').first);
+    await tester.pump();
+    for (var attempt = 0; attempt < 20; attempt += 1) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+      if (find.text('甲章').evaluate().isNotEmpty) {
+        break;
+      }
+    }
+    expect(find.text('甲章'), findsOneWidget);
+    expect(find.text('乙章'), findsNothing);
   });
 
   testWidgets('reader shows renderer error panel and retry action', (
@@ -1310,6 +1841,89 @@ void main() {
       isTrue,
       reason: 'a book with a library path can supply every range',
     );
+  });
+
+  testWidgets('desktop reader restores and saves the active tool tab', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 960);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final settings = _RecordingSettingsRepository(
+      const ReaderSettings(
+        desktopContextOpen: true,
+        desktopContextTab: ReaderContextTab.notebook,
+      ),
+    );
+    addTearDown(settings.dispose);
+    final books = _FakeBookRepository(
+      books: [
+        _libraryBook(
+          id: 'tab-restore',
+          title: '工具页签恢复',
+          format: BookFormat.pdf,
+        ),
+      ],
+    );
+    Widget reader() => ProviderScope(
+      overrides: [
+        bookRepositoryProvider.overrideWithValue(books),
+        settingsRepositoryProvider.overrideWithValue(settings),
+        taskRepositoryProvider.overrideWithValue(_FakeTaskRepository()),
+        categoryRepositoryProvider.overrideWithValue(
+          const _FakeCategoryRepository(),
+        ),
+        tagRepositoryProvider.overrideWithValue(const _FakeTagRepository()),
+        bookmarkRepositoryProvider.overrideWithValue(
+          const _FakeBookmarkRepository(),
+        ),
+        annotationRepositoryProvider.overrideWithValue(
+          const _FakeAnnotationRepository(),
+        ),
+        noteRepositoryProvider.overrideWithValue(const _FakeNoteRepository()),
+        searchRepositoryProvider.overrideWithValue(
+          const _FakeSearchRepository(),
+        ),
+        aiSettingsRepositoryProvider.overrideWithValue(
+          const _FakeAiSettingsRepository(),
+        ),
+        aiConversationRepositoryProvider.overrideWithValue(
+          const _FakeAiConversationRepository(),
+        ),
+        readerRendererHostProvider.overrideWithValue(
+          (config) =>
+              _FakeRendererHost(config: config, event: const RendererReady()),
+        ),
+      ],
+      child: const MaterialApp(home: ReaderPage(bookId: 'tab-restore')),
+    );
+    await tester.pumpWidget(reader());
+    await tester.pumpAndSettle();
+    expect(find.text('书签、标注与笔记'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ReaderDesktopToolbar),
+        matching: find.byTooltip('AI'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('对选中文本提问'), findsOneWidget);
+    expect(settings.saved.last.desktopContextTab, ReaderContextTab.ai);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(reader());
+    await tester.pumpAndSettle();
+    expect(find.text('对选中文本提问'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ReaderDesktopToolbar),
+        matching: find.byTooltip('搜索'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('在本书内查找并跳转'), findsOneWidget);
+    expect(settings.saved.last.desktopContextTab, ReaderContextTab.search);
   });
 
   testWidgets('desktop reader keyboard shortcuts open panels and actions', (
@@ -2125,6 +2739,9 @@ final class _RecordingAnnotationRepository implements AnnotationRepository {
   }) async {}
 
   @override
+  Future<void> unlinkNote({required String annotationId}) async {}
+
+  @override
   Future<Annotation> saveAnnotation({
     String? id,
     required String bookId,
@@ -2460,6 +3077,7 @@ final class _FakeAiConversationRepository implements AiConversationRepository {
     required String answer,
     String? sourceText,
     String? threadId,
+    AiContextSnapshot? contextSnapshot,
   }) async {
     return AiConversation(
       id: id ?? 'ai-test',
@@ -2471,6 +3089,8 @@ final class _FakeAiConversationRepository implements AiConversationRepository {
       contextText: contextText,
       answer: answer,
       sourceText: sourceText,
+      threadId: threadId,
+      contextSnapshot: contextSnapshot,
       createdAt: 1,
     );
   }
@@ -2531,7 +3151,9 @@ final class _FakeTaskRepository implements TaskRepository {
 }
 
 final class _FakeCategoryRepository implements CategoryRepository {
-  const _FakeCategoryRepository();
+  const _FakeCategoryRepository({this.categories = const []});
+
+  final List<BookCategory> categories;
 
   @override
   Future<void> deleteCategory(
@@ -2540,7 +3162,7 @@ final class _FakeCategoryRepository implements CategoryRepository {
   }) async {}
 
   @override
-  Future<List<BookCategory>> getCategories() async => const [];
+  Future<List<BookCategory>> getCategories() async => categories;
 
   @override
   Future<BookCategory> saveCategory({
@@ -2562,7 +3184,7 @@ final class _FakeCategoryRepository implements CategoryRepository {
   }
 
   @override
-  Stream<List<BookCategory>> watchCategories() => Stream.value(const []);
+  Stream<List<BookCategory>> watchCategories() => Stream.value(categories);
 }
 
 final class _MutableCategoryRepository implements CategoryRepository {
@@ -2802,6 +3424,9 @@ final class _FakeAnnotationRepository implements AnnotationRepository {
   }) async {}
 
   @override
+  Future<void> unlinkNote({required String annotationId}) async {}
+
+  @override
   Future<Annotation> saveAnnotation({
     String? id,
     required String bookId,
@@ -3018,6 +3643,7 @@ final class _FakeSearchRepository implements SearchRepository {
 LibraryBook _libraryBook({
   required String id,
   required String title,
+  String? categoryId,
   String? author,
   BookFormat format = BookFormat.epub,
   String indexingStatus = 'done',
@@ -3032,6 +3658,7 @@ LibraryBook _libraryBook({
       libraryFilePath: '$id.${format.value}',
       fileHash: 'hash-$id',
       fileSize: 1,
+      categoryId: categoryId,
       indexingStatus: indexingStatus,
       createdAt: 1,
       updatedAt: 1,

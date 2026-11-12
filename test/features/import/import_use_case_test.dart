@@ -5,7 +5,8 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pagesage/core/database/app_database.dart';
 import 'package:pagesage/core/database/drift_book_repository.dart';
-import 'package:pagesage/core/database/drift_content_repositories.dart';
+import 'package:pagesage/core/database/drift_search_repository.dart';
+import 'package:pagesage/core/database/drift_task_repository.dart';
 import 'package:pagesage/core/files/app_paths.dart';
 import 'package:pagesage/core/files/format_detector.dart';
 import 'package:pagesage/core/files/hash_service.dart';
@@ -18,9 +19,9 @@ import 'package:pagesage/domain/books/book.dart';
 import 'package:pagesage/domain/books/book_repository.dart';
 import 'package:pagesage/domain/books/reading_position.dart';
 import 'package:pagesage/domain/search/search_models.dart';
+import 'package:pagesage/renderers/markdown/markdown_folder.dart';
 import 'package:pagesage/features/import/application/import_result.dart';
 import 'package:pagesage/features/import/application/import_use_case.dart';
-import 'package:pagesage/renderers/markdown/markdown_document_loader.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
@@ -231,10 +232,13 @@ void main() {
     expect(book.fileSize, greaterThan(0));
 
     await _waitForTaskDone(harness.taskRepository, 'import-folder');
-    final document = await const MarkdownDocumentLoader().load(
+    final manifest = await const MarkdownFolderLoader().loadManifest(
       book.libraryFilePath,
     );
-    expect(document.chapters.map((chapter) => chapter.title), ['甲', '乙']);
+    expect(manifest.files.map((file) => file.relativePath), [
+      'a.md',
+      'sub/b.md',
+    ]);
 
     // The same folder is the same book, not a second one.
     final again = await harness.useCase.importFolderAsBook(folder.path);

@@ -1,8 +1,45 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../domain/books/reader_settings.dart';
 import 'app_tokens.dart';
 
 final class AppTheme {
+  static ThemeData reader(
+    ReaderThemePreset preset, {
+    bool highContrast = false,
+  }) {
+    final background = preset.background;
+    final foreground = preset.foreground;
+    final accent = Color.lerp(preset.link, foreground, 0.12)!;
+    final brightness = ThemeData.estimateBrightnessForColor(background);
+    final contrast = highContrast || preset == ReaderThemePreset.contrast;
+    Color blend(Color color, double opacity) =>
+        Color.alphaBlend(color.withValues(alpha: opacity), background);
+    return _build(
+      _scheme(
+        brightness: brightness,
+        primary: accent,
+        onPrimary:
+            ThemeData.estimateBrightnessForColor(accent) == Brightness.dark
+            ? Colors.white
+            : Colors.black,
+        background: background,
+        surface: background,
+        surfaceSubtle: blend(foreground, 0.04),
+        border: blend(foreground, contrast ? 0.7 : 0.16),
+        borderStrong: blend(foreground, contrast ? 0.9 : 0.32),
+        textPrimary: foreground,
+        textSecondary: blend(foreground, contrast ? 0.95 : 0.8),
+        accentSubtle: blend(accent, 0.08),
+        error: brightness == Brightness.dark
+            ? AppColors.dangerDark
+            : AppColors.danger,
+      ),
+      highContrast: contrast,
+    );
+  }
+
   static ThemeData light() {
     return _build(
       _scheme(
@@ -177,6 +214,15 @@ final class AppTheme {
         titleLarge: TextStyle(color: textColor, fontSize: 22, height: 1.36),
       ),
       appBarTheme: AppBarTheme(
+        systemOverlayStyle:
+            (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+                .copyWith(
+                  statusBarColor: Colors.transparent,
+                  systemNavigationBarColor: colorScheme.surface,
+                  systemNavigationBarIconBrightness: isDark
+                      ? Brightness.light
+                      : Brightness.dark,
+                ),
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
@@ -184,6 +230,7 @@ final class AppTheme {
         foregroundColor: colorScheme.onSurface,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
+          fontFamilyFallback: const ['Segoe UI', 'Microsoft YaHei UI'],
           color: colorScheme.onSurface,
           fontSize: 18,
           fontWeight: FontWeight.w600,
@@ -352,11 +399,17 @@ final class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        elevation: 2,
-        backgroundColor: colorScheme.inverseSurface,
-        contentTextStyle: TextStyle(color: colorScheme.onInverseSurface),
+        elevation: 6,
+        backgroundColor: colorScheme.surface,
+        contentTextStyle: TextStyle(
+          color: colorScheme.onSurface,
+          fontSize: 14,
+          height: 1.38,
+        ),
+        actionTextColor: colorScheme.primary,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.lg),
+          side: BorderSide(color: border.withValues(alpha: 0.95)),
         ),
       ),
       popupMenuTheme: PopupMenuThemeData(

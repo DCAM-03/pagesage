@@ -6,6 +6,38 @@ import 'package:pagesage/features/library/application/library_controller.dart';
 import 'package:pagesage/features/library/application/library_providers.dart';
 
 void main() {
+  test('sidebar visibility is independent of filtering and view state', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final controller = container.read(libraryControllerProvider.notifier);
+
+    controller.setSystemFilter(LibrarySystemFilter.reading);
+    controller.setCategory('cat-1');
+    controller.setFormat(BookFormat.markdown);
+    controller.setCategorySidebarOpen(false);
+
+    var state = container.read(libraryControllerProvider);
+    expect(state.categorySidebarOpen, isFalse);
+    expect(state.systemFilter, LibrarySystemFilter.reading);
+    expect(state.categoryId, 'cat-1');
+    expect(state.format, BookFormat.markdown);
+
+    controller.setSort(LibrarySort.title);
+    controller.setGridSize(LibraryGridSize.large);
+    controller.setViewMode(LibraryViewMode.list);
+    controller.clearFilters();
+    controller.browseAll();
+    state = container.read(libraryControllerProvider);
+    expect(state.categorySidebarOpen, isFalse);
+
+    controller.setCategorySidebarOpen(true);
+    state = container.read(libraryControllerProvider);
+    expect(state.categorySidebarOpen, isTrue);
+    expect(state.sort, LibrarySort.title);
+    expect(state.viewMode, LibraryViewMode.list);
+    expect(state.gridSize, LibraryGridSize.large);
+  });
+
   test('library controller updates view state and clears filters', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);

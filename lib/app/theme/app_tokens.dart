@@ -96,16 +96,9 @@ extension AppColorScheme on ColorScheme {
 
   Color get appBorder => outlineVariant;
 
-  Color get appBorderStrong => outline;
-
   Color get textSecondary => onSurfaceVariant;
 
   Color get accentSubtle => secondaryContainer;
-
-  /// Icon-only and muted text that still has to pass AA on `surfaceSubtle`.
-  Color get textMuted => brightness == Brightness.dark
-      ? AppColors.darkTextMuted
-      : AppColors.lightTextMuted;
 
   /// Snackbars and other high-emphasis inverse surfaces.
   Color get inverseSurface => brightness == Brightness.dark

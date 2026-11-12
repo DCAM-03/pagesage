@@ -28,6 +28,7 @@ void main() {
     await fresh.close();
 
     sqlite.execute('ALTER TABLE ai_conversations DROP COLUMN thread_id');
+    sqlite.execute('ALTER TABLE ai_conversations DROP COLUMN context_snapshot');
     // Rewinding to v3 also has to remove what v5 adds, otherwise the upgrade
     // under test finds the columns already there.
     sqlite.execute('ALTER TABLE annotations DROP COLUMN target');

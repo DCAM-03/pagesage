@@ -1,70 +1,34 @@
 ---
 name: code-quality-audit
-description: Audit Java, Kotlin, TypeScript, JavaScript, Go, and Python changes for over-defensive fallback, broad or silent exception handling, empty success masking, unsafe browser token storage, TypeScript any/default masking, first-match fallback selection, React derived-state effects, and test helpers that fabricate runtime resources. Use for changed-file quality checks, code review, focused hardening, regression gates, or classifying suspicious fallback and unnecessary-complexity patterns.
+description: 审查 PageSage Dart/Flutter 变更的错误处理、类型与空安全、异步竞态、Riverpod 状态、资源释放、数据兼容和测试真实性；用于质量审查及有明确风险的修复，不默认扩成全仓整治。
 ---
 
-# Code Quality Audit
+# PageSage Dart 质量审查
 
-Read `references/defensive-fallback-discipline.md`, then use the scanner to collect review candidates. Inspect source context and the applicable product contract before classifying a finding. The scanner is heuristic, not an AST parser or defect classifier.
+读取 [Dart 编码与异步规范](../pagesage-dart-engineering/references/dart-conventions.md)，
+涉及界面时再读 [Flutter 状态与资源](../pagesage-dart-engineering/references/flutter-state.md)。
 
-## Choose A Profile
+## 从实际变更检查
 
-| Target | Profile |
-| --- | --- |
-| Java or Kotlin backend | `backend-java` |
-| Go backend | `backend-go` with `--min-severity low` |
-| Python backend | `backend-python` |
-| Non-React TypeScript frontend | `frontend-typescript` |
-| React frontend | `frontend-react` |
-| JavaScript, Java, Go, or Python SDK | `sdk-js`, `sdk-java`, `sdk-go` with `--min-severity low`, or `sdk-python` |
-| Mixed server SDKs | `sdk-server` |
-| Test helpers that create runtime resources | `test-support` with `--min-severity low` |
-| Low-confidence fallback names and empty results | `fallback-review` with `--min-severity low` |
-| Deliberate repository-wide review | `all` |
+1. 确认本任务起始状态、实际差异和新文件；仓库内其他未提交改动不是本轮成果，也不自动成为修复范围。
+2. 对照用户行为和调用方检查下列高风险位置，不能把搜索命中机械地认定为 bug。
+3. 每个问题说明触发路径、实际影响、最小修复与对应验证。分类为确定缺陷、合法兼容/降级或非问题。
+4. 优先修正范围内确定缺陷；无关重构和可选优化单列。用 `validation-harness` 验证关键行为。
 
-## Changed-File Review
+## Dart 审查重点
 
-Run from each real Git repository root. Replace `<skill>` with the installed skill path when needed.
+- `dynamic`、`as`、`!`、`late` 是否仅用于明确边界，是否把无数据、损坏和加载失败混为一种状态。
+- `catch` 是否吞错或返回空成功；`rethrow` 是否保留堆栈；取消是否被错误保存为完整成功或普通失败。
+- `await` 后是否检查存活与请求身份，旧书/旧查询结果是否可能覆盖新选择。
+- Widget `build()` 是否启动 I/O、写入业务数据或重复订阅；Riverpod 是否持有同一状态的多个可变副本。
+- controller、timer、subscription、数据库、PDF 页面/图片和文件资源是否由实际拥有者释放。
+- `unawaited` 是否有明确的错误处理与生命周期归属；昂贵解析是否阻塞 UI。
+- settings / locator / AI 快照是否往返一致，nullable 更新是否能区分“清空”和“不修改”。
+- 测试是否断言原始定位、旧数据、失败和重开等真实行为，而非只断言“不抛错”或固定文案。
+- 日志、夹具和截图是否含密钥、用户正文或本机真实书库数据。
 
-```bash
-python3 <skill>/scripts/scan_code_quality.py \
-  --root . --profile backend-java --changed-since HEAD
-```
+## 工具的边界
 
-`--changed-since` includes tracked changes relative to the revision and untracked files. Do not run it from a coordination directory that only contains nested repositories.
-
-For a tracked task, use the profile and revision declared in the task. Record the command, relevant findings, and each disposition in the execution record.
-
-## Baseline And Gate
-
-Use a baseline for repeated repository-wide hardening, not as a default requirement for feature work.
-
-```bash
-python3 <skill>/scripts/scan_code_quality.py \
-  --root . --profile backend-java \
-  --write-baseline docs/quality/backend-java-baseline.json --summary-only
-
-python3 <skill>/scripts/scan_code_quality.py \
-  --root . --profile backend-java \
-  --baseline docs/quality/backend-java-baseline.json --only-new --fail-on high
-```
-
-Baseline comparison rejects mismatched scanner version, scope, profile, rules, severity, or test configuration. `--max-findings` limits displayed details only; it does not truncate baselines, summary counts, or failure decisions.
-
-Use repeatable `--rule <rule-id>` for a narrower scan. Use `--include-tests` only when production rules should also inspect test files.
-
-## Review Workflow
-
-1. Select the owner-specific profile and the narrowest relevant Git root.
-2. Prefer changed-file mode for feature work; use a full scan only for a dedicated hardening workstream.
-3. Inspect every HIGH finding and its contract. Sample and group MEDIUM findings.
-4. Classify candidates as `real bug`, `documented fallback`, `migration compatibility`, `test-only acceptable`, or `false positive`.
-5. Fix only confirmed defects within the declared task scope.
-6. Keep compiler, linter, focused tests, and runtime harnesses as the actual acceptance evidence.
-
-## Guardrails
-
-- Never treat scanner output or a zero-finding result as proof that code is correct.
-- Never fix all hits mechanically; valid product fallbacks must remain explicit and tested.
-- Never expand a feature task into repository-wide hardening without coordinating a separate workstream.
-- Keep raw scan dumps out of `docs/PROJECT_TASKS.md`; record only status and links there.
+主要证据为 `flutter analyze`、实际代码检查及命名行为测试。此目录遗留的
+`scripts/scan_code_quality.py` 不支持 Dart；不得以其零命中或 Java/Go profile 声称 Dart 审查通过。
+搜索只用于定位候选，不能代替语义分析；本次不新增一套正则扫描门禁。

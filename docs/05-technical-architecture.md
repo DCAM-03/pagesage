@@ -10,7 +10,7 @@ PageSage 的技术架构需要满足：
 
 - Android 和 Windows 首发。
 - 数据本地优先。
-- EPUB/PDF 渲染可替换。
+- EPUB/PDF/Markdown 渲染可替换。
 - MOBI/AZW 与外部转换工具暂缓。
 - 搜索、笔记、AI 与阅读器位置稳定关联。
 - 后续可以扩展 iOS、macOS、Linux。
@@ -27,11 +27,12 @@ PageSage 的技术架构需要满足：
 | ORM | Drift |
 | 全文搜索 | SQLite FTS5 |
 | EPUB 渲染 | Flutter-native renderer |
+| Markdown 渲染 | 复用 EPUB 文档模型与 Flutter-native renderer |
 | PDF 渲染 | `pdf_graphics` + Flutter Canvas（见 `10-pdf-renderer-migration.md`） |
 | MOBI/AZW 转换 | 暂缓 |
 | 本地文件 | path_provider + file_picker |
 | 安全存储 | flutter_secure_storage |
-| 日志 | logger 或 talker |
+| 错误脱敏 | `PrivacySanitizer`；任务错误在展示前脱敏 |
 | 测试 | flutter_test + integration_test |
 
 ## 3. 架构分层
@@ -50,10 +51,10 @@ Data Layer
   Drift DAOs, local file repositories, settings stores, search index
 
 Renderer Layer
-  EPUB native renderer, PDF renderer, PDF JS bridge protocol
+  EPUB/Markdown native renderer, PDF Canvas renderer, locator/event protocol
 
 Platform Layer
-  File picker, secure storage, external process, PDF WebView, OS integration
+  File picker, secure storage, native OCR, OS integration
 ```
 
 依赖方向：
@@ -101,19 +102,16 @@ lib/
       search_indexer.dart
       search_repository.dart
     tasks/
-      task_queue.dart
       task_models.dart
+      task_cancellation.dart
     platform/
       file_picker_service.dart
-      webview_capabilities.dart
-      webview_capabilities.dart
+      platform_providers.dart
+      open_file_location_service.dart
     security/
       secure_store.dart
     logging/
-      app_logger.dart
-    errors/
-      app_error.dart
-      error_mapper.dart
+      privacy_sanitizer.dart
   domain/
     books/
       book.dart
@@ -135,9 +133,7 @@ lib/
     ai/
   renderers/
     common/
-      renderer_bridge.dart
       renderer_event.dart
-      renderer_command.dart
     epub/
       epub_renderer_controller.dart
     pdf/
@@ -148,6 +144,42 @@ assets/
     pdf/
   images/
 ```
+
+当前实现中的具体职责归属：
+
+- `core/database/drift_*_repository.dart` 各自实现对应领域仓储，`database_providers.dart` 负责装配。
+  locator 数据库解码由 `drift_locator_mapping.dart` 共享；数据库 schema、DAO 与生成入口保持原位。
+- 阅读页负责会话与页面编排；`reader_renderer_host.dart` 负责渲染器装配，
+  `reader_annotations_host.dart` 是只订阅批注并装配渲染器的叶子宿主，
+  `reader_settings_sheet.dart` 管设置面板；目录按载体拆为
+  `reader_desktop_toc_pane.dart`、`reader_epub_toc_sheet.dart`、
+  `reader_pdf_toc_sheet.dart`，共享树遍历与行模型位于 `reader_toc_tree.dart`，
+  `reader_context_empty_state.dart` 提供这些阅读组件共用的空状态。桌面目录接收文档 loader，
+  不反向导入阅读页。
+- `reader_notebook.dart` 管桌面 / 移动 Notebook 的列表、条目排序与菜单；查询 provider 统一归属
+  `features/reader/application/reader_notebook_providers.dart`。正文菜单与 Notebook 共用
+  `reader_annotation_editor.dart`、`reader_annotation_actions.dart`、`reader_bookmark_actions.dart`，
+  对话框与 Snackbar 保留在 presentation，不反向依赖阅读页；页面仍负责阅读会话和工具编排。
+- `reader_search_pane.dart` 管桌面 / 移动书内搜索的输入、结果导航与片段操作；
+  `application/in_book_search_controller.dart` 管防抖和请求身份，输入变化、清空及释放会使旧请求失效。
+  `reader_context_pane.dart` 只装配搜索 / Notebook / AI 页签；复用设置模型的 `ReaderContextTab`，
+  图标与标签放在 presentation 扩展中，不再维护同名值的第二套枚举及名称转换。
+  页签、侧栏尺寸和展开状态仍由阅读页持久化；搜索保存片段后刷新原书籍的笔记查询，
+  由 `application/reader_excerpt_note_service.dart` 协调保存与查询刷新，
+  不依赖保存发起组件在异步完成时仍存活。
+- `reader_selection_actions.dart` 管文字 / 图片选区的动作组件与 presentation 枚举；阅读页管理
+  浮层、当前菜单身份及动作编排。旧菜单结束只能清理自己的状态，移动端更新现有选区面板，
+  不为每次选区变化叠加新路由。`reader_excerpt_editor.dart` 管摘录输入与草稿返回，
+  与搜索摘录共用上述 application 服务，保存发起时的书籍、原文和定位不随后续 UI 变化漂移。
+- `reader_image_actions.dart` 管图片框选菜单的动作枚举、桌面浮动菜单内容和移动底部菜单；
+  阅读页仍统一管理与文字选区共享的 overlay 生命周期和定位。
+  `application/reader_image_annotation_service.dart` 持久化图片批注，并在写入完成后异步导出
+  裁图到缓存；缓存失败不影响已保存批注。页面保留文件选择器交互和短暂状态提示。
+- `reader_ocr_overlay_controller.dart` 管 OCR 叠加的令牌、双页队列、会话内已恢复页集合与
+  恢复代际；`application/reader_ocr_coordinator.dart` 负责可见页解析、显示页导出重试与
+  缓存叠加查询；阅读页只发起流程、显示状态并读取当前快照，不再分别维护这些字段。
+  `reader_ocr_result_sheet.dart` 管 OCR 结果在桌面对话框与移动底部面板中的复制 / 问 AI 呈现，
+  不持有书籍或定位状态，避免识别流程与浮层生命周期互相拖拽。
 
 ## 5. 状态管理
 
@@ -228,6 +260,7 @@ PageSageData/
 ```text
 library/books/<hash-prefix-2>/<hash-prefix-4>/<book-id>.epub
 library/books/<hash-prefix-2>/<hash-prefix-4>/<book-id>.pdf
+library/books/<hash-prefix-2>/<hash-prefix-4>/<book-id>.md
 library/covers/<book-id>.jpg
 ```
 
@@ -237,6 +270,7 @@ library/covers/<book-id>.jpg
 - 数据库记录应用目录路径和原始路径。
 - 应用不依赖原始路径继续存在。
 - 删除应用副本不删除原始文件。
+- Markdown 文件夹书原地读取：`libraryFilePath` 指向用户目录，应用不写入该目录，移除书时不删除目录。
 
 ## 8. 数据库架构
 
@@ -298,10 +332,25 @@ ImportController
 2. 创建 import task。
 3. 计算 hash。
 4. 去重检查。
-5. 复制文件。
+5. 复制文件；Markdown 文件夹书改为记录目录路径指纹，不复制目录。
 6. 解析格式和元数据。
 7. 写入 books。
 8. 创建索引任务。
+
+Markdown 加载路径：
+
+```text
+BookDocumentLoader
+  -> 单文件：MarkdownDocumentLoader -> MarkdownParser
+  -> 文件夹：MarkdownFolderLoader.loadManifest
+       -> MarkdownFolderManifest（文件列表 + 保留层级的文件树）
+       -> 当前文件：MarkdownDocumentLoader.loadWithHref
+            -> MarkdownParser（单个 .md / .markdown）
+  -> EpubDocument / EpubChapter / EpubBlock
+  -> EpubRendererView
+```
+
+Markdown 与 EPUB 共用章节、块和字符偏移模型。文件夹书只发现文件、目录树和 stat 数据，不把所有正文合并成一份文档；阅读器一次只加载当前文件，`href` 记文件夹内相对路径，`chapterIndex` / `chapterOffset` 是该文件内部坐标，`progress` 按文件大小加权到全书。manifest 与单文件解析结果都按路径、大小和修改时间缓存，编辑后自动失效。进度、书内搜索、全文索引、AI 当前章节上下文和目录面板都不按格式分支；文件夹全文索引逐文件写入，当前章节上下文只读活动文件。
 
 ## 10. 后续格式转换
 
@@ -352,6 +401,7 @@ RendererEvent：
 - bookmarkRequested
 - renderError
 - imagesDetected / imageAreaSelected（图片批注，见 `13-image-annotations.md` §4）
+- externalLinkRequested：EPUB / Markdown 文本渲染器点击 `http(s)` / `mailto` 链接时只传 URI；宿主显示完整地址、用户确认后再用 `LaunchMode.externalApplication` 打开。渲染器不直接调用 `launchUrl`，不处理内部锚点或 `javascript:`。
 
 图片批注的边界：
 
@@ -438,6 +488,14 @@ lib/renderers/epub/epub_renderer_view.dart
 
 **图注是正文的一部分。** `figcaption` 参与排版，也参与搜索。
 
+**`alt` 是视觉图注。** 2026-11-08 起，EPUB / Markdown 图片的 `alt` 画在图片块下方，不写入 `EpubChapter.text`，因此不占搜索、进度、批注或 AI 上下文的字符偏移。分页测量通过 `epubImageCaptionTextStyle` 与渲染层共用图注高度；缺失图片也只显示一次图注，占位说明不再重复 `alt`。
+
+**列表与链接是排版元数据。** `EpubTextBlock.listMarker` / `listIndent` 与 `EpubInlineRun.target` 不改变章节文本：列表 marker 仍在章节文本与偏移量里，渲染层用固定 `epubListHangingIndent` 分列并单独绘制 marker；链接目标随 run 穿过 `EpubPageFragment`，切页后仍可点击。分页器按同一缩进宽度量内容文字，避免量出来一页、画出来另一页。
+
+**语法色是排版元数据。** 2026-11-09 起，Markdown 围栏代码的语言由 `EpubTextBlock.codeLanguage` 标注，`EpubCodeRun` 以同一章节字符坐标记录关键字、类型、字符串、数字、注释与字面量范围；它们穿过 `epubBlocks` / `EpubPageFragment`，与行内样式、批注、搜索命中一起被切成 `TextSpan`。`CodeSyntax` 不重写正文，也没有数据库或 locator 契约变化；无语言或未知语言代码块只做字符串与数字的保守着色。
+
+**扩展语法是本地可读边界。** 2026-11-09 起，`MarkdownBoundary` 在解析前用每次解析的随机 token 把闭合显示数学、Mermaid 类围栏和 HTML 块包成内部边界；图表与 HTML 写成章节正文中的可读源码或安全可见文字，作者正文里的同名标记不会被误识别。2026-11-09 的 P14 把数学公式改为纯 Dart / Flutter 的 `flutter_math_fork` 本地排版：显示公式用 `EpubTextBlock.mathSource`，行内公式用新增的 `EpubInlineStyle.math` 与 `EpubInlineRun.mathSource` 携带归一化 TeX；`MathSource` 修复笔记里常见的 `\frac1{x^2}` 等紧凑写法，解析或构建失败时回退为原表达式文本。行内公式识别允许以 `\}` 等转义序列结尾，`$$...$$` 限制在同一行；分页器遇到公式内部的切点时把整条公式移到下一片段，并为高公式预留测量高度。公式 Widget 不占章节字符，搜索、进度、选区、批注与 locator 仍以 `EpubChapter.text` 的单一字符坐标为权威。`diagram` 块带 `Mermaid` 标签并按换行跨页；HTML 标签、注释、处理指令、危险标签整段和远程资源属性不进入正文；未闭合边界与代码围栏内内容保持原样。公式字体随应用包分发，无 WebView、图表 JS、HTML 执行或网络请求。
+
 ### 11.4 PDF Renderer
 
 **已迁移（2026-10-21）。** PDF 由 `pdf_graphics` 5.1.1 直接解释并在 Flutter Canvas
@@ -478,7 +536,7 @@ lib/renderers/pdf/pdf_links.dart               GoTo / URI 链接
 
 职责：
 
-- 从 EPUB/PDF/笔记/书签/AI 中提取文本。
+- 从 EPUB/PDF/Markdown/笔记/书签/AI 中提取文本。
 - 按 chunk 切分。
 - 写入 search_chunks。
 - 同步 FTS5。
@@ -488,6 +546,13 @@ EPUB chunk：
 - 章节标题。
 - href。
 - CFI 或段落位置。
+- 800 到 1500 字。
+
+Markdown chunk：
+
+- 章节标题（单文件按标题切章，目录书按相对路径与标题切章）。
+- `href`（目录书为相对文件路径）。
+- 章节内字符偏移。
 - 800 到 1500 字。
 
 PDF chunk：
@@ -610,13 +675,8 @@ Provider 实现：
 
 ## 15. 错误处理
 
-错误分层：
-
-- DomainError。
-- DataError。
-- RendererError。
-- PlatformError。
-- AiError。
+错误在领域、存储、渲染和平台边界使用具体异常表达，应用层按操作提供恢复建议。
+没有调用方的统一 `AppError` 继承骨架已在 2026-11-09 清理；不为目录对称保留空框架。
 
 错误展示：
 
@@ -625,14 +685,8 @@ Provider 实现：
 - 日志保存 stack trace。
 - 用户数据相关错误不能吞掉。
 
-示例：
-
-```dart
-sealed class AppError {
-  String get message;
-  String? get recoveryAction;
-}
-```
+任务错误通过 `PrivacySanitizer` 脱敏后展示。当前不保留未接入的 logger 包装；
+如需新增诊断链路，应在实际调用处落实隐私规则，而非只增加一个无人使用的日志类。
 
 ## 16. 测试策略
 

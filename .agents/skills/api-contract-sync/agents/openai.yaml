@@ -1,6 +1,6 @@
 interface:
-  display_name: "API Contract Sync"
-  short_description: "Align backend, frontend, mocks, and SDK contracts"
-  default_prompt: "Use $api-contract-sync to align an API contract across its backend source and all frontend, mock, generated-client, and SDK consumers."
+  display_name: "PageSage 契约同步"
+  short_description: "核对领域接口、Drift 迁移、定位和 AI 来源在实际调用链中的一致性"
+  default_prompt: "使用 $api-contract-sync 对齐本次变更的权威契约、实际消费者及兼容验证。"
 policy:
   allow_implicit_invocation: true

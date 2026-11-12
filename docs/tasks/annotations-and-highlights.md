@@ -7,7 +7,7 @@
 ## 来源与边界
 
 - 来源：`docs/02-feature-spec.md`、`docs/03-interaction-spec.md`、`docs/04-ui-design-system.md`、`docs/06-data-model.md`。
-- 不做：手写批注、图形批注、扫描版 PDF OCR 标注。
+- 不做：自由手写、图形批注、扫描版 PDF OCR 标注。
 - 约束：EPUB 以 href/chapter/progress 定位为主，CFI 可后续增强；PDF 坐标高亮可渐进增强，但必须先保存文本和页码定位。
 
 ## 功能范围
@@ -19,6 +19,7 @@
 - 从标注创建笔记。
 - 标注列表和阅读器渲染恢复。
 - 标注参与搜索或笔记联动。
+- 2026-11-10 增量：选中文本可直接添加 `comment` 批注，点击划线查看和编辑；详见 `annotation-comments-2026-11-10.md`。
 
 ## 实现任务
 

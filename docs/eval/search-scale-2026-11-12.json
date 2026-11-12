@@ -1,0 +1,59 @@
+{
+  "runtime": "flutter test debug; not a release or OS-cold benchmark",
+  "os": "Linux 7.2.15-200.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Sun Nov  1 16:10:54 UTC 2026",
+  "dart": "3.12.2 (stable) (Tue Jun 9 01:11:39 2026 -0700) on \"linux_x64\"",
+  "sqlite": "3.51.2",
+  "percentile": "nearest-rank",
+  "chunks": 10000,
+  "utf16": 11193430,
+  "utf8Bytes": 25809990,
+  "databaseBytes": 197681152,
+  "databaseToBodyRatio": 7.659094482407781,
+  "indexBuildMs": 6364,
+  "warmups": 5,
+  "iterations": 30,
+  "queries": {
+    "phrase": {
+      "reopenedConnectionMs": 228.313,
+      "warmP50Ms": 115.629,
+      "warmP95Ms": 155.713,
+      "warmMaxMs": 190.555,
+      "results": 50
+    },
+    "single": {
+      "reopenedConnectionMs": 133.148,
+      "warmP50Ms": 106.513,
+      "warmP95Ms": 121.417,
+      "warmMaxMs": 124.754,
+      "results": 50
+    },
+    "mixed": {
+      "reopenedConnectionMs": 169.579,
+      "warmP50Ms": 160.08,
+      "warmP95Ms": 170.005,
+      "warmMaxMs": 174.624,
+      "results": 50
+    },
+    "fullWidth": {
+      "reopenedConnectionMs": 167.144,
+      "warmP50Ms": 174.333,
+      "warmP95Ms": 199.396,
+      "warmMaxMs": 205.803,
+      "results": 50
+    },
+    "filtered": {
+      "reopenedConnectionMs": 48.929,
+      "warmP50Ms": 89.889,
+      "warmP95Ms": 120.036,
+      "warmMaxMs": 120.971,
+      "results": 20
+    },
+    "absent": {
+      "reopenedConnectionMs": 89.926,
+      "warmP50Ms": 116.804,
+      "warmP95Ms": 130.555,
+      "warmMaxMs": 146.064,
+      "results": 0
+    }
+  }
+}

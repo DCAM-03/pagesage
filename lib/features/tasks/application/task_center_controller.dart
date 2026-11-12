@@ -11,6 +11,7 @@ import '../../../core/tasks/task_models.dart';
 import '../../../domain/books/book_repository.dart';
 import '../../import/application/import_providers.dart';
 import '../../import/application/import_use_case.dart';
+import '../../ocr/application/ocr_job_controller.dart';
 
 final taskListProvider = StreamProvider<List<PageSageTask>>((ref) {
   return ref.watch(taskRepositoryProvider).watchTasks();
@@ -23,6 +24,7 @@ final taskCenterControllerProvider = Provider<TaskCenterController>((ref) {
     bookRepository: ref.watch(bookRepositoryProvider),
     searchIndexer: ref.watch(searchIndexerProvider),
     taskCancellationRegistry: ref.watch(taskCancellationRegistryProvider),
+    ocrJobController: ref.watch(ocrJobControllerProvider),
   );
 });
 
@@ -33,12 +35,14 @@ final class TaskCenterController {
     required BookRepository bookRepository,
     required SearchIndexer searchIndexer,
     required TaskCancellationRegistry taskCancellationRegistry,
+    OcrJobController? ocrJobController,
   }) : this._(
          taskRepository,
          importUseCase,
          bookRepository,
          searchIndexer,
          taskCancellationRegistry,
+         ocrJobController,
        );
 
   const TaskCenterController._(
@@ -47,6 +51,7 @@ final class TaskCenterController {
     this._bookRepository,
     this._searchIndexer,
     this._taskCancellationRegistry,
+    this.ocrJobController,
   );
 
   final TaskRepository _taskRepository;
@@ -54,6 +59,7 @@ final class TaskCenterController {
   final BookRepository _bookRepository;
   final SearchIndexer _searchIndexer;
   final TaskCancellationRegistry _taskCancellationRegistry;
+  final OcrJobController? ocrJobController;
 
   /// Marks tasks left running by a previous session as failed.
   ///
@@ -63,11 +69,25 @@ final class TaskCenterController {
   /// alone (the task used to flip to 失败 mid-import until it finished).
   Future<void> recoverInterruptedTasks() async {
     final tasks = await _taskRepository.getTasks();
+    final liveTaskIds = {
+      for (final task in tasks)
+        if (_taskCancellationRegistry.isLive(task.id)) task.id,
+    };
+    await ocrJobController?.recoverInterrupted(liveTaskIds);
     for (final task in tasks) {
       if (!_isActive(task.status)) {
         continue;
       }
       if (_taskCancellationRegistry.isLive(task.id)) {
+        continue;
+      }
+      if (task.type == PageSageTaskType.ocrPages) {
+        await _taskRepository.updateStatus(
+          id: task.id,
+          status: PageSageTaskStatus.paused,
+          progress: task.progress,
+          message: '上次识别中断，可继续',
+        );
         continue;
       }
       await _taskRepository.updateStatus(
@@ -81,6 +101,10 @@ final class TaskCenterController {
   }
 
   Future<void> cancelTask(PageSageTask task) async {
+    if (task.type == PageSageTaskType.ocrPages && ocrJobController != null) {
+      await ocrJobController!.cancel(task.id);
+      return;
+    }
     final hasActiveToken = _taskCancellationRegistry.cancel(task.id);
     await _deleteIfPartialTarget(task);
     await _taskRepository.updateStatus(
@@ -126,8 +150,43 @@ final class TaskCenterController {
       case PageSageTaskType.exportNotes:
       case PageSageTaskType.backup:
       case PageSageTaskType.restore:
+      case PageSageTaskType.ocrPages:
+        if (ocrJobController != null) {
+          await ocrJobController!.resume(task);
+          return;
+        }
+        await _markRetryFailed(task, '这个任务类型暂不支持自动重试');
+      case PageSageTaskType.unknown:
         await _markRetryFailed(task, '这个任务类型暂不支持自动重试');
     }
+  }
+
+  Future<void> pauseTask(PageSageTask task) async {
+    if (task.type != PageSageTaskType.ocrPages || ocrJobController == null) {
+      return;
+    }
+    await ocrJobController!.pause(task.id);
+  }
+
+  Future<void> resumeTask(PageSageTask task) async {
+    if (task.type != PageSageTaskType.ocrPages || ocrJobController == null) {
+      return;
+    }
+    await ocrJobController!.resume(task);
+  }
+
+  Future<int> retryFailedOcrPages(PageSageTask task) async {
+    if (task.type != PageSageTaskType.ocrPages || ocrJobController == null) {
+      return 0;
+    }
+    return ocrJobController!.retryFailedPages(task);
+  }
+
+  Future<void> clearOcrResults(PageSageTask task) async {
+    if (task.type != PageSageTaskType.ocrPages || ocrJobController == null) {
+      return;
+    }
+    await ocrJobController!.clearResults(task);
   }
 
   Future<void> clearCompleted() {
@@ -208,6 +267,7 @@ final class TaskCenterController {
   }
 
   Future<void> _deleteIfPartialTarget(PageSageTask task) async {
+    if (task.type != PageSageTaskType.importBook) return;
     final path = task.targetPath;
     if (path == null || path.isEmpty) {
       return;
@@ -226,6 +286,7 @@ final class TaskCenterController {
       PageSageTaskStatus.queued ||
       PageSageTaskStatus.running ||
       PageSageTaskStatus.indexing => true,
+      PageSageTaskStatus.paused || PageSageTaskStatus.partial => false,
       PageSageTaskStatus.done ||
       PageSageTaskStatus.failed ||
       PageSageTaskStatus.cancelled => false,

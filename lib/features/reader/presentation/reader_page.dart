@@ -1,6 +1,5 @@
 import 'dart:async';
-
-import 'package:flutter/foundation.dart';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,11 +9,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/responsive/app_breakpoints.dart';
 import '../../../app/theme/app_tokens.dart';
-import '../../../app/widgets/app_chrome.dart';
+import '../../../app/theme/app_theme.dart';
 import '../../../app/widgets/theme_mode_button.dart';
 import '../../../core/database/database_providers.dart';
 import '../../../core/platform/platform_providers.dart';
-import '../../../domain/ai/ai_models.dart';
 import '../../../domain/annotations/annotation.dart';
 import '../../../domain/annotations/image_anchor.dart';
 import '../../../domain/books/book.dart';
@@ -22,104 +20,89 @@ import '../../../domain/books/bookmark.dart';
 import '../../../domain/books/reader_fonts.dart';
 import '../../../domain/books/reader_settings.dart';
 import '../../../domain/books/reading_position.dart';
-import '../../../domain/notes/note.dart';
-import '../../../domain/search/search_models.dart';
 import '../../../features/settings/application/settings_providers.dart';
 import '../../../renderers/common/book_document_loader.dart';
 import '../../../renderers/common/renderer_event.dart';
-import '../../../renderers/epub/epub_document.dart';
 import '../../../renderers/epub/epub_document_loader.dart';
-import '../../../renderers/pdf/pdf_canvas_view.dart';
 import '../../../renderers/pdf/pdf_zoom.dart';
 import '../../../renderers/epub/epub_jump.dart';
-import '../../../renderers/epub/epub_renderer_view.dart';
+import '../../../domain/books/locator_excerpt.dart';
 import '../../../renderers/markdown/markdown_document_loader.dart';
+import '../../../renderers/markdown/markdown_folder.dart';
+import '../../../renderers/markdown/markdown_folder_snapshot.dart';
 import '../../ai/presentation/ai_panel.dart';
 import '../../import/application/import_intent.dart';
 import '../../ocr/application/ocr_page_controller.dart';
+import '../../ocr/application/ocr_job_controller.dart';
 import '../../ocr/application/ocr_providers.dart';
+import '../../../domain/ocr/ocr_jobs.dart';
 import '../../../domain/ocr/ocr_models.dart';
-import '../application/in_book_search_controller.dart';
 import '../application/reader_providers.dart';
+import '../application/reader_notebook_providers.dart';
+import '../application/reader_annotation_comment_service.dart';
+import '../application/reader_excerpt_note_service.dart';
+import '../application/reader_image_annotation_service.dart';
+import '../application/reader_ocr_coordinator.dart';
+import '../application/whole_book_ocr_queue.dart';
+import '../application/markdown_folder_session.dart';
+import '../application/markdown_folder_refresh_coordinator.dart';
 import 'floating_menu_placement.dart';
+import 'reader_settings_sheet.dart';
+import 'reader_desktop_toc_pane.dart';
+import 'reader_epub_toc_sheet.dart';
+import 'reader_pdf_toc_sheet.dart';
+import 'reader_notebook.dart';
+import 'reader_search_pane.dart';
+import 'reader_context_pane.dart';
+import 'reader_annotation_actions.dart';
+import 'reader_annotation_comment_editor.dart';
+import 'reader_annotation_editor.dart';
+import 'reader_bookmark_actions.dart';
+import 'reader_chrome.dart';
+import 'reader_desktop_toolbar.dart';
+import 'reader_location_text.dart';
+import 'reader_mobile_chrome.dart';
+import 'reader_selection_actions.dart';
+import 'reader_image_actions.dart';
+import 'reader_annotations_host.dart';
+import 'reader_excerpt_editor.dart';
+import 'reader_ocr_overlay_controller.dart';
+import 'reader_ocr_result_sheet.dart';
+import 'reader_pdf_toolbar.dart';
+import 'reader_status_widgets.dart';
 
-final readerRendererHostProvider =
-    Provider<Widget Function(ReaderRendererHostConfig)>((ref) {
-      return (config) => _DefaultRendererHost(config: config);
-    });
-
-final class ReaderRendererHostConfig {
-  const ReaderRendererHostConfig({
-    required this.book,
-    required this.progress,
-    required this.settings,
-    required this.annotations,
-    required this.version,
-    required this.jumpToken,
-    required this.searchQuery,
-    required this.focusLocator,
-    required this.clearSearchHighlightsVersion,
-    this.clearSelectionVersion = 0,
-    required this.onEvent,
-    this.ocrOverlayToken = 0,
-    this.ocrOverlayPage,
-    this.ocrOverlayBlocks = const [],
-    this.onZoomChanged,
-    this.imageDragMode = false,
-    this.onImageAreaSelected,
-  });
-
-  final Book book;
-  final ReadingProgressSnapshot? progress;
-  final ReaderSettings settings;
-  final List<Annotation> annotations;
-
-  /// Hard remount token (error retry, format re-open).
-  final int version;
-
-  /// Soft jump token (TOC / in-book search) without remounting the renderer.
-  final int jumpToken;
-  final String? searchQuery;
-
-  /// Temporary source focus after note/bookmark/search jumps.
-  final ReadingLocator? focusLocator;
-  final int clearSearchHighlightsVersion;
-
-  /// Bumped when the selection should be dismissed; the renderer clears its
-  /// highlight and handles when this changes.
-  final int clearSelectionVersion;
-  final ValueChanged<RendererEvent> onEvent;
-
-  /// Bumped when a new OCR overlay should be painted onto the PDF page.
-  final int ocrOverlayToken;
-  final int? ocrOverlayPage;
-  final List<Map<String, Object?>> ocrOverlayBlocks;
-
-  /// Zoom performed inside the renderer (pinch, Ctrl+wheel, double-click),
-  /// or null when the renderer has no such gesture (the WebView bridge owns
-  /// its own zoom and reports it through settings only).
-  final PdfZoomChanged? onZoomChanged;
-
-  /// While true a drag draws a box around a picture instead of selecting text.
-  ///
-  /// Only the canvas PDF renderer supports it; other renderers ignore it.
-  final bool imageDragMode;
-
-  /// Called when the reader finishes drawing an image box.
-  final ValueChanged<RendererImageAreaSelected>? onImageAreaSelected;
-}
-
-final class ReaderPage extends ConsumerStatefulWidget {
+final class ReaderPage extends ConsumerWidget {
   const ReaderPage({required this.bookId, this.initialLocator, super.key});
 
   final String bookId;
   final ReadingLocator? initialLocator;
 
   @override
-  ConsumerState<ReaderPage> createState() => _ReaderPageState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final preset = ref.watch(readerSettingsProvider).value?.themePreset;
+    return Theme(
+      data: preset == null
+          ? Theme.of(context)
+          : AppTheme.reader(
+              preset,
+              highContrast: MediaQuery.highContrastOf(context),
+            ),
+      child: _ReaderContent(bookId: bookId, initialLocator: initialLocator),
+    );
+  }
 }
 
-final class _ReaderPageState extends ConsumerState<ReaderPage>
+final class _ReaderContent extends ConsumerStatefulWidget {
+  const _ReaderContent({required this.bookId, this.initialLocator});
+
+  final String bookId;
+  final ReadingLocator? initialLocator;
+
+  @override
+  ConsumerState<_ReaderContent> createState() => _ReaderPageState();
+}
+
+final class _ReaderPageState extends ConsumerState<_ReaderContent>
     with WidgetsBindingObserver {
   String? _statusText;
   final ValueNotifier<String?> _statusNotifier = ValueNotifier<String?>(null);
@@ -144,22 +127,17 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   int _selectionMenuEpoch = 0;
   List<RendererOutlineItem> _pdfOutline = const [];
   bool _markedOpened = false;
-  int _ocrOverlayToken = 0;
-  int? _ocrOverlayPage;
-  List<Map<String, Object?>> _ocrOverlayBlocks = const [];
-
-  /// Pending multi-page OCR overlays (double-page spread). Applied one-by-one
-  /// via successive [ocrOverlayToken] bumps after each page is recognized.
-  final List<({int page, List<Map<String, Object?>> blocks})>
-  _pendingOcrOverlays = [];
-
-  /// Pages whose OCR overlay is already painted in the current WebView session.
-  final Set<int> _restoredOcrPages = <int>{};
-  int _ocrRestoreGeneration = 0;
+  final ReaderOcrOverlayController _ocrOverlays = ReaderOcrOverlayController();
+  int _ocrRequestEpoch = 0;
+  final _wholeBookOcrQueue = WholeBookOcrQueue();
+  Timer? _ocrIndexTimer;
   RendererLocationChanged? _currentLocation;
   final ValueNotifier<RendererLocationChanged?> _locationNotifier =
       ValueNotifier<RendererLocationChanged?>(null);
   RendererTextSelected? _selectedText;
+  final ValueNotifier<RendererTextSelected?> _mobileSelectionNotifier =
+      ValueNotifier<RendererTextSelected?>(null);
+  bool _mobileSelectionSheetOpen = false;
 
   /// Whether a drag on a PDF page draws an image box instead of selecting
   /// text. Off by default, because the same gesture already means "select".
@@ -170,7 +148,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   ReadingLocator? _focusLocator;
   Timer? _focusClearTimer;
   bool _selectionActionsOpen = false;
-  String? _lastSelectionActionKey;
+  Object? _lastSelectionActionKey;
   OverlayEntry? _selectionOverlayEntry;
   Completer<void>? _selectionOverlayCompleter;
   bool _annotationActionsOpen = false;
@@ -181,17 +159,38 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   double _desktopTocWidth = 300;
   double _desktopContextWidth = 420;
   bool _desktopChromePrefsLoaded = false;
+  String? _lastFolderText;
+  String? _lastFolderTextPath;
   bool _mobileChromeVisible = true;
   Timer? _mobileChromeTimer;
+  bool _pdfQuickToolbarVisible = true;
+  bool _pdfQuickToolbarHovered = false;
+  bool _pdfQuickToolbarMenuOpen = false;
+  bool _pdfQuickToolbarFocused = false;
+  bool _pdfQuickToolbarKeyboardInput = false;
+  bool _pdfQuickToolbarUserCollapsed = false;
+  Timer? _pdfQuickToolbarTimer;
   Timer? _statusClearTimer;
   Timer? _locationChromeTimer;
-  _ReaderContextTab _desktopContextTab = _ReaderContextTab.search;
+  ReaderContextTab _desktopContextTab = ReaderContextTab.search;
   ReaderSessionController? _sessionController;
+
+  /// Folder books keep a manifest and one active file in a dedicated
+  /// controller; the renderer never receives the whole folder as a document.
+  final MarkdownFolderSessionController _folderSession =
+      MarkdownFolderSessionController();
+  MarkdownFolderRefreshCoordinator? _folderRefresh;
+  StreamSubscription<MarkdownFolderRefreshEvent>? _folderRefreshSubscription;
+  String? _folderRefreshState;
+  Timer? _folderRefreshStatusTimer;
+  ({Book book, MarkdownFolderRefreshEvent event})? _pendingFolderRefresh;
+  int _lastAppliedFolderRefreshEpoch = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _ocrOverlays.addListener(_onOcrOverlaysChanged);
     final initialLocator = widget.initialLocator;
     if (initialLocator != null) {
       final canFlash = jumpPrecisionFor(initialLocator) == JumpPrecision.phrase;
@@ -224,6 +223,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         _scheduleMobileChromeAutoHide();
+        _schedulePdfQuickToolbarAutoHide(const Duration(seconds: 4));
       }
     });
   }
@@ -238,8 +238,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   @override
-  void didUpdateWidget(covariant ReaderPage oldWidget) {
+  void didUpdateWidget(covariant _ReaderContent oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.bookId != widget.bookId) {
+      _ocrRequestEpoch += 1;
+      _stopFolderRefresh();
+    }
     // Same book route reused with a new locator (notes/search jump).
     final next = widget.initialLocator;
     final previous = oldWidget.initialLocator;
@@ -263,15 +267,40 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   @override
   void dispose() {
     _closeSelectionOverlay();
+    _folderRefreshStatusTimer?.cancel();
+    unawaited(_folderRefreshSubscription?.cancel());
+    unawaited(_folderRefresh?.dispose());
+    _ocrOverlays.removeListener(_onOcrOverlaysChanged);
+    _ocrOverlays.dispose();
     _mobileChromeTimer?.cancel();
+    _pdfQuickToolbarTimer?.cancel();
     _statusClearTimer?.cancel();
+    _ocrIndexTimer?.cancel();
     _locationChromeTimer?.cancel();
     _focusClearTimer?.cancel();
     _locationNotifier.dispose();
     _statusNotifier.dispose();
+    _mobileSelectionNotifier.dispose();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_sessionController?.flush());
     super.dispose();
+  }
+
+  void _stopFolderRefresh() {
+    _folderRefreshStatusTimer?.cancel();
+    unawaited(_folderRefreshSubscription?.cancel());
+    unawaited(_folderRefresh?.dispose());
+    _folderRefreshSubscription = null;
+    _folderRefresh = null;
+    _folderRefreshState = null;
+    _pendingFolderRefresh = null;
+    _lastAppliedFolderRefreshEpoch = 0;
+  }
+
+  void _onOcrOverlaysChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _setTransientStatus(String? message, {Duration? clearAfter}) {
@@ -385,6 +414,93 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
+  void _showPdfQuickToolbar({bool force = false, bool autoHide = true}) {
+    if (_pdfQuickToolbarUserCollapsed && !force) {
+      return;
+    }
+    if (force) {
+      _pdfQuickToolbarUserCollapsed = false;
+    }
+    _pdfQuickToolbarTimer?.cancel();
+    if (!_pdfQuickToolbarVisible) {
+      setState(() => _pdfQuickToolbarVisible = true);
+    }
+    if (autoHide) {
+      _schedulePdfQuickToolbarAutoHide();
+    }
+  }
+
+  void _hidePdfQuickToolbar({bool userInitiated = false}) {
+    _pdfQuickToolbarTimer?.cancel();
+    _pdfQuickToolbarHovered = false;
+    if (userInitiated) {
+      _pdfQuickToolbarUserCollapsed = true;
+    }
+    if (_pdfQuickToolbarVisible) {
+      setState(() => _pdfQuickToolbarVisible = false);
+    }
+  }
+
+  void _schedulePdfQuickToolbarAutoHide([
+    Duration delay = const Duration(seconds: 3),
+  ]) {
+    _pdfQuickToolbarTimer?.cancel();
+    _pdfQuickToolbarTimer = Timer(delay, () {
+      if (!mounted) {
+        return;
+      }
+      if (_pdfQuickToolbarMenuOpen ||
+          _pdfQuickToolbarHovered ||
+          (_pdfQuickToolbarFocused && _pdfQuickToolbarKeyboardInput)) {
+        _schedulePdfQuickToolbarAutoHide();
+        return;
+      }
+      if (_pdfQuickToolbarVisible) {
+        setState(() => _pdfQuickToolbarVisible = false);
+      }
+    });
+  }
+
+  void _setPdfQuickToolbarHovered(bool hovered) {
+    _pdfQuickToolbarKeyboardInput = false;
+    _pdfQuickToolbarHovered = hovered;
+    if (hovered) {
+      _showPdfQuickToolbar(autoHide: false);
+    } else {
+      _schedulePdfQuickToolbarAutoHide();
+    }
+  }
+
+  void _setPdfQuickToolbarMenuOpen(bool open) {
+    _pdfQuickToolbarMenuOpen = open;
+    if (open) {
+      _pdfQuickToolbarTimer?.cancel();
+    } else if (mounted) {
+      _schedulePdfQuickToolbarAutoHide();
+    }
+  }
+
+  void _handleReaderHover(PointerHoverEvent event, Book book) {
+    if (book.format != BookFormat.pdf || context.appBreakpoint.isCompact) {
+      return;
+    }
+    _pdfQuickToolbarKeyboardInput = false;
+    if (event.localPosition.dy <= 72) {
+      _showPdfQuickToolbar();
+    } else if (_pdfQuickToolbarVisible && !_pdfQuickToolbarHovered) {
+      _schedulePdfQuickToolbarAutoHide();
+    }
+  }
+
+  void _setPdfQuickToolbarFocused(bool focused) {
+    _pdfQuickToolbarFocused = focused;
+    if (focused && _pdfQuickToolbarKeyboardInput) {
+      _pdfQuickToolbarTimer?.cancel();
+    } else if (_pdfQuickToolbarVisible) {
+      _schedulePdfQuickToolbarAutoHide();
+    }
+  }
+
   Future<void> _showMobileMoreSheet({
     required BuildContext context,
     required Book book,
@@ -400,7 +516,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         builder: (sheetContext) {
           final isPdf = book.format == BookFormat.pdf;
           return SafeArea(
-            child: _MobileReaderMoreSheet(
+            child: MobileReaderMoreSheet(
               book: book,
               settings: settings,
               bookmarked: currentBookmark != null,
@@ -453,10 +569,22 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 Navigator.of(sheetContext).pop();
                 unawaited(_showAiPanel(context));
               },
-              onOcrPage: isPdf && _rendererNativeTextLayerAvailable == false
+              onOcrPage: isPdf
                   ? () {
                       Navigator.of(sheetContext).pop();
                       unawaited(_runOcrCurrentPage(context, book));
+                    }
+                  : null,
+              onOcrRange: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_showOcrRangeDialog(context, book));
+                    }
+                  : null,
+              onOcrBook: isPdf
+                  ? () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_startOcrWholeBook(context, book));
                     }
                   : null,
               onImageBox: isPdf
@@ -496,8 +624,27 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     );
     _sessionController = sessionController;
     final book = ref.watch(readerBookProvider(widget.bookId));
+    ref.watch(readerOcrCoordinatorProvider(widget.bookId));
     final progress = ref.watch(readerProgressProvider(widget.bookId));
     final settings = ref.watch(readerSettingsProvider);
+    ref.listen(readerSettingsSavePhaseProvider, (previous, next) {
+      if (next.asData?.value != ReaderSettingsSavePhase.failed ||
+          previous?.asData?.value == ReaderSettingsSavePhase.failed) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('阅读设置未保存，修改已保留'),
+          action: SnackBarAction(
+            label: '重试',
+            onPressed: ref.read(readerSettingsControllerProvider).retry,
+          ),
+        ),
+      );
+    });
+    if (settings.value != null) {
+      _syncDesktopChromePrefs(settings.value!);
+    }
     final bookmarks = ref.watch(bookmarksByBookProvider(widget.bookId));
     final currentLocator = _currentLocation?.locator ?? progress.value?.locator;
     final currentBookmark = _bookmarkAtLocator(
@@ -546,6 +693,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       child: Focus(
         autofocus: true,
         onKeyEvent: (node, event) {
+          if (event is KeyDownEvent) {
+            _pdfQuickToolbarKeyboardInput = true;
+            if (_pdfQuickToolbarFocused) {
+              _pdfQuickToolbarTimer?.cancel();
+            }
+          }
           if (event is KeyDownEvent &&
               event.logicalKey == LogicalKeyboardKey.keyF &&
               HardwareKeyboard.instance.isControlPressed &&
@@ -558,101 +711,55 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         child: Scaffold(
           appBar: context.appBreakpoint.isCompact
               ? null
-              : AppBar(
-                  leading: IconButton(
-                    tooltip: '返回书库',
-                    onPressed: () async {
-                      await ref
-                          .read(readerSessionControllerProvider(widget.bookId))
-                          .flush();
-                      if (context.mounted) {
-                        context.go('/library');
-                      }
-                    },
-                    icon: const Icon(Icons.arrow_back),
+              : ReaderDesktopToolbar(
+                  title: book.value?.title ?? '阅读器',
+                  tocOpen: context.supportsSidePanel && _desktopTocOpen,
+                  activeContextTab:
+                      context.supportsSidePanel && _desktopContextOpen
+                      ? _desktopContextTab
+                      : null,
+                  bookmarked: currentBookmark != null,
+                  onBack: () async {
+                    await ref
+                        .read(readerSessionControllerProvider(widget.bookId))
+                        .flush();
+                    if (context.mounted) {
+                      context.go('/library');
+                    }
+                  },
+                  onToc: book.value == null
+                      ? null
+                      : () {
+                          if (context.supportsSidePanel) {
+                            _setDesktopTocOpen(!_desktopTocOpen);
+                            return;
+                          }
+                          unawaited(_showTableOfContents(context, book.value!));
+                        },
+                  onSearch: () => _showInBookSearch(context),
+                  onBookmark: () => _toggleBookmark(context, currentBookmark),
+                  onNotebook: () => _showContextOrSheet(
+                    context,
+                    ReaderContextTab.notebook,
+                    () => _showNotebook(context),
                   ),
-                  title: Text(
-                    book.value?.title ?? '阅读器',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  onAi: () => unawaited(_showAiPanel(context)),
+                  onSettings: settings.value == null
+                      ? null
+                      : () => _showReaderSettings(context, settings.value!),
+                  onMore: (action) => _handleReaderMoreAction(
+                    context,
+                    action,
+                    book.value,
+                    settings.value,
                   ),
-                  actions: [
-                    _ReaderToolbarButton(
-                      icon: Icons.toc,
-                      label: context.supportsSidePanel && _desktopTocOpen
-                          ? '收起目录'
-                          : '目录',
-                      onPressed: book.value == null
-                          ? null
-                          : () {
-                              if (context.supportsSidePanel) {
-                                _setDesktopTocOpen(!_desktopTocOpen);
-                                return;
-                              }
-                              unawaited(
-                                _showTableOfContents(context, book.value!),
-                              );
-                            },
-                    ),
-                    _ReaderToolbarButton(
-                      icon: Icons.search,
-                      label: '搜索',
-                      onPressed: () => _showInBookSearch(context),
-                    ),
-                    _ReaderToolbarButton(
-                      icon: currentBookmark == null
-                          ? Icons.bookmark_add_outlined
-                          : Icons.bookmark,
-                      label: currentBookmark == null ? '加书签' : '取消书签',
-                      onPressed: () =>
-                          _toggleBookmark(context, currentBookmark),
-                    ),
-                    _ReaderToolbarButton(
-                      icon: Icons.library_books_outlined,
-                      label: '笔记',
-                      onPressed: () => _showContextOrSheet(
-                        context,
-                        _ReaderContextTab.notebook,
-                        () => _showNotebook(context),
-                      ),
-                    ),
-                    _ReaderToolbarButton(
-                      icon: Icons.auto_awesome_outlined,
-                      label: 'AI',
-                      onPressed: () => unawaited(_showAiPanel(context)),
-                    ),
-                    _ReaderToolbarButton(
-                      icon: Icons.tune,
-                      label: '设置',
-                      onPressed: settings.value == null
-                          ? null
-                          : () => _showReaderSettings(context, settings.value!),
-                    ),
-                    if (settings.value != null)
-                      _ReaderToolbarButton(
-                        icon: Icons.brightness_4_outlined,
-                        label: '主题',
-                        onPressed: () =>
-                            _showQuickThemeSheet(context, settings.value!),
-                      ),
-                    PopupMenuButton<_ReaderMoreAction>(
-                      tooltip: '更多阅读操作',
-                      onSelected: (action) => _handleReaderMoreAction(
-                        context,
-                        action,
-                        book.value,
-                        settings.value,
-                      ),
-                      itemBuilder: (context) =>
-                          _readerMoreMenuItems(book.value, settings.value),
-                      icon: const Icon(Icons.more_vert),
-                    ),
-                  ],
+                  moreItems: (context) =>
+                      _readerMoreMenuItems(book.value, settings.value),
                 ),
           body: book.when(
             data: (book) {
               if (book == null) {
-                return const _ReaderMessage(message: '找不到这本书');
+                return const ReaderMessage(message: '找不到这本书');
               }
 
               if (!_markedOpened) {
@@ -668,511 +775,654 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 data: (snapshot) {
                   final readerSettings =
                       settings.value ?? const ReaderSettings();
-                  // Only lock chrome prefs after settings have actually loaded.
-                  if (settings.hasValue && settings.value != null) {
-                    _syncDesktopChromePrefs(settings.value!);
-                  }
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      const desktopStatusBarHeight = 34.0;
-                      final showDesktopContext =
-                          _desktopContextOpen &&
-                          AppBreakpoint.supportsSidePanelWidth(
-                            constraints.maxWidth,
-                          );
-                      final showDesktopToc =
-                          _desktopTocOpen &&
-                          AppBreakpoint.supportsSidePanelWidth(
-                            constraints.maxWidth,
-                          );
-                      final showDesktopChrome =
-                          AppBreakpoint.supportsSidePanelWidth(
-                            constraints.maxWidth,
-                          );
-                      final tocWidth = _clampPanelWidth(
-                        _desktopTocWidth,
-                        min: 220,
-                        max: 420,
-                        availableWidth: constraints.maxWidth,
-                      );
-                      final contextWidth = _clampPanelWidth(
-                        _desktopContextWidth,
-                        min: 340,
-                        max: 600,
-                        availableWidth: constraints.maxWidth,
-                        maxFraction: 0.48,
-                      );
-                      return Stack(
-                        children: [
-                          if (showDesktopToc)
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              bottom: showDesktopChrome
-                                  ? desktopStatusBarHeight
-                                  : 0,
-                              width: tocWidth,
-                              child: _DesktopTocPane(
-                                book: book,
-                                pdfOutline: _pdfOutline,
-                                totalPages: _currentLocation?.totalPages,
-                                currentLocator:
-                                    _currentLocation?.locator ??
-                                    snapshot?.locator,
-                                locationListenable: _locationNotifier,
-                                onSelected: _jumpTo,
-                                onClose: () => _setDesktopTocOpen(false),
-                              ),
-                            ),
-                          if (showDesktopToc)
-                            Positioned(
-                              top: 0,
-                              left: tocWidth - 3,
-                              bottom: showDesktopChrome
-                                  ? desktopStatusBarHeight
-                                  : 0,
-                              width: 6,
-                              child: _PanelResizeHandle(
-                                semanticLabel: '调整目录宽度',
-                                onDrag: (delta) => _setDesktopTocWidth(
-                                  _desktopTocWidth + delta.delta.dx,
+                  return _withFolderSession(book, snapshot, () {
+                    return LayoutBuilder(
+                      builder: (context, constraints) {
+                        const desktopStatusBarHeight = 34.0;
+                        final showDesktopContext =
+                            _desktopContextOpen &&
+                            AppBreakpoint.supportsSidePanelWidth(
+                              constraints.maxWidth,
+                            );
+                        final showDesktopToc =
+                            _desktopTocOpen &&
+                            AppBreakpoint.supportsSidePanelWidth(
+                              constraints.maxWidth,
+                            );
+                        final showDesktopChrome =
+                            AppBreakpoint.supportsSidePanelWidth(
+                              constraints.maxWidth,
+                            );
+                        final tocWidth = _clampPanelWidth(
+                          _desktopTocWidth,
+                          min: 220,
+                          max: 420,
+                          availableWidth: constraints.maxWidth,
+                        );
+                        final contextWidth = _clampPanelWidth(
+                          _desktopContextWidth,
+                          min: 340,
+                          max: 600,
+                          availableWidth: constraints.maxWidth,
+                          maxFraction: 0.48,
+                        );
+                        return Listener(
+                          onPointerDown: (_) {
+                            if (book.format == BookFormat.pdf &&
+                                !context.appBreakpoint.isCompact) {
+                              _pdfQuickToolbarKeyboardInput = false;
+                              if (_pdfQuickToolbarVisible) {
+                                _schedulePdfQuickToolbarAutoHide();
+                              }
+                            }
+                          },
+                          onPointerHover: (event) =>
+                              _handleReaderHover(event, book),
+                          child: Stack(
+                            children: [
+                              if (showDesktopToc)
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  bottom: showDesktopChrome
+                                      ? desktopStatusBarHeight
+                                      : 0,
+                                  width: tocWidth,
+                                  child: DesktopTocPane(
+                                    book: book,
+                                    documentLoader: _documentLoaderFor(book),
+                                    folderManifest: _folderSession.manifest,
+                                    activeFolderFile:
+                                        _folderSession.activeFile?.relativePath,
+                                    onFolderFileSelected: _openFolderFile,
+                                    onRefresh: _refreshFolderBook,
+                                    refreshState: _folderRefreshState,
+                                    pdfOutline: _pdfOutline,
+                                    totalPages: _currentLocation?.totalPages,
+                                    currentLocator:
+                                        _currentLocation?.locator ??
+                                        snapshot?.locator,
+                                    locationListenable: _locationNotifier,
+                                    onSelected: _jumpTo,
+                                    onClose: () => _setDesktopTocOpen(false),
+                                  ),
+                                ),
+                              if (showDesktopToc)
+                                Positioned(
+                                  top: 0,
+                                  left: tocWidth - 3,
+                                  bottom: showDesktopChrome
+                                      ? desktopStatusBarHeight
+                                      : 0,
+                                  width: 6,
+                                  child: PanelResizeHandle(
+                                    semanticLabel: '调整目录宽度',
+                                    onDrag: (delta) => _setDesktopTocWidth(
+                                      _desktopTocWidth + delta.delta.dx,
+                                    ),
+                                  ),
+                                ),
+                              Positioned.fill(
+                                left: showDesktopToc ? tocWidth : 0,
+                                right: showDesktopContext ? contextWidth : 0,
+                                bottom: showDesktopChrome
+                                    ? desktopStatusBarHeight
+                                    : 0,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color:
+                                        readerSettings.themePreset.background,
+                                  ),
+                                  // Annotations are watched in a leaf widget so
+                                  // highlight updates do not rebuild the whole reader chrome.
+                                  child: ReaderAnnotationsHost(
+                                    bookId: widget.bookId,
+                                    book: book,
+                                    progress: _rendererProgressFor(snapshot),
+                                    documentPath:
+                                        _folderSession.activeFile?.absolutePath,
+                                    folderRelativePath:
+                                        _folderSession.activeFile?.relativePath,
+                                    settings: readerSettings,
+                                    version: _rendererVersion,
+                                    jumpToken: _jumpToken,
+                                    searchQuery: _rendererSearchQuery,
+                                    focusLocator: _focusLocator,
+                                    clearSearchHighlightsVersion:
+                                        _clearSearchHighlightsVersion,
+                                    clearSelectionVersion:
+                                        _clearSelectionVersion,
+                                    onEvent: _handleRendererEvent,
+                                    ocrOverlayToken: _ocrOverlays.state.token,
+                                    ocrOverlayPage: _ocrOverlays.state.page,
+                                    ocrOverlayBlocks: _ocrOverlays.state.blocks,
+                                    onZoomChanged: _handlePdfZoomChanged,
+                                    imageDragMode: _imageDragMode,
+                                    onImageAreaSelected:
+                                        _showImageAnnotationActions,
+                                  ),
                                 ),
                               ),
-                            ),
-                          Positioned.fill(
-                            left: showDesktopToc ? tocWidth : 0,
-                            right: showDesktopContext ? contextWidth : 0,
-                            bottom: showDesktopChrome
-                                ? desktopStatusBarHeight
-                                : 0,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: readerSettings.themePreset.background,
-                              ),
-                              // Annotations are watched in a leaf widget so
-                              // highlight updates do not rebuild the whole reader chrome.
-                              child: _ReaderAnnotationsHost(
-                                bookId: widget.bookId,
-                                book: book,
-                                progress: _jumpProgress ?? snapshot,
-                                settings: readerSettings,
-                                version: _rendererVersion,
-                                jumpToken: _jumpToken,
-                                searchQuery: _rendererSearchQuery,
-                                focusLocator: _focusLocator,
-                                clearSearchHighlightsVersion:
-                                    _clearSearchHighlightsVersion,
-                                clearSelectionVersion: _clearSelectionVersion,
-                                onEvent: _handleRendererEvent,
-                                ocrOverlayToken: _ocrOverlayToken,
-                                ocrOverlayPage: _ocrOverlayPage,
-                                ocrOverlayBlocks: _ocrOverlayBlocks,
-                                onZoomChanged: _handlePdfZoomChanged,
-                                imageDragMode: _imageDragMode,
-                                onImageAreaSelected:
-                                    _showImageAnnotationActions,
-                              ),
-                            ),
-                          ),
-                          if (book.format == BookFormat.pdf &&
-                              !context.appBreakpoint.isCompact)
-                            Positioned(
-                              top: 12,
-                              left: showDesktopToc ? tocWidth + 16 : 16,
-                              right: showDesktopContext
-                                  ? contextWidth + 16
-                                  : 16,
-                              child: Center(
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 760,
-                                  ),
-                                  child: ValueListenableBuilder<RendererLocationChanged?>(
-                                    valueListenable: _locationNotifier,
-                                    builder: (context, location, _) {
-                                      return _PdfQuickToolbar(
-                                        pageNumber: location?.pageNumber,
-                                        totalPages: location?.totalPages,
-                                        settings: readerSettings,
-                                        bookmarked: currentBookmark != null,
-                                        searchAvailable:
-                                            _rendererSearchAvailable != false,
-                                        textLayerAvailable:
-                                            // After OCR, selection works, but "native" may still be false.
-                                            // Treat either native or OCR overlay as selection-capable UI.
-                                            (_rendererNativeTextLayerAvailable ==
-                                                true) ||
-                                            _rendererOcrTextLayerAvailable ||
-                                            (_rendererTextSelectionAvailable !=
-                                                false),
-                                        capabilityReason:
-                                            _rendererSearchUnavailableReason,
-                                        onPageJump: () =>
-                                            unawaited(_showPageJump(context)),
-                                        onZoomOut: () =>
-                                            unawaited(_adjustReaderScale(-1)),
-                                        onZoomIn: () =>
-                                            unawaited(_adjustReaderScale(1)),
-                                        onFitWidth: () => unawaited(
-                                          _setPdfZoomMode(PdfZoomMode.fitWidth),
-                                        ),
-                                        onFitPage: () => unawaited(
-                                          _setPdfZoomMode(PdfZoomMode.fitPage),
-                                        ),
-                                        onSearch: () => unawaited(
-                                          _showInBookSearch(context),
-                                        ),
-                                        onBookmark: () => _toggleBookmark(
-                                          context,
-                                          currentBookmark,
-                                        ),
-                                        onOcrPage:
-                                            _rendererNativeTextLayerAvailable ==
-                                                false
-                                            ? () => unawaited(
-                                                _runOcrCurrentPage(
-                                                  context,
-                                                  book,
+                              if (book.format == BookFormat.pdf &&
+                                  !context.appBreakpoint.isCompact) ...[
+                                Positioned(
+                                  top: 12,
+                                  left: showDesktopToc ? tocWidth + 16 : 16,
+                                  right: showDesktopContext
+                                      ? contextWidth + 16
+                                      : 16,
+                                  child: IgnorePointer(
+                                    ignoring: !_pdfQuickToolbarVisible,
+                                    child: ExcludeSemantics(
+                                      excluding: !_pdfQuickToolbarVisible,
+                                      child: ExcludeFocus(
+                                        excluding: !_pdfQuickToolbarVisible,
+                                        child: MouseRegion(
+                                          onEnter: (_) =>
+                                              _setPdfQuickToolbarHovered(true),
+                                          onExit: (_) =>
+                                              _setPdfQuickToolbarHovered(false),
+                                          child: Focus(
+                                            onFocusChange:
+                                                _setPdfQuickToolbarFocused,
+                                            child: AnimatedSlide(
+                                              duration: const Duration(
+                                                milliseconds: 160,
+                                              ),
+                                              curve: Curves.easeOutCubic,
+                                              offset: _pdfQuickToolbarVisible
+                                                  ? Offset.zero
+                                                  : const Offset(0, -0.12),
+                                              child: AnimatedOpacity(
+                                                duration: const Duration(
+                                                  milliseconds: 140,
                                                 ),
-                                              )
-                                            : null,
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (showDesktopContext)
-                            Positioned(
-                              top: 0,
-                              right: 0,
-                              bottom: showDesktopChrome
-                                  ? desktopStatusBarHeight
-                                  : 0,
-                              width: contextWidth,
-                              child: _DesktopContextPane(
-                                bookId: widget.bookId,
-                                bookPath: book.libraryFilePath,
-                                format: book.format,
-                                activeTab: _desktopContextTab,
-                                searchQuery: _rendererSearchQuery,
-                                currentLocator:
-                                    _currentLocation?.locator ??
-                                    snapshot?.locator,
-                                selectedText: _selectedText?.text,
-                                selectedLocator: _selectedText?.locator,
-                                onQueryChanged: _applyRendererSearchQuery,
-                                onPreviewResult: _jumpTo,
-                                onClear: _clearRendererSearchHighlights,
-                                onClose: _closeDesktopContext,
-                                onTabChanged: _setDesktopContextTab,
-                                onAction: _handleInBookSearchAction,
-                                onAskAi: _showAiPanel,
-                                onNoteSaved: () {
-                                  ref.invalidate(
-                                    notesByBookProvider(widget.bookId),
-                                  );
-                                },
-                              ),
-                            ),
-                          if (showDesktopContext)
-                            Positioned(
-                              top: 0,
-                              right: contextWidth - 3,
-                              bottom: showDesktopChrome
-                                  ? desktopStatusBarHeight
-                                  : 0,
-                              width: 6,
-                              child: _PanelResizeHandle(
-                                semanticLabel: '调整上下文栏宽度',
-                                onDrag: (delta) => _setDesktopContextWidth(
-                                  _desktopContextWidth - delta.delta.dx,
-                                ),
-                              ),
-                            ),
-                          // Status banner must keep Positioned as a *direct* Stack child.
-                          // Wrapping Positioned in ValueListenableBuilder breaks the
-                          // Stack and blanks the whole reader body.
-                          Positioned(
-                            left: showDesktopToc ? tocWidth + 16 : 16,
-                            right: showDesktopContext ? contextWidth + 16 : 16,
-                            bottom: showDesktopChrome
-                                ? desktopStatusBarHeight + 10
-                                : 16,
-                            // One column, so a persistent mode banner and a
-                            // transient status cannot land on top of each other.
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (_imageDragMode) ...[
-                                  _ImageBoxModeBanner(
-                                    onExit: _toggleImageDragMode,
-                                  ),
-                                  const SizedBox(height: 6),
-                                ],
-                                ValueListenableBuilder<String?>(
-                                  valueListenable: _statusNotifier,
-                                  builder: (context, status, _) {
-                                    if (status == null) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    return _ReaderStatusBanner(message: status);
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (_renderError != null)
-                            Positioned.fill(
-                              left: showDesktopToc ? tocWidth : 0,
-                              right: showDesktopContext ? contextWidth : 0,
-                              child: _ReaderErrorPanel(
-                                message: _renderError!,
-                                onRetry: _retryRenderer,
-                                onShowDetails: () => _showRenderErrorDetails(
-                                  context,
-                                  _renderError!,
-                                ),
-                              ),
-                            ),
-                          if (showDesktopChrome)
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              height: desktopStatusBarHeight,
-                              child:
-                                  ValueListenableBuilder<
-                                    RendererLocationChanged?
-                                  >(
-                                    valueListenable: _locationNotifier,
-                                    builder: (context, location, _) {
-                                      return _ReaderStatusBar(
-                                        book: book,
-                                        locator:
-                                            location?.locator ??
-                                            snapshot?.locator,
-                                        progress:
-                                            location?.progress ??
-                                            snapshot?.progress,
-                                        chapterTitle:
-                                            location?.chapterTitle ??
-                                            snapshot?.chapterTitle,
-                                        pageNumber: location?.pageNumber,
-                                        totalPages: location?.totalPages,
-                                        settings: readerSettings,
-                                        tocOpen: showDesktopToc,
-                                        contextOpen: showDesktopContext,
-                                        tocWidth: tocWidth,
-                                        contextWidth: contextWidth,
-                                      );
-                                    },
-                                  ),
-                            ),
-                          if (context.appBreakpoint.isCompact) ...[
-                            // Center-band toggle (Apple Books / Kindle style).
-                            // Kept as a short middle strip so vertical scroll and
-                            // edge page-turns still work.
-                            Positioned(
-                              left: 72,
-                              right: 72,
-                              top: 0,
-                              bottom: 0,
-                              child: Center(
-                                child: SizedBox(
-                                  height: 120,
-                                  width: double.infinity,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.translucent,
-                                    onTap: () =>
-                                        _toggleMobileChrome(autoHide: true),
-                                    child: const SizedBox.expand(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // Animated immersive chrome.
-                            Positioned(
-                              left: AppSpacing.x2,
-                              right: AppSpacing.x2,
-                              top: AppSpacing.x2,
-                              child: IgnorePointer(
-                                ignoring: !_mobileChromeVisible,
-                                child: AnimatedSlide(
-                                  duration: const Duration(milliseconds: 180),
-                                  curve: Curves.easeOutCubic,
-                                  offset: _mobileChromeVisible
-                                      ? Offset.zero
-                                      : const Offset(0, -0.35),
-                                  child: AnimatedOpacity(
-                                    duration: const Duration(milliseconds: 160),
-                                    opacity: _mobileChromeVisible ? 1 : 0,
-                                    child: SafeArea(
-                                      bottom: false,
-                                      child: _MobileReaderTopBar(
-                                        title: book.title,
-                                        progress:
-                                            _currentLocation?.progress ??
-                                            snapshot?.progress,
-                                        locationLabel: _readerLocationText(
-                                          book: book,
-                                          locator:
-                                              _currentLocation?.locator ??
-                                              snapshot?.locator,
-                                          chapterTitle:
-                                              _currentLocation?.chapterTitle ??
-                                              snapshot?.chapterTitle,
-                                          pageNumber:
-                                              _currentLocation?.pageNumber,
-                                          totalPages:
-                                              _currentLocation?.totalPages,
-                                        ),
-                                        onBack: () async {
-                                          await ref
-                                              .read(
-                                                readerSessionControllerProvider(
-                                                  widget.bookId,
+                                                opacity: _pdfQuickToolbarVisible
+                                                    ? 1
+                                                    : 0,
+                                                child: Center(
+                                                  child: ConstrainedBox(
+                                                    constraints:
+                                                        const BoxConstraints(
+                                                          maxWidth: 760,
+                                                        ),
+                                                    child: ValueListenableBuilder<RendererLocationChanged?>(
+                                                      valueListenable:
+                                                          _locationNotifier,
+                                                      builder: (context, location, _) {
+                                                        return PdfQuickToolbar(
+                                                          pageNumber: location
+                                                              ?.pageNumber,
+                                                          totalPages: location
+                                                              ?.totalPages,
+                                                          settings:
+                                                              readerSettings,
+                                                          searchAvailable:
+                                                              _rendererSearchAvailable !=
+                                                              false,
+                                                          textLayerAvailable:
+                                                              // After OCR, selection works, but "native" may still be false.
+                                                              // Treat either native or OCR overlay as selection-capable UI.
+                                                              (_rendererNativeTextLayerAvailable ==
+                                                                  true) ||
+                                                              _rendererOcrTextLayerAvailable ||
+                                                              (_rendererTextSelectionAvailable !=
+                                                                  false),
+                                                          capabilityReason:
+                                                              _rendererSearchUnavailableReason,
+                                                          onPageJump: () =>
+                                                              unawaited(
+                                                                _showPageJump(
+                                                                  context,
+                                                                ),
+                                                              ),
+                                                          onZoomOut: () =>
+                                                              unawaited(
+                                                                _adjustReaderScale(
+                                                                  -1,
+                                                                ),
+                                                              ),
+                                                          onZoomIn: () =>
+                                                              unawaited(
+                                                                _adjustReaderScale(
+                                                                  1,
+                                                                ),
+                                                              ),
+                                                          onFitWidth: () =>
+                                                              unawaited(
+                                                                _setPdfZoomMode(
+                                                                  PdfZoomMode
+                                                                      .fitWidth,
+                                                                ),
+                                                              ),
+                                                          onFitPage: () =>
+                                                              unawaited(
+                                                                _setPdfZoomMode(
+                                                                  PdfZoomMode
+                                                                      .fitPage,
+                                                                ),
+                                                              ),
+                                                          onOcrPage: () =>
+                                                              unawaited(
+                                                                _runOcrCurrentPage(
+                                                                  context,
+                                                                  book,
+                                                                ),
+                                                              ),
+                                                          onOcrRange: () =>
+                                                              unawaited(
+                                                                _showOcrRangeDialog(
+                                                                  context,
+                                                                  book,
+                                                                ),
+                                                              ),
+                                                          onOcrBook: () =>
+                                                              unawaited(
+                                                                _startOcrWholeBook(
+                                                                  context,
+                                                                  book,
+                                                                ),
+                                                              ),
+                                                          onOcrMenuChanged:
+                                                              _setPdfQuickToolbarMenuOpen,
+                                                          onCollapse: () =>
+                                                              _hidePdfQuickToolbar(
+                                                                userInitiated:
+                                                                    true,
+                                                              ),
+                                                        );
+                                                      },
+                                                    ),
+                                                  ),
                                                 ),
-                                              )
-                                              .flush();
-                                          if (context.mounted) {
-                                            context.go('/library');
-                                          }
-                                        },
-                                        onToc: () => unawaited(
-                                          _showTableOfContents(context, book),
-                                        ),
-                                        onMore: () => unawaited(
-                                          _showMobileMoreSheet(
-                                            context: context,
-                                            book: book,
-                                            settings: readerSettings,
-                                            currentBookmark: currentBookmark,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            Positioned(
-                              left: AppSpacing.x2,
-                              right: AppSpacing.x2,
-                              bottom: AppSpacing.x2,
-                              child: IgnorePointer(
-                                ignoring: !_mobileChromeVisible,
-                                child: AnimatedSlide(
-                                  duration: const Duration(milliseconds: 180),
-                                  curve: Curves.easeOutCubic,
-                                  offset: _mobileChromeVisible
-                                      ? Offset.zero
-                                      : const Offset(0, 0.35),
-                                  child: AnimatedOpacity(
-                                    duration: const Duration(milliseconds: 160),
-                                    opacity: _mobileChromeVisible ? 1 : 0,
-                                    child: SafeArea(
-                                      top: false,
-                                      child:
-                                          ValueListenableBuilder<
-                                            RendererLocationChanged?
-                                          >(
-                                            valueListenable: _locationNotifier,
-                                            builder: (context, location, _) {
-                                              return _MobileReaderBottomBar(
-                                                book: book,
-                                                locator:
-                                                    location?.locator ??
-                                                    snapshot?.locator,
-                                                progress:
-                                                    location?.progress ??
-                                                    snapshot?.progress,
-                                                chapterTitle:
-                                                    location?.chapterTitle ??
-                                                    snapshot?.chapterTitle,
-                                                pageNumber:
-                                                    location?.pageNumber,
-                                                totalPages:
-                                                    location?.totalPages,
-                                                bookmarked:
-                                                    currentBookmark != null,
-                                                searchAvailable:
-                                                    _rendererSearchAvailable !=
-                                                    false,
-                                                onToc: () => unawaited(
-                                                  _showTableOfContents(
-                                                    context,
-                                                    book,
-                                                  ),
-                                                ),
-                                                onSearch: () => unawaited(
-                                                  _showInBookSearch(context),
-                                                ),
-                                                onBookmark: () =>
-                                                    _toggleBookmark(
-                                                      context,
-                                                      currentBookmark,
-                                                    ),
-                                                onProgressTap:
-                                                    book.format ==
-                                                        BookFormat.pdf
-                                                    ? () => unawaited(
-                                                        _showPageJump(context),
-                                                      )
-                                                    : null,
-                                                onMore: () => unawaited(
-                                                  _showMobileMoreSheet(
-                                                    context: context,
-                                                    book: book,
-                                                    settings: readerSettings,
-                                                    currentBookmark:
-                                                        currentBookmark,
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          ),
+                                if (!_pdfQuickToolbarVisible)
+                                  Positioned(
+                                    top: 10,
+                                    left: showDesktopToc ? tocWidth + 16 : 16,
+                                    right: showDesktopContext
+                                        ? contextWidth + 16
+                                        : 16,
+                                    child: Center(
+                                      child: MouseRegion(
+                                        onEnter: (_) => _showPdfQuickToolbar(),
+                                        child: PdfQuickToolbarReveal(
+                                          pageNumber:
+                                              _currentLocation?.pageNumber,
+                                          totalPages:
+                                              _currentLocation?.totalPages,
+                                          onReveal: () =>
+                                              _showPdfQuickToolbar(force: true),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                              if (showDesktopContext)
+                                Positioned(
+                                  top: 0,
+                                  right: 0,
+                                  bottom: showDesktopChrome
+                                      ? desktopStatusBarHeight
+                                      : 0,
+                                  width: contextWidth,
+                                  child: ReaderContextPane(
+                                    bookId: widget.bookId,
+                                    bookPath: book.libraryFilePath,
+                                    format: book.format,
+                                    activeTab: _desktopContextTab,
+                                    searchQuery: _rendererSearchQuery,
+                                    currentLocator:
+                                        _currentLocation?.locator ??
+                                        snapshot?.locator,
+                                    selectedText: _selectedText?.text,
+                                    selectedLocator: _selectedText?.locator,
+                                    onQueryChanged: _applyRendererSearchQuery,
+                                    onPreviewResult: _jumpTo,
+                                    onClear: _clearRendererSearchHighlights,
+                                    onClose: _closeDesktopContext,
+                                    onTabChanged: _setDesktopContextTab,
+                                    onAction: _handleInBookSearchAction,
+                                    onNoteSaved: () {
+                                      ref.invalidate(
+                                        notesByBookProvider(widget.bookId),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              if (showDesktopContext)
+                                Positioned(
+                                  top: 0,
+                                  right: contextWidth - 3,
+                                  bottom: showDesktopChrome
+                                      ? desktopStatusBarHeight
+                                      : 0,
+                                  width: 6,
+                                  child: PanelResizeHandle(
+                                    semanticLabel: '调整上下文栏宽度',
+                                    onDrag: (delta) => _setDesktopContextWidth(
+                                      _desktopContextWidth - delta.delta.dx,
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            if (!_mobileChromeVisible)
+                              // Status banner must keep Positioned as a *direct* Stack child.
+                              // Wrapping Positioned in ValueListenableBuilder breaks the
+                              // Stack and blanks the whole reader body.
                               Positioned(
-                                right: AppSpacing.x3,
-                                bottom: AppSpacing.x3,
-                                child: SafeArea(
-                                  top: false,
-                                  child: _ReaderChromeRevealButton(
-                                    onPressed: () =>
-                                        _showMobileChrome(autoHide: true),
-                                  ),
+                                left: showDesktopToc ? tocWidth + 16 : 16,
+                                right: showDesktopContext
+                                    ? contextWidth + 16
+                                    : 16,
+                                bottom: showDesktopChrome
+                                    ? desktopStatusBarHeight + 10
+                                    : 16,
+                                // One column, so a persistent mode banner and a
+                                // transient status cannot land on top of each other.
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_imageDragMode) ...[
+                                      ImageBoxModeBanner(
+                                        onExit: _toggleImageDragMode,
+                                      ),
+                                      const SizedBox(height: 6),
+                                    ],
+                                    ValueListenableBuilder<String?>(
+                                      valueListenable: _statusNotifier,
+                                      builder: (context, status, _) {
+                                        if (status == null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return ReaderStatusBanner(
+                                          message: status,
+                                        );
+                                      },
+                                    ),
+                                  ],
                                 ),
                               ),
-                          ],
-                        ],
-                      );
-                    },
-                  );
+                              if (_renderError != null)
+                                Positioned.fill(
+                                  left: showDesktopToc ? tocWidth : 0,
+                                  right: showDesktopContext ? contextWidth : 0,
+                                  child: ReaderErrorPanel(
+                                    message: _renderError!,
+                                    onRetry: _retryRenderer,
+                                    onShowDetails: () =>
+                                        _showRenderErrorDetails(
+                                          context,
+                                          _renderError!,
+                                        ),
+                                  ),
+                                ),
+                              if (showDesktopChrome)
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  height: desktopStatusBarHeight,
+                                  child:
+                                      ValueListenableBuilder<
+                                        RendererLocationChanged?
+                                      >(
+                                        valueListenable: _locationNotifier,
+                                        builder: (context, location, _) {
+                                          return ReaderStatusBar(
+                                            book: book,
+                                            locator:
+                                                location?.locator ??
+                                                snapshot?.locator,
+                                            progress:
+                                                location?.progress ??
+                                                snapshot?.progress,
+                                            chapterTitle:
+                                                location?.chapterTitle ??
+                                                snapshot?.chapterTitle,
+                                            pageNumber: location?.pageNumber,
+                                            totalPages: location?.totalPages,
+                                            settings: readerSettings,
+                                            tocOpen: showDesktopToc,
+                                            contextOpen: showDesktopContext,
+                                            tocWidth: tocWidth,
+                                            contextWidth: contextWidth,
+                                          );
+                                        },
+                                      ),
+                                ),
+                              if (context.appBreakpoint.isCompact) ...[
+                                // Center-band toggle (Apple Books / Kindle style).
+                                // Kept as a short middle strip so vertical scroll and
+                                // edge page-turns still work.
+                                Positioned(
+                                  left: 72,
+                                  right: 72,
+                                  top: 0,
+                                  bottom: 0,
+                                  child: Center(
+                                    child: SizedBox(
+                                      height: 120,
+                                      width: double.infinity,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: () =>
+                                            _toggleMobileChrome(autoHide: true),
+                                        child: const SizedBox.expand(),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // Animated immersive chrome.
+                                Positioned(
+                                  left: AppSpacing.x2,
+                                  right: AppSpacing.x2,
+                                  top: AppSpacing.x2,
+                                  child: IgnorePointer(
+                                    ignoring: !_mobileChromeVisible,
+                                    child: AnimatedSlide(
+                                      duration: const Duration(
+                                        milliseconds: 180,
+                                      ),
+                                      curve: Curves.easeOutCubic,
+                                      offset: _mobileChromeVisible
+                                          ? Offset.zero
+                                          : const Offset(0, -0.35),
+                                      child: AnimatedOpacity(
+                                        duration: const Duration(
+                                          milliseconds: 160,
+                                        ),
+                                        opacity: _mobileChromeVisible ? 1 : 0,
+                                        child: SafeArea(
+                                          bottom: false,
+                                          child: MobileReaderTopBar(
+                                            title: book.title,
+                                            progress:
+                                                _currentLocation?.progress ??
+                                                snapshot?.progress,
+                                            locationLabel: readerLocationText(
+                                              book: book,
+                                              locator:
+                                                  _currentLocation?.locator ??
+                                                  snapshot?.locator,
+                                              chapterTitle:
+                                                  _currentLocation
+                                                      ?.chapterTitle ??
+                                                  snapshot?.chapterTitle,
+                                              pageNumber:
+                                                  _currentLocation?.pageNumber,
+                                              totalPages:
+                                                  _currentLocation?.totalPages,
+                                            ),
+                                            onBack: () async {
+                                              await ref
+                                                  .read(
+                                                    readerSessionControllerProvider(
+                                                      widget.bookId,
+                                                    ),
+                                                  )
+                                                  .flush();
+                                              if (context.mounted) {
+                                                context.go('/library');
+                                              }
+                                            },
+                                            onToc: () => unawaited(
+                                              _showTableOfContents(
+                                                context,
+                                                book,
+                                              ),
+                                            ),
+                                            onMore: () => unawaited(
+                                              _showMobileMoreSheet(
+                                                context: context,
+                                                book: book,
+                                                settings: readerSettings,
+                                                currentBookmark:
+                                                    currentBookmark,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  left: AppSpacing.x2,
+                                  right: AppSpacing.x2,
+                                  bottom: AppSpacing.x2,
+                                  child: IgnorePointer(
+                                    ignoring: !_mobileChromeVisible,
+                                    child: AnimatedSlide(
+                                      duration: const Duration(
+                                        milliseconds: 180,
+                                      ),
+                                      curve: Curves.easeOutCubic,
+                                      offset: _mobileChromeVisible
+                                          ? Offset.zero
+                                          : const Offset(0, 0.35),
+                                      child: AnimatedOpacity(
+                                        duration: const Duration(
+                                          milliseconds: 160,
+                                        ),
+                                        opacity: _mobileChromeVisible ? 1 : 0,
+                                        child: SafeArea(
+                                          top: false,
+                                          child:
+                                              ValueListenableBuilder<
+                                                RendererLocationChanged?
+                                              >(
+                                                valueListenable:
+                                                    _locationNotifier,
+                                                builder: (context, location, _) {
+                                                  return MobileReaderBottomBar(
+                                                    book: book,
+                                                    locator:
+                                                        location?.locator ??
+                                                        snapshot?.locator,
+                                                    progress:
+                                                        location?.progress ??
+                                                        snapshot?.progress,
+                                                    chapterTitle:
+                                                        location
+                                                            ?.chapterTitle ??
+                                                        snapshot?.chapterTitle,
+                                                    pageNumber:
+                                                        location?.pageNumber,
+                                                    totalPages:
+                                                        location?.totalPages,
+                                                    bookmarked:
+                                                        currentBookmark != null,
+                                                    searchAvailable:
+                                                        _rendererSearchAvailable !=
+                                                        false,
+                                                    onToc: () => unawaited(
+                                                      _showTableOfContents(
+                                                        context,
+                                                        book,
+                                                      ),
+                                                    ),
+                                                    onSearch: () => unawaited(
+                                                      _showInBookSearch(
+                                                        context,
+                                                      ),
+                                                    ),
+                                                    onBookmark: () =>
+                                                        _toggleBookmark(
+                                                          context,
+                                                          currentBookmark,
+                                                        ),
+                                                    onProgressTap:
+                                                        book.format ==
+                                                            BookFormat.pdf
+                                                        ? () => unawaited(
+                                                            _showPageJump(
+                                                              context,
+                                                            ),
+                                                          )
+                                                        : null,
+                                                    onMore: () => unawaited(
+                                                      _showMobileMoreSheet(
+                                                        context: context,
+                                                        book: book,
+                                                        settings:
+                                                            readerSettings,
+                                                        currentBookmark:
+                                                            currentBookmark,
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (!_mobileChromeVisible)
+                                  Positioned(
+                                    right: AppSpacing.x3,
+                                    bottom: AppSpacing.x3,
+                                    child: SafeArea(
+                                      top: false,
+                                      child: ReaderChromeRevealButton(
+                                        onPressed: () =>
+                                            _showMobileChrome(autoHide: true),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  });
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (error, stackTrace) =>
-                    const _ReaderMessage(message: '无法读取阅读进度'),
+                    const ReaderMessage(message: '无法读取阅读进度'),
               );
             },
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, stackTrace) =>
-                const _ReaderMessage(message: '无法打开书籍'),
+                const ReaderMessage(message: '无法打开书籍'),
           ),
         ),
       ),
     );
   }
 
-  void _handleRendererEvent(RendererEvent event) {
+  void _handleRendererEvent(RendererEvent rawEvent) {
     if (!mounted) {
       return;
     }
+    final event = _folderSession.normalizeEvent(rawEvent);
     _sessionController?.handleEvent(event);
     switch (event) {
       case RendererReady():
@@ -1212,25 +1462,17 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         if (_renderError != null) {
           setState(() => _renderError = null);
         }
-      case RendererImagesDetected():
-        // Snapping happens inside the canvas view, which already holds the
-        // renderer; the host has nothing to do with the list yet. It is
-        // routed here so the event is not an unhandled case.
-        break;
       case RendererImageAreaSelected():
         _showImageAnnotationActions(event);
       case RendererTextSelected():
-        // Avoid setState on every selection event — rebuilding the whole reader
-        // (and WebView host) while the native ::selection is active makes the
-        // highlight jump. Only rebuild when the desktop AI pane needs the text.
         final previousText = _selectedText?.text;
         _selectedText = event;
         if (_desktopContextOpen) {
-          final needAiTab = _desktopContextTab != _ReaderContextTab.ai;
+          final needAiTab = _desktopContextTab != ReaderContextTab.ai;
           final textChanged = previousText != event.text;
           if (needAiTab || textChanged) {
             setState(() {
-              _desktopContextTab = _ReaderContextTab.ai;
+              _desktopContextTab = ReaderContextTab.ai;
             });
           }
         }
@@ -1245,8 +1487,6 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         }
       case RendererOutlineChanged(:final items):
         setState(() => _pdfOutline = items);
-      case RendererBookmarkRequested(:final locator):
-        _saveBookmarkAt(locator);
       case RendererCapabilityChanged(
         :final search,
         :final textSelection,
@@ -1278,6 +1518,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         _showAnnotationActionsById(annotationId, sourceRect: sourceRect);
       case RendererExternalLinkRequested(:final uri):
         unawaited(_confirmOpenExternalLink(uri));
+      case RendererInternalLinkRequested(:final locator):
+        _jumpTo(locator);
       case RendererFailed(:final message):
         _statusClearTimer?.cancel();
         setState(() {
@@ -1363,58 +1605,73 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
-  List<PopupMenuEntry<_ReaderMoreAction>> _readerMoreMenuItems(
+  List<PopupMenuEntry<ReaderMoreAction>> _readerMoreMenuItems(
     Book? book,
     ReaderSettings? settings,
   ) {
     // Flat items only. Nested ListTiles inside PopupMenuItem look broken.
     // Notebook/AI already have toolbar buttons, so keep this menu focused.
     final isPdf = book?.format == BookFormat.pdf;
+    final isFolderBook = book?.isFolderBook ?? false;
     return [
-      if (isPdf) ...[
+      if (isFolderBook)
         const PopupMenuItem(
-          value: _ReaderMoreAction.pageJump,
-          child: Text('跳转页码'),
+          value: ReaderMoreAction.refreshFolder,
+          child: Text('刷新文件夹并重建索引'),
         ),
-        CheckedPopupMenuItem(
-          value: _ReaderMoreAction.pdfFitWidth,
-          checked: settings?.pdfZoomMode == PdfZoomMode.fitWidth,
-          child: const Text('适合宽度'),
-        ),
-        CheckedPopupMenuItem(
-          value: _ReaderMoreAction.pdfFitPage,
-          checked: settings?.pdfZoomMode == PdfZoomMode.fitPage,
-          child: const Text('适合页面'),
-        ),
-        const PopupMenuItem(
-          value: _ReaderMoreAction.pdfZoomOut,
-          child: Text('缩小'),
-        ),
-        const PopupMenuItem(
-          value: _ReaderMoreAction.pdfZoomIn,
-          child: Text('放大'),
-        ),
-        CheckedPopupMenuItem(
-          value: _ReaderMoreAction.pdfImageBox,
-          checked: _imageDragMode,
-          child: const Text('框选图片'),
-        ),
-        const PopupMenuDivider(),
-      ],
       PopupMenuItem(
-        value: _ReaderMoreAction.readerMode,
+        value: ReaderMoreAction.quickTheme,
+        enabled: settings != null,
+        child: const Text('阅读主题与界面颜色'),
+      ),
+      PopupMenuItem(
+        value: ReaderMoreAction.readerMode,
         enabled: settings != null,
         child: Text(
           settings?.readerMode == ReaderMode.paged ? '切换为连续滚动' : '切换为分页阅读',
         ),
       ),
       const PopupMenuDivider(),
+      if (isPdf) ...[
+        const PopupMenuItem(
+          value: ReaderMoreAction.pageJump,
+          child: Text('跳转页码'),
+        ),
+        CheckedPopupMenuItem(
+          value: ReaderMoreAction.pdfFitWidth,
+          checked: settings?.pdfZoomMode == PdfZoomMode.fitWidth,
+          child: const Text('适合宽度'),
+        ),
+        CheckedPopupMenuItem(
+          value: ReaderMoreAction.pdfFitPage,
+          checked: settings?.pdfZoomMode == PdfZoomMode.fitPage,
+          child: const Text('适合页面'),
+        ),
+        const PopupMenuItem(
+          value: ReaderMoreAction.pdfZoomOut,
+          child: Text('缩小'),
+        ),
+        const PopupMenuItem(
+          value: ReaderMoreAction.pdfZoomIn,
+          child: Text('放大'),
+        ),
+        CheckedPopupMenuItem(
+          value: ReaderMoreAction.pdfImageBox,
+          checked: _imageDragMode,
+          child: const Text('框选图片'),
+        ),
+        const PopupMenuItem(
+          value: ReaderMoreAction.ocrRange,
+          child: Text('识别页面范围…'),
+        ),
+        const PopupMenuDivider(),
+      ],
       const PopupMenuItem(
-        value: _ReaderMoreAction.addAnnotation,
+        value: ReaderMoreAction.addAnnotation,
         child: Text('给选中文本添加标注'),
       ),
       const PopupMenuItem(
-        value: _ReaderMoreAction.createNote,
+        value: ReaderMoreAction.createNote,
         child: Text('保存摘录笔记'),
       ),
     ];
@@ -1422,42 +1679,52 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
 
   Future<void> _handleReaderMoreAction(
     BuildContext context,
-    _ReaderMoreAction action,
+    ReaderMoreAction action,
     Book? book,
     ReaderSettings? settings,
   ) async {
     switch (action) {
-      case _ReaderMoreAction.pageJump:
+      case ReaderMoreAction.refreshFolder:
+        await _refreshFolderBook();
+      case ReaderMoreAction.pageJump:
         await _showPageJump(context);
-      case _ReaderMoreAction.pdfFitWidth:
+      case ReaderMoreAction.pdfFitWidth:
         await _setPdfZoomMode(PdfZoomMode.fitWidth);
-      case _ReaderMoreAction.pdfFitPage:
+      case ReaderMoreAction.pdfFitPage:
         await _setPdfZoomMode(PdfZoomMode.fitPage);
-      case _ReaderMoreAction.pdfZoomOut:
+      case ReaderMoreAction.pdfZoomOut:
         await _adjustReaderScale(-1);
-      case _ReaderMoreAction.pdfZoomIn:
+      case ReaderMoreAction.pdfZoomIn:
         await _adjustReaderScale(1);
-      case _ReaderMoreAction.pdfImageBox:
+      case ReaderMoreAction.pdfImageBox:
         _toggleImageDragMode();
-      case _ReaderMoreAction.readerMode:
+      case ReaderMoreAction.ocrRange:
+        if (book != null) {
+          await _showOcrRangeDialog(context, book);
+        }
+      case ReaderMoreAction.readerMode:
         if (settings != null) {
           await _toggleReaderMode(settings);
         }
-      case _ReaderMoreAction.notebook:
+      case ReaderMoreAction.quickTheme:
+        if (settings != null) {
+          await _showQuickThemeSheet(context, settings);
+        }
+      case ReaderMoreAction.notebook:
         _showContextOrSheet(
           context,
-          _ReaderContextTab.notebook,
+          ReaderContextTab.notebook,
           () => _showNotebook(context),
         );
-      case _ReaderMoreAction.ai:
+      case ReaderMoreAction.ai:
         _showContextOrSheet(
           context,
-          _ReaderContextTab.ai,
+          ReaderContextTab.ai,
           () => _showAiPanel(context),
         );
-      case _ReaderMoreAction.addAnnotation:
+      case ReaderMoreAction.addAnnotation:
         await _addAnnotation(context);
-      case _ReaderMoreAction.createNote:
+      case ReaderMoreAction.createNote:
         await _createExcerptNote(context);
     }
   }
@@ -1532,9 +1799,10 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         );
         return;
       }
-      await _showAnnotationActions(context, ref, annotation);
+      await showReaderAnnotationActions(context, ref, annotation);
     } finally {
       _annotationActionsOpen = false;
+      _flushPendingFolderRefresh();
     }
   }
 
@@ -1548,7 +1816,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     final overlayBox = overlayState.context.findRenderObject() as RenderBox?;
     final overlaySize = overlayBox?.size ?? MediaQuery.sizeOf(context);
     const overlayWidth = 300.0;
-    const estimatedHeight = 168.0;
+    const estimatedHeight = 230.0;
     final placement = placeFloatingMenu(
       overlaySize: overlaySize,
       target: _toOverlayLocalRect(sourceRect, overlayBox),
@@ -1566,161 +1834,186 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     final colorScheme = Theme.of(context).colorScheme;
-    final linkedNote = annotation.noteId == null
-        ? null
-        : await ref.read(noteRepositoryProvider).getNote(annotation.noteId!);
+    final linkedNote = await ref
+        .read(readerAnnotationCommentServiceProvider)
+        .commentFor(annotation);
     if (!mounted) {
       return;
     }
     final hasNote = linkedNote != null;
     _selectionOverlayEntry = OverlayEntry(
-      builder: (overlayContext) => Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: dismiss,
-              child: const ColoredBox(color: Color(0x00000000)),
+      builder: (overlayContext) => InheritedTheme.captureAll(
+        context,
+        Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: dismiss,
+                child: const ColoredBox(color: Color(0x00000000)),
+              ),
             ),
-          ),
-          Positioned(
-            left: placement.left,
-            top: placement.top,
-            width: overlayWidth,
-            child: CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.escape): dismiss,
-              },
-              child: Focus(
-                autofocus: true,
-                child: Material(
-                  elevation: 12,
-                  shadowColor: colorScheme.shadow.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  color: colorScheme.surface,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(AppRadius.lg),
-                      border: Border.all(color: colorScheme.outlineVariant),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 10,
-                                height: 10,
-                                decoration: BoxDecoration(
-                                  color: _annotationUiColor(annotation.color),
-                                  shape: BoxShape.circle,
+            Positioned(
+              left: placement.left,
+              top: placement.top,
+              width: overlayWidth,
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.escape): dismiss,
+                },
+                child: Focus(
+                  autofocus: true,
+                  child: Material(
+                    elevation: 12,
+                    shadowColor: colorScheme.shadow.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                    color: colorScheme.surface,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(AppRadius.lg),
+                        border: Border.all(color: colorScheme.outlineVariant),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: readerAnnotationColor(
+                                      annotation.color,
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  hasNote ? '标注 · 已有笔记' : '标注',
-                                  style: Theme.of(context).textTheme.labelLarge
-                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    hasNote ? '标注 · 批注' : '标注',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
                                 ),
-                              ),
-                              IconButton(
-                                tooltip: '关闭',
-                                visualDensity: VisualDensity.compact,
-                                onPressed: dismiss,
-                                icon: const Icon(Icons.close, size: 18),
-                              ),
-                            ],
-                          ),
-                          Text(
-                            annotation.selectedText,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
-                                  height: 1.35,
-                                ),
-                          ),
-                          if (hasNote) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              linkedNote.content,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: colorScheme.onSurface),
-                            ),
-                          ],
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
+                                IconButton(
+                                  tooltip: '删除标注',
+                                  visualDensity: VisualDensity.compact,
                                   onPressed: () {
                                     dismiss();
                                     unawaited(
-                                      _editAnnotation(context, ref, annotation),
-                                    );
-                                  },
-                                  child: const Text('样式'),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () {
-                                    dismiss();
-                                    if (hasNote) {
-                                      unawaited(
-                                        _openLinkedAnnotationNote(
-                                          context,
-                                          linkedNote,
-                                        ),
-                                      );
-                                    } else {
-                                      unawaited(
-                                        _saveAnnotationAsNote(
-                                          context,
-                                          ref,
-                                          annotation,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  child: Text(hasNote ? '查看笔记' : '添加笔记'),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: () {
-                                    dismiss();
-                                    unawaited(
-                                      _deleteAnnotation(
+                                      deleteReaderAnnotation(
                                         context,
                                         ref,
                                         annotation,
                                       ),
                                     );
                                   },
-                                  child: const Text('删除标注'),
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 18,
+                                  ),
                                 ),
+                                IconButton(
+                                  tooltip: '关闭',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: dismiss,
+                                  icon: const Icon(Icons.close, size: 18),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              annotation.selectedText,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                    height: 1.35,
+                                  ),
+                            ),
+                            if (hasNote) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                linkedNote.content,
+                                maxLines: 5,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: colorScheme.onSurface),
+                              ),
+                            ] else ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                '点击下方「添加批注」写下你的理解。',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
                               ),
                             ],
-                          ),
-                        ],
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                OutlinedButton(
+                                  onPressed: () {
+                                    dismiss();
+                                    unawaited(
+                                      editReaderAnnotation(
+                                        context,
+                                        ref,
+                                        annotation,
+                                      ),
+                                    );
+                                  },
+                                  child: const Text('样式'),
+                                ),
+                                FilledButton(
+                                  onPressed: () {
+                                    dismiss();
+                                    unawaited(
+                                      editReaderAnnotationComment(
+                                        context,
+                                        ref,
+                                        annotation,
+                                      ),
+                                    );
+                                  },
+                                  child: Text(hasNote ? '编辑批注' : '添加批注'),
+                                ),
+                                if (hasNote) ...[
+                                  OutlinedButton(
+                                    onPressed: () {
+                                      dismiss();
+                                      unawaited(
+                                        deleteReaderAnnotationComment(
+                                          context,
+                                          ref,
+                                          annotation,
+                                        ),
+                                      );
+                                    },
+                                    child: const Text('删除批注'),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
 
@@ -1739,12 +2032,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!mounted) return;
     final caption = _captionForAnchor(event.anchor);
     _showMobileChrome(autoHide: false);
-    _ImageAnnotationAction? action;
+    ReaderImageAction? action;
     try {
       if (context.supportsSidePanel) {
         action = await _showDesktopImageMenu(context, event);
       } else {
-        action = await _showImageActionSheet(caption);
+        action = await showReaderImageActionSheet(context, caption: caption);
       }
     } finally {
       _scheduleMobileChromeAutoHide();
@@ -1755,11 +2048,11 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
     switch (action) {
-      case _ImageAnnotationAction.annotate:
+      case ReaderImageAction.annotate:
         await _annotateImage(event);
-      case _ImageAnnotationAction.save:
+      case ReaderImageAction.save:
         await _saveImageToFile(event);
-      case _ImageAnnotationAction.copyCaption:
+      case ReaderImageAction.copyCaption:
         await Clipboard.setData(ClipboardData(text: caption));
         if (mounted) {
           _setTransientStatus('已复制图注', clearAfter: const Duration(seconds: 2));
@@ -1771,7 +2064,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   /// Floating bar next to the box the reader just drew, like the text one.
-  Future<_ImageAnnotationAction?> _showDesktopImageMenu(
+  Future<ReaderImageAction?> _showDesktopImageMenu(
     BuildContext context,
     RendererImageAreaSelected event,
   ) async {
@@ -1790,8 +2083,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     );
     final completer = Completer<void>();
     _selectionOverlayCompleter = completer;
-    _ImageAnnotationAction? picked;
-    void dismiss([_ImageAnnotationAction? action]) {
+    ReaderImageAction? picked;
+    void dismiss([ReaderImageAction? action]) {
       picked = action;
       _closeSelectionOverlay();
       if (!completer.isCompleted) {
@@ -1800,102 +2093,51 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     _selectionOverlayEntry = OverlayEntry(
-      builder: (overlayContext) => Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: dismiss,
-              child: const IgnorePointer(
-                child: ColoredBox(color: Color(0x00000000)),
-              ),
-            ),
-          ),
-          Positioned(
-            left: placement.left,
-            top: placement.top,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: (overlaySize.width - placement.left - 12).clamp(
-                  180.0,
-                  overlaySize.width - 24,
+      builder: (overlayContext) => InheritedTheme.captureAll(
+        context,
+        Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: dismiss,
+                child: const IgnorePointer(
+                  child: ColoredBox(color: Color(0x00000000)),
                 ),
               ),
-              child: CallbackShortcuts(
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape): dismiss,
-                },
-                child: Focus(
-                  autofocus: true,
-                  child: _ImageActionOverlay(
-                    hasCaption: _captionForAnchor(event.anchor).isNotEmpty,
-                    onAction: (picked) => dismiss(picked),
-                    onDismiss: dismiss,
+            ),
+            Positioned(
+              left: placement.left,
+              top: placement.top,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: (overlaySize.width - placement.left - 12).clamp(
+                    180.0,
+                    overlaySize.width - 24,
+                  ),
+                ),
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.escape): dismiss,
+                  },
+                  child: Focus(
+                    autofocus: true,
+                    child: ReaderImageActionOverlay(
+                      hasCaption: _captionForAnchor(event.anchor).isNotEmpty,
+                      onAction: (picked) => dismiss(picked),
+                      onDismiss: dismiss,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
     overlayState.insert(_selectionOverlayEntry!);
     await completer.future;
     return picked;
-  }
-
-  Future<_ImageAnnotationAction?> _showImageActionSheet(String caption) {
-    return showModalBottomSheet<_ImageAnnotationAction>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.x4,
-            AppSpacing.x2,
-            AppSpacing.x4,
-            AppSpacing.x4,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                '图片',
-                style: Theme.of(
-                  sheetContext,
-                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: AppSpacing.x2),
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('注释此图'),
-                onTap: () => Navigator.of(
-                  sheetContext,
-                ).pop(_ImageAnnotationAction.annotate),
-              ),
-              ListTile(
-                leading: const Icon(Icons.download_outlined),
-                title: const Text('保存图片'),
-                onTap: () =>
-                    Navigator.of(sheetContext).pop(_ImageAnnotationAction.save),
-              ),
-              ListTile(
-                leading: const Icon(Icons.copy_all_outlined),
-                title: const Text('复制图注'),
-                // No caption is not an error: plenty of illustrations carry
-                // none. Say so instead of copying an empty string.
-                subtitle: Text(caption.isEmpty ? '这张图没有图注' : caption),
-                enabled: caption.isNotEmpty,
-                onTap: () => Navigator.of(
-                  sheetContext,
-                ).pop(_ImageAnnotationAction.copyCaption),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   /// The page's caption for an annotated image.
@@ -1908,8 +2150,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
 
   Future<void> _annotateImage(RendererImageAreaSelected event) async {
     final anchor = event.anchor;
-    final page = anchor is PdfImageAnchor ? anchor.page : null;
-    final result = await _showAnnotationEditor(
+    final result = await showReaderAnnotationEditor(
       context,
       initialText: '',
       initialColor: AnnotationColor.blue,
@@ -1918,53 +2159,17 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (result == null) return;
     if (!mounted) return;
     await ref
-        .read(annotationRepositoryProvider)
+        .read(readerImageAnnotationServiceProvider)
         .saveAnnotation(
           bookId: widget.bookId,
-          // The box is stored twice on purpose: in the anchor for painting,
-          // and in the locator so jump-back can flash the same area. The
-          // locator is the only thing every jump path already carries.
-          locator: ReadingLocator.pdf(
-            page: page ?? 1,
-            selectionRects: [anchor.rect],
-          ),
-          selectedText: result.selectedText.trim(),
+          anchor: anchor,
+          selectedText: result.selectedText,
           color: result.color,
           style: result.style,
-          imageAnchor: anchor,
+          imageSource: ref.read(activePdfRendererControllerProvider),
         );
     if (!mounted) return;
     _setTransientStatus('已标注图片', clearAfter: const Duration(seconds: 2));
-    // Cut the picture out of the page and keep it in the cache, but not
-    // before the annotation is written: the reader's comment is what they
-    // asked for, and it must not wait on a page render and a disk write.
-    // The export copies these files, and it says so when one is missing.
-    unawaited(_cacheImageForAnchor(anchor));
-  }
-
-  /// Render the marked region and store it in the picture cache.
-  ///
-  /// Failure is not worth interrupting the reader over: the annotation is
-  /// still valid without its picture, and the export says so when the cache
-  /// is empty.
-  Future<void> _cacheImageForAnchor(ImageAnchor anchor) async {
-    if (anchor is! PdfImageAnchor) return;
-    // The reader may have closed while the page was still rendering.
-    if (!mounted) return;
-    final source = ref.read(activePdfRendererControllerProvider);
-    if (source == null) return;
-    try {
-      final bytes = await source.exportPageRegion(
-        pageNumber: anchor.page,
-        rect: anchor.rect,
-      );
-      if (bytes == null || bytes.isEmpty) return;
-      await ref
-          .read(imageCacheStoreProvider)
-          .put(bookId: widget.bookId, anchor: anchor, bytes: bytes);
-    } on Object {
-      // A page that will not render simply has no cached picture.
-    }
   }
 
   Future<void> _saveImageToFile(RendererImageAreaSelected event) async {
@@ -1979,10 +2184,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
     _setTransientStatus('正在生成图片…', clearAfter: const Duration(seconds: 8));
-    final bytes = await source.exportPageRegion(
-      pageNumber: anchor.page,
-      rect: anchor.rect,
-    );
+    final bytes = await ref
+        .read(readerImageAnnotationServiceProvider)
+        .renderRegion(anchor: anchor, imageSource: source);
     if (!mounted) return;
     if (bytes == null || bytes.isEmpty) {
       _setTransientStatus('这一页无法生成图片', clearAfter: const Duration(seconds: 3));
@@ -2008,15 +2212,24 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   void _showSelectionActionsOnce(RendererTextSelected event) {
-    // Stable key: text + page/chapter only. Do NOT include selectionRects —
-    // they jitter a few pixels across events and used to thrash the menu.
-    final pageOrChapter =
-        event.locator.page?.toString() ??
-        event.locator.chapterIndex?.toString() ??
-        '';
-    final key = '${event.text.trim()}@$pageOrChapter';
+    final locator = event.locator;
+    final key = (
+      event.text.trim(),
+      locator.type,
+      locator.cfi,
+      locator.href,
+      locator.page,
+      locator.chapterIndex,
+      locator.chapterOffset,
+      locator.chapterEndOffset,
+    );
     // Ignore duplicate events while the same selection menu is open.
     if (_selectionActionsOpen && _lastSelectionActionKey == key) {
+      return;
+    }
+    if (_mobileSelectionSheetOpen) {
+      _lastSelectionActionKey = key;
+      _mobileSelectionNotifier.value = event;
       return;
     }
     if (_selectionActionsOpen && _lastSelectionActionKey != key) {
@@ -2040,8 +2253,8 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => _ReaderBottomSheetFrame(
-        child: _ReaderSettingsSheet(initialSettings: currentSettings),
+      builder: (context) => ReaderBottomSheetFrame(
+        child: ReaderSettingsSheet(initialSettings: currentSettings),
       ),
     );
   }
@@ -2074,7 +2287,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 ),
                 const SizedBox(height: AppSpacing.x1),
                 Text(
-                  '书页纸色',
+                  '阅读主题',
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -2091,7 +2304,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                       ReaderThemePreset.paper,
                       ReaderThemePreset.warm,
                     ])
-                      _QuickThemeChip(
+                      QuickThemeChip(
                         preset: preset,
                         selected: currentSettings.themePreset == preset,
                         onSelected: () async {
@@ -2103,7 +2316,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
                 ),
                 const SizedBox(height: AppSpacing.x4),
                 Text(
-                  '界面颜色',
+                  '书库与设置页颜色',
                   style: Theme.of(
                     context,
                   ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
@@ -2316,55 +2529,80 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
     try {
-      final document = await _documentLoaderFor(
-        book,
-      ).load(book.libraryFilePath);
+      final folderManifest = book.isFolderBook
+          ? _folderSession.manifest ??
+                (await _folderSession.load(
+                  book: book,
+                  initialLocator: widget.initialLocator,
+                )).manifest
+          : null;
+      final document = book.isFolderBook
+          ? null
+          : await _documentLoaderFor(book).load(book.libraryFilePath);
       if (!context.mounted) {
         return;
       }
+      final currentLocator = _currentLocation?.locator;
+      final currentChapter = folderManifest == null
+          ? currentLocator?.chapterIndex
+          : normalizeFolderHref(currentLocator?.href ?? '') ==
+                normalizeFolderHref(
+                  _folderSession.activeFile?.relativePath ?? '',
+                )
+          ? currentLocator?.chapterIndex
+          : null;
       await showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
         showDragHandle: true,
-        builder: (context) => _ReaderBottomSheetFrame(
-          child: _EpubTocSheet(
+        builder: (sheetContext) => ReaderBottomSheetFrame(
+          child: EpubTocSheet(
             document: document,
-            currentChapterIndex: _currentLocation?.locator.chapterIndex,
-            onSelected: (item) {
-              final chapterIndex = (item.chapterIndex ?? 0)
-                  .clamp(0, document.chapters.length - 1)
-                  .toInt();
-              final chapter = document.chapters[chapterIndex];
-              final progress = document.progressForChapter(
-                chapterIndex: chapter.index,
-                chapterOffset: item.chapterOffset ?? 0,
-              );
-              final locator = book.format == BookFormat.markdown
-                  ? ReadingLocator.markdown(
-                      href: item.href,
-                      chapterIndex: chapter.index,
-                      chapterOffset: item.chapterOffset,
-                      progress: progress,
-                    )
-                  : ReadingLocator.epub(
-                      href: item.href,
-                      chapterIndex: chapter.index,
-                      chapterOffset: item.chapterOffset,
-                      progress: progress,
-                    );
-              setState(() {
-                _jumpProgress = ReadingProgressSnapshot(
-                  bookId: widget.bookId,
-                  locator: locator,
-                  progress: locator.progress,
-                  chapterTitle: item.title,
-                  updatedAt: DateTime.now().millisecondsSinceEpoch,
-                );
-                _jumpToken += 1;
-              });
-              _setTransientStatus(item.title);
-              Navigator.of(context).pop();
+            folderManifest: folderManifest,
+            activeFolderFile: _folderSession.activeFile?.relativePath,
+            onFolderFileSelected: _openFolderFile,
+            currentChapterIndex: currentChapter,
+            onFolderLocatorSelected: (locator) {
+              _jumpTo(locator);
+              Navigator.of(sheetContext).pop();
             },
+            onSelected: document == null
+                ? null
+                : (item) {
+                    final chapterIndex = (item.chapterIndex ?? 0)
+                        .clamp(0, document.chapters.length - 1)
+                        .toInt();
+                    final chapter = document.chapters[chapterIndex];
+                    final progress = document.progressForChapter(
+                      chapterIndex: chapter.index,
+                      chapterOffset: item.chapterOffset ?? 0,
+                    );
+                    final locator = book.format == BookFormat.markdown
+                        ? ReadingLocator.markdown(
+                            href: item.href,
+                            chapterIndex: chapter.index,
+                            chapterOffset: item.chapterOffset,
+                            progress: progress,
+                          )
+                        : ReadingLocator.epub(
+                            href: item.href,
+                            chapterIndex: chapter.index,
+                            chapterOffset: item.chapterOffset,
+                            progress: progress,
+                          );
+                    setState(() {
+                      _jumpProgress = ReadingProgressSnapshot(
+                        bookId: widget.bookId,
+                        locator: locator,
+                        progress: locator.progress,
+                        chapterTitle: item.title,
+                        updatedAt: DateTime.now().millisecondsSinceEpoch,
+                      );
+                      _jumpToken += 1;
+                    });
+                    _setTransientStatus(item.title);
+                    Navigator.of(sheetContext).pop();
+                  },
           ),
         ),
       );
@@ -2390,11 +2628,13 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => _ReaderBottomSheetFrame(
-        child: _PdfTocSheet(
+      builder: (context) => ReaderBottomSheetFrame(
+        child: PdfTocSheet(
           outline: _pdfOutline,
           totalPages: totalPages ?? 0,
           currentPage: _currentLocation?.pageNumber,
+          currentPageOffsetFraction:
+              _currentLocation?.locator.pageOffsetFraction,
         ),
       ),
     );
@@ -2408,7 +2648,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     Bookmark? currentBookmark,
   ) async {
     if (currentBookmark != null) {
-      await _deleteBookmarkWithUndo(context, ref, currentBookmark);
+      await deleteReaderBookmarkWithUndo(context, ref, currentBookmark);
       return;
     }
     final location = _currentLocation;
@@ -2431,38 +2671,18 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (!context.mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('已添加书签'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-        action: SnackBarAction(
-          label: '添加备注',
-          onPressed: () => unawaited(_editBookmarkNote(context, ref, bookmark)),
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        readerActionSnackBar(
+          message: '已添加书签',
+          actionLabel: '添加备注',
+          compact: context.appBreakpoint.isCompact,
+          onAction: () =>
+              unawaited(editReaderBookmarkNote(context, ref, bookmark)),
         ),
-      ),
-    );
-  }
-
-  Future<void> _saveBookmarkAt(ReadingLocator locator) async {
-    await ref
-        .read(bookmarkRepositoryProvider)
-        .saveBookmark(
-          bookId: widget.bookId,
-          locator: locator,
-          title: _currentLocation?.chapterTitle ?? locator.displayLabel,
-          excerpt: locator.excerpt,
-        );
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('已添加书签'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
-      ),
-    );
+      );
   }
 
   Future<void> _showNotebook(BuildContext context) async {
@@ -2470,8 +2690,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) =>
-          _ReaderBottomSheetFrame(child: _NotebookSheet(bookId: widget.bookId)),
+      builder: (context) => ReaderBottomSheetFrame(
+        child: ReaderNotebookSheet(bookId: widget.bookId),
+      ),
     );
     if (locator != null) {
       _jumpTo(locator);
@@ -2487,11 +2708,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     _desktopContextOpen = settings.desktopContextOpen;
     _desktopTocWidth = settings.desktopTocWidth;
     _desktopContextWidth = settings.desktopContextWidth;
+    _desktopContextTab = settings.desktopContextTab;
   }
 
   void _showContextOrSheet(
     BuildContext context,
-    _ReaderContextTab tab,
+    ReaderContextTab tab,
     Future<void> Function() fallback,
   ) {
     if (context.supportsSidePanel) {
@@ -2501,7 +2723,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     unawaited(fallback());
   }
 
-  void _openDesktopContext(_ReaderContextTab tab) {
+  void _openDesktopContext(ReaderContextTab tab) {
     setState(() {
       _desktopContextOpen = true;
       _desktopContextTab = tab;
@@ -2509,8 +2731,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     _saveDesktopChromePrefs();
   }
 
-  void _setDesktopContextTab(_ReaderContextTab tab) {
+  void _setDesktopContextTab(ReaderContextTab tab) {
     setState(() => _desktopContextTab = tab);
+    _saveDesktopChromePrefs();
   }
 
   void _setDesktopTocOpen(bool value) {
@@ -2551,6 +2774,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       desktopContextOpen: _desktopContextOpen,
       desktopTocWidth: _desktopTocWidth,
       desktopContextWidth: _desktopContextWidth,
+      desktopContextTab: _desktopContextTab,
     );
     if (debounced) {
       unawaited(ref.read(readerSettingsControllerProvider).save(next));
@@ -2567,14 +2791,14 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       return;
     }
     if (context.supportsSidePanel) {
-      _openDesktopContext(_ReaderContextTab.search);
+      _openDesktopContext(ReaderContextTab.search);
       return;
     }
-    final action = await showModalBottomSheet<_InBookSearchAction>(
+    final action = await showModalBottomSheet<InBookSearchAction>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => _InBookSearchSheet(
+      builder: (context) => ReaderSearchPane(
         bookId: widget.bookId,
         initialQuery: _rendererSearchQuery,
         currentLocator: _currentLocation?.locator,
@@ -2597,12 +2821,12 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     _saveDesktopChromePrefs();
   }
 
-  Future<void> _handleInBookSearchAction(_InBookSearchAction action) async {
+  Future<void> _handleInBookSearchAction(InBookSearchAction action) async {
     _jumpTo(action.locator);
     if (!mounted) {
       return;
     }
-    if (action.intent == _InBookSearchIntent.askAi) {
+    if (action.intent == InBookSearchIntent.askAi) {
       await _showAiPanel(
         context,
         locatorOverride: action.locator,
@@ -2645,7 +2869,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     final value = await showDialog<String>(
       context: context,
       builder: (context) =>
-          _PageJumpDialog(initialPage: currentLocator?.page ?? 1),
+          PageJumpDialog(initialPage: currentLocator?.page ?? 1),
     );
     final page = int.tryParse(value?.trim() ?? '');
     if (page == null || page <= 0) {
@@ -2671,7 +2895,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       ).showSnackBar(const SnackBar(content: Text('还没有可标注的位置')));
       return;
     }
-    final result = await _showAnnotationEditor(
+    final result = await showReaderAnnotationEditor(
       context,
       initialText: _selectedText?.text ?? locator.excerpt ?? '',
     );
@@ -2752,9 +2976,14 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     // dismissal clears it. The renderer still drops it on the next tap
     // elsewhere, which is the reader's other way of saying "finished".
     var acted = false;
-    void runAction(_SelectionAction action) {
+    void runAction(
+      ReaderSelectionAction action, [
+      RendererTextSelected? activeSelection,
+    ]) {
       acted = true;
-      unawaited(_handleSelectionAction(context, selection, action));
+      unawaited(
+        _handleSelectionAction(context, activeSelection ?? selection, action),
+      );
     }
 
     _showMobileChrome(autoHide: false);
@@ -2767,35 +2996,44 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         );
         return;
       }
+      _mobileSelectionSheetOpen = true;
+      _mobileSelectionNotifier.value = selection;
       await showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
         builder: (sheetContext) => SafeArea(
-          child: _SelectionActionSurface(
-            selection: selection,
-            compact: true,
-            onAction: (action) {
-              Navigator.of(sheetContext).pop();
-              runAction(action);
-            },
-            onDismiss: () => Navigator.of(sheetContext).pop(),
+          child: ValueListenableBuilder<RendererTextSelected?>(
+            valueListenable: _mobileSelectionNotifier,
+            builder: (context, latest, child) => ReaderSelectionActionSurface(
+              selection: latest ?? selection,
+              compact: true,
+              onAction: (action) {
+                Navigator.of(sheetContext).pop();
+                runAction(action, latest ?? selection);
+              },
+              onDismiss: () => Navigator.of(sheetContext).pop(),
+            ),
           ),
         ),
       );
     } finally {
-      _selectionActionsOpen = false;
-      _lastSelectionActionKey = null;
-      if (mounted && epoch == _selectionMenuEpoch && !acted) {
-        setState(() => _clearSelectionVersion += 1);
+      if (epoch == _selectionMenuEpoch) {
+        _mobileSelectionSheetOpen = false;
+        _selectionActionsOpen = false;
+        _lastSelectionActionKey = null;
+        _flushPendingFolderRefresh();
+        if (mounted && !acted) {
+          setState(() => _clearSelectionVersion += 1);
+        }
+        _scheduleMobileChromeAutoHide();
       }
-      _scheduleMobileChromeAutoHide();
     }
   }
 
   Future<void> _showDesktopSelectionMenu(
     BuildContext context,
     RendererTextSelected selection, {
-    required ValueChanged<_SelectionAction> onAction,
+    required ValueChanged<ReaderSelectionAction> onAction,
   }) async {
     _closeSelectionOverlay();
     final overlayState = Overlay.of(context);
@@ -2803,7 +3041,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     final overlaySize = overlayBox?.size ?? MediaQuery.sizeOf(context);
     // Toolbar is icon-only; keep intrinsic width and avoid fixed-width overflow.
     const estimatedWidth = 520.0;
-    const estimatedHeight = 56.0;
+    const estimatedHeight = 104.0;
     final localTarget = _toOverlayLocalRect(selection.sourceRect, overlayBox);
     final placement = placeFloatingMenu(
       overlaySize: overlaySize,
@@ -2822,52 +3060,55 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     _selectionOverlayEntry = OverlayEntry(
-      builder: (overlayContext) => Stack(
-        children: [
-          // Tap-outside-to-dismiss, but pointer-transparent underneath: the
-          // selection handles sit outside the menu and must stay draggable
-          // while it is open. `ColoredBox` is hit-test opaque, so a fully
-          // transparent colour would still swallow every drag; `IgnorePointer`
-          // on the colour fill keeps only the tap recognizer live.
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: dismiss,
-              child: const IgnorePointer(
-                child: ColoredBox(color: Color(0x00000000)),
-              ),
-            ),
-          ),
-          Positioned(
-            left: placement.left,
-            top: placement.top,
-            // Cap width so the menu never paints past the overlay edge.
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: (overlaySize.width - placement.left - 12).clamp(
-                  180.0,
-                  overlaySize.width - 24,
+      builder: (overlayContext) => InheritedTheme.captureAll(
+        context,
+        Stack(
+          children: [
+            // Tap-outside-to-dismiss, but pointer-transparent underneath: the
+            // selection handles sit outside the menu and must stay draggable
+            // while it is open. `ColoredBox` is hit-test opaque, so a fully
+            // transparent colour would still swallow every drag; `IgnorePointer`
+            // on the colour fill keeps only the tap recognizer live.
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: dismiss,
+                child: const IgnorePointer(
+                  child: ColoredBox(color: Color(0x00000000)),
                 ),
               ),
-              child: CallbackShortcuts(
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape): dismiss,
-                },
-                child: Focus(
-                  autofocus: true,
-                  child: _DesktopSelectionOverlay(
-                    selection: selection,
-                    onAction: (action) {
-                      dismiss();
-                      onAction(action);
-                    },
-                    onDismiss: dismiss,
+            ),
+            Positioned(
+              left: placement.left,
+              top: placement.top,
+              // Cap width so the menu never paints past the overlay edge.
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: (overlaySize.width - placement.left - 12).clamp(
+                    180.0,
+                    overlaySize.width - 24,
+                  ),
+                ),
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.escape): dismiss,
+                  },
+                  child: Focus(
+                    autofocus: true,
+                    child: DesktopReaderSelectionOverlay(
+                      selection: selection,
+                      onAction: (action) {
+                        dismiss();
+                        onAction(action);
+                      },
+                      onDismiss: dismiss,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
     overlayState.insert(_selectionOverlayEntry!);
@@ -2890,7 +3131,9 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   void _closeSelectionOverlay() {
-    _selectionOverlayEntry?.remove();
+    final entry = _selectionOverlayEntry;
+    entry?.remove();
+    entry?.dispose();
     _selectionOverlayEntry = null;
     final completer = _selectionOverlayCompleter;
     _selectionOverlayCompleter = null;
@@ -2902,46 +3145,92 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   Future<void> _handleSelectionAction(
     BuildContext context,
     RendererTextSelected selection,
-    _SelectionAction action,
+    ReaderSelectionAction action,
   ) async {
     switch (action) {
-      case _SelectionAction.highlight:
+      case ReaderSelectionAction.highlight:
         await _saveQuickAnnotation(
           context,
           selection,
           color: AnnotationColor.yellow,
           style: AnnotationStyle.highlight,
         );
-      case _SelectionAction.underline:
+      case ReaderSelectionAction.underline:
         await _saveQuickAnnotation(
           context,
           selection,
           color: AnnotationColor.blue,
           style: AnnotationStyle.underline,
         );
-      case _SelectionAction.note:
-        await _createExcerptNote(context);
-      case _SelectionAction.search:
+      case ReaderSelectionAction.comment:
+        await _createAnnotationComment(context, selection);
+      case ReaderSelectionAction.note:
+        await _createExcerptNote(context, selection: selection);
+      case ReaderSelectionAction.search:
         _applyRendererSearchQuery(selection.text);
         if (context.supportsSidePanel) {
-          _openDesktopContext(_ReaderContextTab.search);
+          _openDesktopContext(ReaderContextTab.search);
         } else {
           unawaited(_showInBookSearch(context));
         }
-      case _SelectionAction.copy:
+      case ReaderSelectionAction.copy:
         await Clipboard.setData(ClipboardData(text: selection.text));
         if (context.mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('已复制选中文本')));
         }
-      case _SelectionAction.ai:
+      case ReaderSelectionAction.ai:
         await _showAiPanel(context);
     }
   }
 
-  Future<void> _createExcerptNote(BuildContext context) async {
-    final selectedText = _selectedText;
+  Future<void> _createAnnotationComment(
+    BuildContext context,
+    RendererTextSelected selection,
+  ) async {
+    final comment = await showReaderAnnotationCommentEditor(
+      context,
+      selectedText: selection.text,
+    );
+    if (comment == null || !context.mounted) {
+      return;
+    }
+    final bookId = widget.bookId;
+    try {
+      await ref
+          .read(readerAnnotationCommentServiceProvider)
+          .createWithComment(
+            bookId: bookId,
+            locator: selection.locator,
+            selectedText: selection.text,
+            comment: comment,
+          );
+    } on Object {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('保存批注失败')));
+      }
+      return;
+    }
+    if (!context.mounted || widget.bookId != bookId) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已添加批注'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _createExcerptNote(
+    BuildContext context, {
+    RendererTextSelected? selection,
+  }) async {
+    final selectedText = selection ?? _selectedText;
     final location = _currentLocation;
     final progress = ref.read(readerProgressProvider(widget.bookId)).value;
     final locator =
@@ -2956,83 +3245,27 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       ).showSnackBar(const SnackBar(content: Text('还没有可保存的位置')));
       return;
     }
-    final contentController = TextEditingController();
-    final titleController = TextEditingController(
-      text:
+    final bookId = widget.bookId;
+    final service = ref.read(readerExcerptNoteServiceProvider);
+    final draft = await showReaderExcerptEditor(
+      context,
+      initialTitle:
           location?.chapterTitle ??
           progress?.chapterTitle ??
           locator.displayLabel,
+      sourceText: sourceText,
     );
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('创建摘录笔记'),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (sourceText?.isNotEmpty == true) ...[
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '原文摘录',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(sourceText!, maxLines: 4, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 12),
-              ],
-              TextField(
-                controller: titleController,
-                decoration: const InputDecoration(labelText: '标题'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: contentController,
-                minLines: 4,
-                maxLines: 8,
-                decoration: const InputDecoration(
-                  labelText: '笔记',
-                  helperText: '纯文本显示；可使用 **加粗**、*斜体*、`代码` 简单标记',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    final title = titleController.text.trim();
-    final content = contentController.text.trim();
-    titleController.dispose();
-    contentController.dispose();
-    if (saved != true || content.isEmpty) {
+    if (draft == null || draft.content.isEmpty) {
       return;
     }
-    await ref
-        .read(noteRepositoryProvider)
-        .saveNote(
-          bookId: widget.bookId,
-          title: title.isEmpty ? null : title,
-          content: content,
-          sourceText: sourceText,
-          locator: locator,
-          noteType: NoteType.excerpt,
-        );
-    ref.invalidate(notesByBookProvider(widget.bookId));
-    if (!context.mounted) {
+    final note = await service.saveExcerpt(
+      bookId: bookId,
+      title: draft.title.isEmpty ? null : draft.title,
+      content: draft.content,
+      sourceText: sourceText,
+      locator: locator,
+    );
+    if (note == null || !context.mounted || widget.bookId != bookId) {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3053,6 +3286,41 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       locator,
       fallbackExcerpt: fallbackExcerpt,
     );
+    if (_folderSession.manifest != null &&
+        enriched.type == ReadingLocatorType.markdown) {
+      if (_folderSession.needsLegacyJump(enriched)) {
+        unawaited(_jumpToLegacyFolder(enriched));
+        return;
+      }
+      final file = _folderSession.fileForJump(enriched);
+      if (file != null) {
+        final switchingFile = _folderSession.switchesFile(enriched);
+        final folderLocator = switchingFile
+            ? _folderSession.selectFile(file, locator: enriched)
+            : _folderSession.locatorForActiveFile(enriched);
+        setState(() {
+          if (switchingFile) {
+            _currentLocation = null;
+            _locationNotifier.value = null;
+            _rendererVersion += 1;
+          }
+          _jumpProgress = ReadingProgressSnapshot(
+            bookId: widget.bookId,
+            locator: folderLocator,
+            progress: folderLocator.progress,
+            pageNumber: folderLocator.page,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          );
+          _jumpToken += 1;
+          _focusLocator = null;
+        });
+        _setTransientStatus(
+          jumpStatusLabelFor(folderLocator, pdfTextLayerAvailable: true),
+          clearAfter: const Duration(milliseconds: 2800),
+        );
+        return;
+      }
+    }
     final textLayer =
         pdfTextLayerAvailable ??
         (_rendererTextSelectionAvailable ?? _rendererSearchAvailable ?? true);
@@ -3099,10 +3367,246 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     });
   }
 
-  Future<void> _runOcrCurrentPage(BuildContext context, Book book) async {
-    if (book.format != BookFormat.pdf) {
+  Widget _withFolderSession(
+    Book book,
+    ReadingProgressSnapshot? snapshot,
+    Widget Function() build,
+  ) {
+    if (!book.isFolderBook) {
+      return build();
+    }
+    final future = _folderSession.load(
+      book: book,
+      initialLocator: widget.initialLocator ?? snapshot?.locator,
+    );
+    return FutureBuilder<MarkdownFolderSession>(
+      future: future,
+      builder: (context, sessionSnapshot) {
+        if (sessionSnapshot.hasError) {
+          return const ReaderMessage(message: '无法读取文件夹');
+        }
+        final session = sessionSnapshot.data;
+        if (session == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          unawaited(_primeFolderTextCache());
+          _startFolderRefresh(book);
+        });
+        return build();
+      },
+    );
+  }
+
+  Future<void> _primeFolderTextCache() async {
+    final file = _folderSession.activeFile;
+    if (file == null || _lastFolderTextPath == file.relativePath) {
       return;
     }
+    try {
+      final text = await File(file.absolutePath).readAsString();
+      if (!mounted) return;
+      _lastFolderText = text;
+      _lastFolderTextPath = file.relativePath;
+    } on Object {
+      // The refresh coordinator reports unreadable files separately.
+    }
+  }
+
+  void _startFolderRefresh(Book book) {
+    if (_folderRefresh != null ||
+        !book.isFolderBook ||
+        _folderSession.manifest == null) {
+      return;
+    }
+    final coordinator = MarkdownFolderRefreshCoordinator(
+      rootPath: book.libraryFilePath,
+      loader: MarkdownFolderSnapshotLoader(_folderSession.source),
+    );
+    _folderRefresh = coordinator;
+    _folderRefreshSubscription = coordinator.events.listen(
+      (event) => _onFolderRefresh(book, event),
+    );
+    unawaited(coordinator.start());
+  }
+
+  void _onFolderRefresh(Book book, MarkdownFolderRefreshEvent event) {
+    if (!mounted) return;
+    final activePath = _folderSession.activeFile?.relativePath;
+    final currentChanged =
+        activePath != null && event.diff.involves(activePath);
+    final nextActiveFile = event.snapshot.manifest.fileForHref(activePath);
+    final selectionFrozen = _selectionActionsOpen || _annotationActionsOpen;
+    if (selectionFrozen) {
+      _pendingFolderRefresh = (book: book, event: event);
+      if (currentChanged) {
+        setState(() => _folderRefreshState = '来源已更新，选区结束后刷新正文');
+      }
+      return;
+    }
+    if (event.epoch < _lastAppliedFolderRefreshEpoch) return;
+    _lastAppliedFolderRefreshEpoch = event.epoch;
+    _folderSession.replaceManifest(event.snapshot.manifest);
+    if (currentChanged && nextActiveFile != null) {
+      MarkdownDocumentLoader.clearCache();
+      final locator =
+          _currentLocation?.locator ??
+          _jumpProgress?.locator ??
+          _folderSession.initialLocator;
+      final oldText = _lastFolderTextPath == activePath
+          ? _lastFolderText ?? ''
+          : locator?.excerpt ?? '';
+      final newText = _readFolderFileText(nextActiveFile);
+      if (locator != null && newText != null) {
+        final result = _folderSession.reanchor(
+          locator,
+          oldText: oldText,
+          newText: newText,
+        );
+        _jumpProgress = ReadingProgressSnapshot(
+          bookId: widget.bookId,
+          locator: result.locator,
+          progress: result.locator.progress,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+      _lastFolderText = newText;
+      _lastFolderTextPath = nextActiveFile.relativePath;
+      _rendererVersion += 1;
+      _jumpToken += 1;
+      _setTransientStatus('文件已更新', clearAfter: const Duration(seconds: 3));
+    } else if (currentChanged) {
+      _setTransientStatus(
+        '当前文件已移除，保留上次内容',
+        clearAfter: const Duration(seconds: 4),
+      );
+    }
+    if (!event.diff.isEmpty) {
+      unawaited(_reindexFolderBook(book));
+    }
+    final stateText = switch (event.state) {
+      MarkdownFolderRefreshState.ready => event.diff.isEmpty ? null : '文件夹已同步',
+      MarkdownFolderRefreshState.degraded => event.message,
+      MarkdownFolderRefreshState.error => event.message,
+      _ => null,
+    };
+    _folderRefreshState = _folderSession.folderNotice ?? stateText;
+    _folderRefreshStatusTimer?.cancel();
+    if (stateText != null) {
+      _folderRefreshStatusTimer = Timer(const Duration(seconds: 3), () {
+        if (!mounted) return;
+        setState(() => _folderRefreshState = _folderSession.folderNotice);
+      });
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _flushPendingFolderRefresh() {
+    final pending = _pendingFolderRefresh;
+    if (pending == null ||
+        !mounted ||
+        _selectionActionsOpen ||
+        _annotationActionsOpen) {
+      return;
+    }
+    _pendingFolderRefresh = null;
+    _onFolderRefresh(pending.book, pending.event);
+  }
+
+  String? _readFolderFileText(MarkdownFolderFile? file) {
+    if (file == null) return null;
+    try {
+      return File(file.absolutePath).readAsStringSync();
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<void> _reindexFolderBook(Book book) async {
+    try {
+      await ref.read(searchIndexerProvider).indexBook(book);
+    } on Object {
+      if (mounted) {
+        _setTransientStatus(
+          '文件已更新，但搜索索引待重建',
+          clearAfter: const Duration(seconds: 4),
+        );
+      }
+    }
+  }
+
+  Future<void> _refreshFolderBook() async {
+    await _folderRefresh?.refresh(full: true);
+  }
+
+  ReadingProgressSnapshot? _rendererProgressFor(
+    ReadingProgressSnapshot? snapshot,
+  ) {
+    if (_folderSession.manifest == null) {
+      return _jumpProgress ?? snapshot;
+    }
+    return _folderSession.rendererProgress(
+      bookId: widget.bookId,
+      snapshot: snapshot,
+      jumpProgress: _jumpProgress,
+    );
+  }
+
+  void _openFolderFile(MarkdownFolderFile file) {
+    if (_folderSession.manifest == null ||
+        _folderSession.activeFile?.relativePath == file.relativePath) {
+      return;
+    }
+    final locator = _folderSession.openFile(file);
+    setState(() {
+      _currentLocation = null;
+      _locationNotifier.value = null;
+      _jumpProgress = ReadingProgressSnapshot(
+        bookId: widget.bookId,
+        locator: locator,
+        progress: locator.progress,
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      _rendererVersion += 1;
+      _jumpToken += 1;
+      _focusLocator = null;
+    });
+    unawaited(_primeFolderTextCache());
+    _setTransientStatus(
+      '已打开 ${file.title}',
+      clearAfter: const Duration(milliseconds: 1600),
+    );
+  }
+
+  Future<void> _jumpToLegacyFolder(ReadingLocator locator) async {
+    try {
+      final resolved = await _folderSession.resolveLegacyJump(locator);
+      if (!mounted) {
+        return;
+      }
+      if (resolved == null) {
+        _setTransientStatus(
+          '旧版文件夹位置已失效，请重新选择目录',
+          clearAfter: const Duration(seconds: 4),
+        );
+        return;
+      }
+      _jumpTo(resolved);
+    } on Object {
+      if (mounted) {
+        _setTransientStatus('无法定位旧版文件夹位置');
+      }
+    }
+  }
+
+  Future<void> _runOcrCurrentPage(BuildContext context, Book book) async {
+    if (book.format != BookFormat.pdf || book.id != widget.bookId) {
+      return;
+    }
+    final requestEpoch = ++_ocrRequestEpoch;
+    bool isCurrent() =>
+        mounted && widget.bookId == book.id && requestEpoch == _ocrRequestEpoch;
     final fallbackPage = _currentLocation?.pageNumber;
     if (fallbackPage == null || fallbackPage < 1) {
       if (!mounted) {
@@ -3115,53 +3619,26 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     final pdfController = ref.read(activePdfRendererControllerProvider);
-    // Double-page: OCR both pages of the visible spread.
-    List<int> pages = [fallbackPage];
-    if (pdfController != null) {
-      try {
-        pages = await pdfController.getVisiblePages(fallbackPage: fallbackPage);
-      } on Object {
-        pages = [fallbackPage];
-      }
-    }
-    if (pages.isEmpty) {
-      pages = [fallbackPage];
+    final coordinator = ref.read(readerOcrCoordinatorProvider(book.id));
+    final pages = await coordinator.visiblePages(
+      fallbackPage: fallbackPage,
+      pageSource: pdfController,
+    );
+    if (!mounted || !isCurrent()) {
+      return;
     }
 
-    final controller = ref.read(ocrPageControllerProvider(book.id).notifier);
     final statusLabel = pages.length > 1
         ? '正在识别第 ${pages.first}–${pages.last} 页…'
         : '正在识别第 ${pages.first} 页…';
     _setTransientStatus(statusLabel, clearAfter: const Duration(seconds: 12));
 
-    final completed = await controller.recognizePages(
+    final completed = await coordinator.recognizePages(
       book: book,
       pageNumbers: pages,
-      // Reuse session + disk cache; only re-OCR when user force-refreshes later.
-      forceRefresh: false,
-      exportPage: pdfController == null
-          ? null
-          : (page) async {
-              try {
-                var exported = await pdfController.exportPageImage(
-                  pageNumber: page,
-                );
-                if (exported == null || exported.isEmpty) {
-                  // A page that was still rasterising when the request
-                  // arrived comes back empty; one retry after it settles is
-                  // cheaper than making the user press the button again.
-                  await Future<void>.delayed(const Duration(milliseconds: 180));
-                  exported = await pdfController.exportPageImage(
-                    pageNumber: page,
-                  );
-                }
-                return exported;
-              } on Object {
-                return null;
-              }
-            },
+      pageSource: pdfController,
     );
-    if (!mounted) {
+    if (!mounted || !isCurrent()) {
       return;
     }
     final state = ref.read(ocrPageControllerProvider(book.id));
@@ -3196,18 +3673,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
             ),
           )
           .toList(growable: false);
-      _pendingOcrOverlays
-        ..clear()
-        ..addAll(overlays.skip(1));
-      setState(() {
-        _ocrOverlayPage = overlays.first.page;
-        _ocrOverlayBlocks = overlays.first.blocks;
-        _ocrOverlayToken += 1;
-      });
-      for (final item in withGeometry) {
-        _restoredOcrPages.add(item.page);
-      }
-      _flushPendingOcrOverlays();
+      _ocrOverlays.show(overlays);
 
       // Overlay is the primary feedback; keep status brief and auto-clear.
       // Avoid sticky SnackBars for successful OCR — they linger over the page.
@@ -3219,6 +3685,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
         '$pageLabel 可划词',
         clearAfter: const Duration(milliseconds: 1600),
       );
+      _scheduleOcrReindex(book);
       return;
     }
 
@@ -3227,38 +3694,199 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       '第 ${first.page} 页识别完成',
       clearAfter: const Duration(seconds: 2),
     );
-    await _showOcrResultSheet(
+    final result = OcrPageResult(
+      text: combinedText.isEmpty ? first.result.text : combinedText,
+      language: first.result.language,
+      engine: first.result.engine,
+      confidence: first.result.confidence,
+      blocks: first.result.blocks,
+    );
+    final locator = ReadingLocator.pdf(
+      page: first.page,
+      progress: _currentLocation?.progress ?? 0,
+      excerpt: result.text.length > 120
+          ? '${result.text.substring(0, 120)}…'
+          : result.text,
+    );
+    await showReaderOcrResultSheet(
       this.context,
-      book: book,
       pageNumber: first.page,
-      result: OcrPageResult(
-        text: combinedText.isEmpty ? first.result.text : combinedText,
-        language: first.result.language,
-        engine: first.result.engine,
-        confidence: first.result.confidence,
-        blocks: first.result.blocks,
+      result: result,
+      onAskAi: () => unawaited(
+        _showAiPanel(
+          this.context,
+          locatorOverride: locator,
+          initialContextOverride: result.text,
+        ),
       ),
     );
+    _scheduleOcrReindex(book);
   }
 
-  void _flushPendingOcrOverlays() {
-    if (_pendingOcrOverlays.isEmpty || !mounted) {
+  void _scheduleOcrReindex(Book book) {
+    _ocrIndexTimer?.cancel();
+    _ocrIndexTimer = Timer(const Duration(seconds: 2), () {
+      unawaited(_reindexAfterOcr(book));
+    });
+  }
+
+  Future<void> _reindexAfterOcr(Book book) async {
+    try {
+      await ref.read(searchIndexerProvider).indexBook(book);
+      if (mounted && widget.bookId == book.id) {
+        _setTransientStatus(
+          '识别文本已加入搜索',
+          clearAfter: const Duration(milliseconds: 1800),
+        );
+      }
+    } on Object {
+      if (mounted && widget.bookId == book.id) {
+        _setTransientStatus(
+          '识别完成，搜索索引待重建',
+          clearAfter: const Duration(seconds: 4),
+        );
+      }
+    }
+  }
+
+  Future<void> _showOcrRangeDialog(BuildContext context, Book book) async {
+    if (book.format != BookFormat.pdf) return;
+    final totalPages = _currentLocation?.totalPages;
+    if (totalPages == null || totalPages < 1) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('PDF 页码尚未准备好')));
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _pendingOcrOverlays.isEmpty) {
-        return;
-      }
-      final next = _pendingOcrOverlays.removeAt(0);
-      setState(() {
-        _ocrOverlayPage = next.page;
-        _ocrOverlayBlocks = next.blocks;
-        _ocrOverlayToken += 1;
-      });
-      if (_pendingOcrOverlays.isNotEmpty) {
-        _flushPendingOcrOverlays();
-      }
-    });
+    final currentPage = (_currentLocation?.pageNumber ?? 1).clamp(
+      1,
+      totalPages,
+    );
+    final controller = TextEditingController(text: '$currentPage');
+    final input = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('识别页面范围'),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('支持单页、连续页码和多段范围，例如 1-3, 8, 10-12。'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.text,
+                decoration: InputDecoration(
+                  labelText: '页码范围',
+                  helperText: '全书共 $totalPages 页，单次最多 2000 页',
+                ),
+                onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '已有原生文字的页面会自动跳过；识别文本会加入书内和全局搜索。',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('开始识别'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (input == null || !context.mounted) return;
+    late final List<int> pages;
+    try {
+      pages = OcrPageRange.parse(input, pageCount: totalPages);
+    } on FormatException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
+    try {
+      await ref
+          .read(ocrJobControllerProvider)
+          .start(book: book, pageNumbers: pages, languageHint: book.language);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已加入识别队列 · ${pages.length} 页'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> _startOcrWholeBook(BuildContext context, Book book) async {
+    final totalPages = _currentLocation?.totalPages;
+    if (book.format != BookFormat.pdf || totalPages == null || totalPages < 1) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('PDF 页码尚未准备好')));
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('识别整本'),
+        content: Text('共 $totalPages 页，已有原生文字的页面会自动跳过。识别可能需要较长时间，可在任务中心管理。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('开始识别'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || widget.bookId != book.id) return;
+    try {
+      final controller = ref.read(ocrJobControllerProvider);
+      final queued = await _wholeBookOcrQueue.enqueue(
+        totalPages: totalPages,
+        startBatch: (pages) async {
+          await controller.start(
+            book: book,
+            pageNumbers: pages,
+            languageHint: book.language,
+          );
+        },
+      );
+      if (queued == null) return;
+      if (!mounted || widget.bookId != book.id) return;
+      ScaffoldMessenger.of(
+        this.context,
+      ).showSnackBar(SnackBar(content: Text('已加入识别队列 · $queued 页')));
+    } on WholeBookOcrQueueException catch (error) {
+      if (!mounted || widget.bookId != book.id) return;
+      ScaffoldMessenger.of(this.context).showSnackBar(
+        SnackBar(
+          content: Text('加入队列失败，已加入 ${error.queuedPages} / $totalPages 页'),
+        ),
+      );
+    }
   }
 
   /// Re-apply OCR overlays from session/disk cache when the user returns
@@ -3269,232 +3897,30 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
     if (book == null || book.format != BookFormat.pdf) {
       return;
     }
-    if (_rendererTextSelectionAvailable == true) {
-      // Native text layer exists; OCR overlays are only for scan pages.
-      // Still allow restore if we already painted OCR this session.
-    }
     final fallbackPage = _currentLocation?.pageNumber;
     if (fallbackPage == null || fallbackPage < 1) {
       return;
     }
-    final generation = ++_ocrRestoreGeneration;
-    final pdfController = ref.read(activePdfRendererControllerProvider);
-    List<int> pages = [fallbackPage];
-    if (pdfController != null) {
-      try {
-        pages = await pdfController.getVisiblePages(fallbackPage: fallbackPage);
-      } on Object {
-        pages = [fallbackPage];
-      }
-    }
-    if (!mounted || generation != _ocrRestoreGeneration) {
-      return;
-    }
-    final controller = ref.read(ocrPageControllerProvider(book.id).notifier);
-    final toRestore = <({int page, List<Map<String, Object?>> blocks})>[];
-    for (final page in pages) {
-      if (_restoredOcrPages.contains(page)) {
-        continue;
-      }
-      final cached = await controller.peekCached(pageNumber: page);
-      if (!mounted || generation != _ocrRestoreGeneration) {
-        return;
-      }
-      if (cached == null || !cached.hasGeometry) {
-        continue;
-      }
-      final blocks = cached.blocks
-          .where((block) => block.hasGeometry)
-          .map((block) => block.toJson())
-          .toList(growable: false);
-      if (blocks.isEmpty) {
-        continue;
-      }
-      toRestore.add((page: page, blocks: blocks));
-    }
-    if (toRestore.isEmpty || !mounted || generation != _ocrRestoreGeneration) {
-      return;
-    }
-    _pendingOcrOverlays
-      ..clear()
-      ..addAll(toRestore.skip(1));
-    setState(() {
-      _ocrOverlayPage = toRestore.first.page;
-      _ocrOverlayBlocks = toRestore.first.blocks;
-      _ocrOverlayToken += 1;
-    });
-    for (final item in toRestore) {
-      _restoredOcrPages.add(item.page);
-    }
-    _flushPendingOcrOverlays();
-  }
-
-  Future<void> _showOcrResultSheet(
-    BuildContext context, {
-    required Book book,
-    required int pageNumber,
-    required OcrPageResult result,
-  }) async {
-    final locator = ReadingLocator.pdf(
-      page: pageNumber,
-      progress: _currentLocation?.progress ?? 0,
-      excerpt: result.text.length > 120
-          ? '${result.text.substring(0, 120)}…'
-          : result.text,
+    final generation = _ocrOverlays.beginRestore();
+    final coordinator = ref.read(readerOcrCoordinatorProvider(book.id));
+    final restored = await coordinator.restoreOverlays(
+      fallbackPage: fallbackPage,
+      pageSource: ref.read(activePdfRendererControllerProvider),
+      isRestored: _ocrOverlays.isRestored,
+      isCurrent: () => mounted && _ocrOverlays.isRestoreCurrent(generation),
     );
-
-    if (context.supportsSidePanel) {
-      // Desktop: inject into AI panel as the primary "ask" path, and also show
-      // a lightweight dialog for copy / review.
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) {
-          return AlertDialog(
-            title: Text('本页文本（OCR · 第 $pageNumber 页）'),
-            content: SizedBox(
-              width: 520,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '文本识别在本地完成，不会上传书籍页面。',
-                    style: Theme.of(dialogContext).textTheme.bodySmall
-                        ?.copyWith(
-                          color: Theme.of(
-                            dialogContext,
-                          ).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                  const SizedBox(height: AppSpacing.x2),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 360),
-                    child: SingleChildScrollView(
-                      child: SelectableText(result.text),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('关闭'),
-              ),
-              TextButton(
-                onPressed: () async {
-                  await Clipboard.setData(ClipboardData(text: result.text));
-                  if (dialogContext.mounted) {
-                    ScaffoldMessenger.of(
-                      dialogContext,
-                    ).showSnackBar(const SnackBar(content: Text('已复制本页文本')));
-                  }
-                },
-                child: const Text('复制'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  unawaited(
-                    _showAiPanel(
-                      context,
-                      locatorOverride: locator,
-                      initialContextOverride: result.text,
-                    ),
-                  );
-                },
-                child: const Text('问 AI'),
-              ),
-            ],
-          );
-        },
-      );
+    if (!mounted ||
+        !_ocrOverlays.isRestoreCurrent(generation) ||
+        restored.isEmpty) {
       return;
     }
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) {
-        return _ReaderBottomSheetFrame(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.x4,
-              AppSpacing.x2,
-              AppSpacing.x4,
-              AppSpacing.x4,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '本页文本（OCR · 第 $pageNumber 页）',
-                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.x1),
-                Text(
-                  '文本识别在本地完成，不会上传书籍页面。',
-                  style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.x3),
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.45,
-                  ),
-                  child: SingleChildScrollView(
-                    child: SelectableText(result.text),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.x3),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          await Clipboard.setData(
-                            ClipboardData(text: result.text),
-                          );
-                          if (sheetContext.mounted) {
-                            ScaffoldMessenger.of(sheetContext).showSnackBar(
-                              const SnackBar(content: Text('已复制本页文本')),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.copy_outlined),
-                        label: const Text('复制'),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.x2),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          Navigator.of(sheetContext).pop();
-                          unawaited(
-                            _showAiPanel(
-                              context,
-                              locatorOverride: locator,
-                              initialContextOverride: result.text,
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.auto_awesome_outlined),
-                        label: const Text('问 AI'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    _ocrOverlays.show([
+      for (final overlay in restored)
+        (
+          page: overlay.page,
+          blocks: [for (final block in overlay.blocks) block.toJson()],
+        ),
+    ]);
   }
 
   Future<void> _showAiPanel(
@@ -3520,7 +3946,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
           });
         }
       }
-      _openDesktopContext(_ReaderContextTab.ai);
+      _openDesktopContext(ReaderContextTab.ai);
       return;
     }
 
@@ -3532,7 +3958,7 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => _ReaderBottomSheetFrame(
+      builder: (context) => ReaderBottomSheetFrame(
         child: AiPanel(
           bookId: widget.bookId,
           bookPath: book?.libraryFilePath,
@@ -3557,2671 +3983,6 @@ final class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 }
 
-final class _InBookSearchSheet extends ConsumerStatefulWidget {
-  const _InBookSearchSheet({
-    required this.bookId,
-    required this.onQueryChanged,
-    required this.onPreviewResult,
-    required this.onClear,
-    this.initialQuery,
-    this.currentLocator,
-    this.onClose,
-    this.onAction,
-    this.embedded = false,
-  });
-
-  final String bookId;
-  final ValueChanged<String> onQueryChanged;
-  final ValueChanged<ReadingLocator> onPreviewResult;
-  final VoidCallback onClear;
-  final String? initialQuery;
-  final ReadingLocator? currentLocator;
-  final VoidCallback? onClose;
-  final ValueChanged<_InBookSearchAction>? onAction;
-  final bool embedded;
-
-  @override
-  ConsumerState<_InBookSearchSheet> createState() => _InBookSearchSheetState();
-}
-
-final class _InBookSearchSheetState extends ConsumerState<_InBookSearchSheet> {
-  final _queryController = TextEditingController();
-  late final InBookSearchController _searchController;
-
-  @override
-  void initState() {
-    super.initState();
-    _searchController = InBookSearchController(
-      bookId: widget.bookId,
-      repository: ref.read(searchRepositoryProvider),
-      currentLocator: widget.currentLocator,
-    )..addListener(_handleSearchStateChanged);
-    final initialQuery = widget.initialQuery?.trim();
-    if (initialQuery != null && initialQuery.isNotEmpty) {
-      _queryController.text = initialQuery;
-      _searchController.updateQuery(initialQuery);
-      unawaited(_searchController.searchNow(initialQuery));
-    }
-  }
-
-  @override
-  void dispose() {
-    _searchController
-      ..removeListener(_handleSearchStateChanged)
-      ..dispose();
-    _queryController.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(covariant _InBookSearchSheet oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final nextQuery = widget.initialQuery?.trim() ?? '';
-    final oldQuery = oldWidget.initialQuery?.trim() ?? '';
-    if (nextQuery.isNotEmpty &&
-        nextQuery != oldQuery &&
-        nextQuery != _queryController.text.trim()) {
-      _queryController.text = nextQuery;
-      _searchController.updateQuery(nextQuery);
-      unawaited(_searchController.searchNow(nextQuery));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final state = _searchController.state;
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.enter): _selectNextAndPreview,
-        const SingleActivator(LogicalKeyboardKey.enter, shift: true):
-            _selectPreviousAndPreview,
-        const SingleActivator(LogicalKeyboardKey.escape): _close,
-      },
-      child: Focus(
-        autofocus: true,
-        child: SafeArea(
-          child: Padding(
-            padding: widget.embedded
-                ? const EdgeInsets.fromLTRB(16, 12, 16, 16)
-                : EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
-                  ),
-            child: ListView(
-              shrinkWrap: true,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '本书搜索',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '关闭搜索',
-                      onPressed: _close,
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SearchBar(
-                  controller: _queryController,
-                  hintText: '搜索当前书籍',
-                  leading: const Icon(Icons.search),
-                  trailing: [
-                    if (_queryController.text.isNotEmpty)
-                      IconButton(
-                        tooltip: '清空搜索',
-                        onPressed: _clear,
-                        icon: const Icon(Icons.close),
-                      ),
-                  ],
-                  onChanged: _updateQuery,
-                  onSubmitted: (_) => _selectNextAndPreview(),
-                ),
-                const SizedBox(height: 12),
-                if (state.results.isNotEmpty)
-                  _SearchNavigationBar(
-                    state: state,
-                    onPrevious: _selectPreviousAndPreview,
-                    onNext: _selectNextAndPreview,
-                    onJump: () => _previewSearchResult(state.selectedResult),
-                  ),
-                const SizedBox(height: 8),
-                _buildSearchBody(context, state),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _selectNextAndPreview() {
-    final state = _searchController.state;
-    if (state.results.isEmpty) {
-      unawaited(_searchController.searchNow(_queryController.text));
-      return;
-    }
-    _searchController.selectNext();
-    _previewSearchResult(_searchController.state.selectedResult);
-  }
-
-  void _selectPreviousAndPreview() {
-    final state = _searchController.state;
-    if (state.results.isEmpty) {
-      unawaited(_searchController.searchNow(_queryController.text));
-      return;
-    }
-    _searchController.selectPrevious();
-    _previewSearchResult(_searchController.state.selectedResult);
-  }
-
-  void _close() {
-    widget.onClear();
-    widget.onClose?.call();
-    if (!widget.embedded) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  Widget _buildSearchBody(BuildContext context, InBookSearchState state) {
-    if (state.query.isEmpty) {
-      return const Center(child: Text('输入关键词搜索当前书籍'));
-    }
-    if (state.isSearching) {
-      return const LinearProgressIndicator();
-    }
-    if (state.error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(state.error!),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _searchController.retry,
-              icon: const Icon(Icons.refresh_outlined),
-              label: const Text('重试'),
-            ),
-          ],
-        ),
-      );
-    }
-    if (state.results.isEmpty) {
-      return const Center(child: Text('没有找到匹配内容'));
-    }
-    return Column(
-      children: [
-        for (var index = 0; index < state.results.length; index++)
-          _SearchResultTile(
-            result: state.results[index],
-            selected: index == state.selectedIndex,
-            onSelected: () {
-              _searchController.select(index);
-              _previewSearchResult(state.results[index]);
-            },
-            onSaveNote: () => _saveSearchResultAsNote(state.results[index]),
-            onAskAi: () => _popSearchAction(
-              state.results[index],
-              intent: _InBookSearchIntent.askAi,
-            ),
-          ),
-      ],
-    );
-  }
-
-  void _handleSearchStateChanged() {
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  void _clear() {
-    _queryController.clear();
-    _searchController.clear();
-    widget.onClear();
-  }
-
-  void _updateQuery(String value) {
-    _searchController.updateQuery(value);
-    widget.onQueryChanged(value);
-  }
-
-  void _popSearchAction(
-    SearchResult? result, {
-    _InBookSearchIntent intent = _InBookSearchIntent.jump,
-  }) {
-    final locator = result?.locator;
-    if (result == null || locator == null) {
-      return;
-    }
-    final action = _InBookSearchAction(
-      locator: locator,
-      sourceText: _plainSearchSnippet(result.snippet),
-      intent: intent,
-    );
-    if (widget.onAction != null) {
-      widget.onAction!(action);
-      return;
-    }
-    Navigator.of(context).pop(action);
-  }
-
-  void _previewSearchResult(SearchResult? result) {
-    final locator = result?.locator;
-    if (locator == null) {
-      return;
-    }
-    widget.onPreviewResult(locator);
-  }
-
-  Future<void> _saveSearchResultAsNote(SearchResult result) async {
-    final text = _plainSearchSnippet(result.snippet);
-    if (text.isEmpty) {
-      return;
-    }
-    await ref
-        .read(noteRepositoryProvider)
-        .saveNote(
-          bookId: widget.bookId,
-          title: result.title,
-          content: text,
-          sourceText: text,
-          locator: result.locator,
-          noteType: NoteType.excerpt,
-        );
-    ref.invalidate(notesByBookProvider(widget.bookId));
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('已保存为笔记'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-}
-
-enum _ReaderContextTab {
-  search('搜索', Icons.search),
-  notebook('笔记', Icons.library_books_outlined),
-  ai('AI', Icons.auto_awesome_outlined);
-
-  const _ReaderContextTab(this.label, this.icon);
-
-  final String label;
-  final IconData icon;
-}
-
-enum _ReaderMoreAction {
-  pageJump,
-  pdfFitWidth,
-  pdfFitPage,
-  pdfZoomOut,
-  pdfZoomIn,
-  pdfImageBox,
-  readerMode,
-  notebook,
-  ai,
-  addAnnotation,
-  createNote,
-}
-
-final class _ReaderToolbarButton extends StatelessWidget {
-  const _ReaderToolbarButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final showLabel = MediaQuery.sizeOf(context).width >= 980;
-    if (!showLabel) {
-      return IconButton(tooltip: label, onPressed: onPressed, icon: Icon(icon));
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: TextButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 19),
-        label: Text(label),
-        style: TextButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-        ),
-      ),
-    );
-  }
-}
-
-final class _MobileReaderTopBar extends StatelessWidget {
-  const _MobileReaderTopBar({
-    required this.title,
-    required this.progress,
-    required this.locationLabel,
-    required this.onBack,
-    required this.onToc,
-    required this.onMore,
-  });
-
-  final String title;
-  final double? progress;
-  final String locationLabel;
-  final Future<void> Function() onBack;
-  final VoidCallback onToc;
-  final VoidCallback onMore;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final percentage = ((progress ?? 0).clamp(0.0, 1.0) * 100).round();
-    return _ReaderFloatingChrome(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // The row is as tall as its tallest child, not a fixed 48 px: that
-          // figure is the icon button's height, and at large text scales the
-          // title and location lines together need more, so a hard height
-          // clipped the second line by a few pixels. The buttons hold the row
-          // at 48 px on their own, and the text block grows past it when it
-          // must.
-          Row(
-            children: [
-              IconButton(
-                tooltip: '返回书库',
-                onPressed: () => unawaited(onBack()),
-                icon: const Icon(Icons.arrow_back),
-              ),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: colorScheme.onSurface,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      '$locationLabel · $percentage%',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                tooltip: '目录',
-                onPressed: onToc,
-                icon: const Icon(Icons.toc),
-              ),
-              IconButton(
-                tooltip: '更多',
-                onPressed: onMore,
-                icon: const Icon(Icons.more_horiz),
-              ),
-            ],
-          ),
-          ClipRRect(
-            borderRadius: const BorderRadius.vertical(
-              bottom: Radius.circular(AppRadius.lg),
-            ),
-            child: LinearProgressIndicator(
-              value: (progress ?? 0).clamp(0.0, 1.0),
-              minHeight: 2,
-              backgroundColor: colorScheme.surfaceContainerHighest,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-final class _MobileReaderBottomBar extends StatelessWidget {
-  const _MobileReaderBottomBar({
-    required this.book,
-    required this.locator,
-    required this.progress,
-    required this.chapterTitle,
-    required this.pageNumber,
-    required this.totalPages,
-    required this.bookmarked,
-    required this.onToc,
-    required this.onSearch,
-    required this.onBookmark,
-    required this.onMore,
-    this.onProgressTap,
-    this.searchAvailable = true,
-  });
-
-  final Book book;
-  final ReadingLocator? locator;
-  final double? progress;
-  final String? chapterTitle;
-  final int? pageNumber;
-  final int? totalPages;
-  final bool bookmarked;
-  final VoidCallback onToc;
-  final VoidCallback onSearch;
-  final VoidCallback onBookmark;
-  final VoidCallback onMore;
-  final VoidCallback? onProgressTap;
-  final bool searchAvailable;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final percentage = ((progress ?? locator?.progress ?? 0).clamp(0, 1) * 100)
-        .round();
-    final location = _readerLocationText(
-      book: book,
-      locator: locator,
-      chapterTitle: chapterTitle,
-      pageNumber: pageNumber,
-      totalPages: totalPages,
-    );
-
-    return _ReaderFloatingChrome(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onProgressTap,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.x4,
-                  AppSpacing.x2,
-                  AppSpacing.x4,
-                  AppSpacing.x1,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        location,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                    ),
-                    Text(
-                      '$percentage%',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (onProgressTap != null) ...[
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.keyboard_arrow_up,
-                        size: 18,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.x1,
-              0,
-              AppSpacing.x1,
-              AppSpacing.x1,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _MobileReaderActionButton(
-                    icon: Icons.toc,
-                    label: '目录',
-                    onPressed: onToc,
-                  ),
-                ),
-                Expanded(
-                  child: _MobileReaderActionButton(
-                    icon: Icons.search,
-                    label: '搜索',
-                    onPressed: searchAvailable ? onSearch : () {},
-                    enabled: searchAvailable,
-                  ),
-                ),
-                Expanded(
-                  child: _MobileReaderActionButton(
-                    icon: bookmarked
-                        ? Icons.bookmark
-                        : Icons.bookmark_add_outlined,
-                    label: bookmarked ? '已书签' : '书签',
-                    selected: bookmarked,
-                    onPressed: onBookmark,
-                  ),
-                ),
-                Expanded(
-                  child: _MobileReaderActionButton(
-                    icon: Icons.more_horiz,
-                    label: '更多',
-                    onPressed: onMore,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-final class _MobileReaderMoreSheet extends StatelessWidget {
-  const _MobileReaderMoreSheet({
-    required this.book,
-    required this.settings,
-    required this.bookmarked,
-    required this.searchAvailable,
-    required this.textLayerAvailable,
-    required this.onSearch,
-    required this.onBookmark,
-    required this.onNotebook,
-    required this.onAi,
-    required this.onSettings,
-    required this.onQuickTheme,
-    required this.onToggleReaderMode,
-    this.capabilityReason,
-    this.onPageJump,
-    this.onZoomOut,
-    this.onZoomIn,
-    this.onFitWidth,
-    this.onFitPage,
-    this.onOcrPage,
-    this.onImageBox,
-    this.imageBoxMode = false,
-  });
-
-  final Book book;
-  final ReaderSettings settings;
-  final bool bookmarked;
-  final bool searchAvailable;
-  final bool textLayerAvailable;
-  final String? capabilityReason;
-  final VoidCallback onSearch;
-  final VoidCallback onBookmark;
-  final VoidCallback onNotebook;
-  final VoidCallback onAi;
-  final VoidCallback onSettings;
-  final VoidCallback onQuickTheme;
-  final VoidCallback onToggleReaderMode;
-  final VoidCallback? onPageJump;
-  final VoidCallback? onZoomOut;
-  final VoidCallback? onZoomIn;
-  final VoidCallback? onFitWidth;
-  final VoidCallback? onFitPage;
-  final VoidCallback? onOcrPage;
-  final VoidCallback? onImageBox;
-  final bool imageBoxMode;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isPdf = book.format == BookFormat.pdf;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.x4,
-        AppSpacing.x1,
-        AppSpacing.x4,
-        AppSpacing.x4,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '阅读操作',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: AppSpacing.x1),
-          Text(
-            book.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          if (isPdf && (!textLayerAvailable || !searchAvailable)) ...[
-            const SizedBox(height: AppSpacing.x3),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.x3),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      size: 18,
-                      color: colorScheme.statusWarning,
-                    ),
-                    const SizedBox(width: AppSpacing.x2),
-                    Expanded(
-                      child: Text(
-                        capabilityReason ??
-                            (!textLayerAvailable
-                                ? '无文本层 · 可用「识别可见页」；标注为近似定位'
-                                : '不支持书内搜索'),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (onOcrPage != null) ...[
-              const SizedBox(height: AppSpacing.x2),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: onOcrPage,
-                  icon: const Icon(Icons.document_scanner_outlined),
-                  label: const Text('识别可见页'),
-                ),
-              ),
-            ],
-          ],
-          const SizedBox(height: AppSpacing.x3),
-          if (isPdf) ...[
-            Text(
-              'PDF',
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: AppSpacing.x2),
-            Wrap(
-              spacing: AppSpacing.x2,
-              runSpacing: AppSpacing.x2,
-              children: [
-                if (onPageJump != null)
-                  _MobileMoreChip(
-                    icon: Icons.pin_outlined,
-                    label: '跳转页码',
-                    onTap: onPageJump!,
-                  ),
-                if (onZoomOut != null)
-                  _MobileMoreChip(
-                    icon: Icons.zoom_out,
-                    label: '缩小',
-                    onTap: onZoomOut!,
-                  ),
-                if (onZoomIn != null)
-                  _MobileMoreChip(
-                    icon: Icons.zoom_in,
-                    label: '放大',
-                    onTap: onZoomIn!,
-                  ),
-                if (onFitWidth != null)
-                  _MobileMoreChip(
-                    icon: Icons.fit_screen_outlined,
-                    label: '适合宽度',
-                    selected: settings.pdfZoomMode == PdfZoomMode.fitWidth,
-                    onTap: onFitWidth!,
-                  ),
-                if (onFitPage != null)
-                  _MobileMoreChip(
-                    icon: Icons.fullscreen_outlined,
-                    label: '适合页面',
-                    selected: settings.pdfZoomMode == PdfZoomMode.fitPage,
-                    onTap: onFitPage!,
-                  ),
-                if (onOcrPage != null)
-                  _MobileMoreChip(
-                    icon: Icons.document_scanner_outlined,
-                    label: '识别可见页',
-                    onTap: onOcrPage!,
-                  ),
-                if (onImageBox != null)
-                  _MobileMoreChip(
-                    icon: Icons.crop_free,
-                    label: '框选图片',
-                    selected: imageBoxMode,
-                    onTap: onImageBox!,
-                  ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.x4),
-          ],
-          Text(
-            '常用',
-            style: Theme.of(
-              context,
-            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: AppSpacing.x2),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.search),
-            title: const Text('书内搜索'),
-            enabled: searchAvailable,
-            onTap: searchAvailable ? onSearch : null,
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              bookmarked ? Icons.bookmark : Icons.bookmark_add_outlined,
-            ),
-            title: Text(bookmarked ? '取消书签' : '添加书签'),
-            onTap: onBookmark,
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.library_books_outlined),
-            title: const Text('笔记与标注'),
-            onTap: onNotebook,
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.auto_awesome_outlined),
-            title: const Text('AI 助手'),
-            onTap: onAi,
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.brightness_4_outlined),
-            title: const Text('快速主题'),
-            subtitle: Text(settings.themePreset.label),
-            onTap: onQuickTheme,
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.view_day_outlined),
-            title: Text(
-              settings.readerMode == ReaderMode.paged ? '切换连续滚动' : '切换分页阅读',
-            ),
-            onTap: onToggleReaderMode,
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.tune),
-            title: const Text('阅读设置'),
-            onTap: onSettings,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-final class _MobileMoreChip extends StatelessWidget {
-  const _MobileMoreChip({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.selected = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return FilterChip(
-      avatar: Icon(icon, size: 18),
-      label: Text(label),
-      selected: selected,
-      showCheckmark: false,
-      onSelected: (_) => onTap(),
-      selectedColor: colorScheme.secondaryContainer,
-    );
-  }
-}
-
-/// Page-number prompt for the PDF toolbar.
-///
-/// The controller lives here rather than in `_showPageJump` because
-/// `showDialog`'s future completes when the dialog starts dismissing, while
-/// the route (and its `TextField`) is still animating out. Disposing the
-/// controller at that point throws "used after being disposed" on the next
-/// frame.
-final class _PageJumpDialog extends StatefulWidget {
-  const _PageJumpDialog({required this.initialPage});
-
-  final int initialPage;
-
-  @override
-  State<_PageJumpDialog> createState() => _PageJumpDialogState();
-}
-
-final class _PageJumpDialogState extends State<_PageJumpDialog> {
-  late final _controller = TextEditingController(
-    text: widget.initialPage.toString(),
-  );
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('跳转页码'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: '页码',
-          hintText: '输入 PDF 页码',
-        ),
-        onSubmitted: (value) => Navigator.of(context).pop(value),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_controller.text),
-          child: const Text('跳转'),
-        ),
-      ],
-    );
-  }
-}
-
-final class _PdfQuickToolbar extends StatelessWidget {
-  const _PdfQuickToolbar({
-    required this.pageNumber,
-    required this.totalPages,
-    required this.settings,
-    required this.bookmarked,
-    required this.onPageJump,
-    required this.onZoomOut,
-    required this.onZoomIn,
-    required this.onFitWidth,
-    required this.onFitPage,
-    required this.onSearch,
-    required this.onBookmark,
-    this.searchAvailable = true,
-    this.textLayerAvailable = true,
-    this.capabilityReason,
-    this.onOcrPage,
-  });
-
-  final int? pageNumber;
-  final int? totalPages;
-  final ReaderSettings settings;
-  final bool bookmarked;
-  final VoidCallback onPageJump;
-  final VoidCallback onZoomOut;
-  final VoidCallback onZoomIn;
-  final VoidCallback onFitWidth;
-  final VoidCallback onFitPage;
-  final VoidCallback onSearch;
-  final VoidCallback onBookmark;
-  final bool searchAvailable;
-  final bool textLayerAvailable;
-  final String? capabilityReason;
-  final VoidCallback? onOcrPage;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final pageLabel = _pdfPageLabel(pageNumber, totalPages);
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (!textLayerAvailable || !searchAvailable)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.x2,
-              AppSpacing.x1,
-              AppSpacing.x2,
-              0,
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                // Compact status, not a sticky warning paragraph.
-                !textLayerAvailable
-                    ? (onOcrPage != null ? '无文本层 · 可识别（标注为近似）' : '无文本层')
-                    : '搜索不可用',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.x2,
-            AppSpacing.x2,
-            AppSpacing.x2,
-            AppSpacing.x2,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _PdfToolbarChip(
-                icon: Icons.pin_outlined,
-                label: pageLabel,
-                tooltip: '跳转页码',
-                onPressed: onPageJump,
-              ),
-              const SizedBox(width: AppSpacing.x1),
-              _PdfToolbarIconButton(
-                icon: Icons.zoom_out,
-                tooltip: '缩小 PDF',
-                onPressed: onZoomOut,
-              ),
-              _PdfToolbarIconButton(
-                icon: Icons.zoom_in,
-                tooltip: '放大 PDF',
-                onPressed: onZoomIn,
-              ),
-              const SizedBox(width: AppSpacing.x1),
-              _PdfToolbarIconButton(
-                icon: Icons.fit_screen_outlined,
-                tooltip: '适合宽度',
-                selected: settings.pdfZoomMode == PdfZoomMode.fitWidth,
-                onPressed: onFitWidth,
-              ),
-              _PdfToolbarIconButton(
-                icon: Icons.fullscreen_outlined,
-                tooltip: '适合页面',
-                selected: settings.pdfZoomMode == PdfZoomMode.fitPage,
-                onPressed: onFitPage,
-              ),
-              const SizedBox(width: AppSpacing.x1),
-              _PdfToolbarIconButton(
-                icon: Icons.search,
-                tooltip: searchAvailable ? '搜索 PDF' : '此 PDF 不可搜索',
-                onPressed: searchAvailable ? onSearch : null,
-              ),
-              if (onOcrPage != null) ...[
-                const SizedBox(width: AppSpacing.x1),
-                _PdfToolbarChip(
-                  icon: Icons.document_scanner_outlined,
-                  label: '识别可见页',
-                  tooltip: '识别当前可见页（双页模式会识别对开两页）',
-                  onPressed: onOcrPage!,
-                ),
-              ],
-              _PdfToolbarIconButton(
-                icon: bookmarked ? Icons.bookmark : Icons.bookmark_add_outlined,
-                tooltip: bookmarked ? '取消书签' : '添加书签',
-                selected: bookmarked,
-                onPressed: onBookmark,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    return _ReaderFloatingChrome(child: content);
-  }
-}
-
-final class _PdfToolbarChip extends StatelessWidget {
-  const _PdfToolbarChip({
-    required this.icon,
-    required this.label,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final String tooltip;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        label: tooltip,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          onTap: onPressed,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceSubtle,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(color: colorScheme.outlineVariant),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.x3,
-                vertical: AppSpacing.x2,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
-                  const SizedBox(width: AppSpacing.x2),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _PdfToolbarIconButton extends StatelessWidget {
-  const _PdfToolbarIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-    this.selected = false,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 1),
-      child: Tooltip(
-        message: tooltip,
-        child: Semantics(
-          button: true,
-          selected: selected,
-          label: tooltip,
-          child: IconButton.filledTonal(
-            tooltip: tooltip,
-            visualDensity: VisualDensity.compact,
-            style: IconButton.styleFrom(
-              fixedSize: const Size(40, 40),
-              backgroundColor: selected
-                  ? colorScheme.secondaryContainer
-                  : colorScheme.surfaceSubtle,
-              foregroundColor: selected
-                  ? colorScheme.onSecondaryContainer
-                  : colorScheme.onSurfaceVariant,
-            ),
-            onPressed: onPressed,
-            icon: Icon(icon, size: 19),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _pdfPageLabel(int? pageNumber, int? totalPages) {
-  if (pageNumber != null && totalPages != null && totalPages > 0) {
-    return '$pageNumber / $totalPages';
-  }
-  if (pageNumber != null) {
-    return '第 $pageNumber 页';
-  }
-  return '页码';
-}
-
-final class _MobileReaderActionButton extends StatelessWidget {
-  const _MobileReaderActionButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-    this.selected = false,
-    this.enabled = true,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  final bool selected;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final foreground = !enabled
-        ? colorScheme.onSurface.withValues(alpha: 0.38)
-        : selected
-        ? colorScheme.primary
-        : colorScheme.onSurface;
-    final secondary = !enabled
-        ? colorScheme.onSurface.withValues(alpha: 0.38)
-        : selected
-        ? colorScheme.primary
-        : colorScheme.onSurfaceVariant;
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        button: true,
-        enabled: enabled,
-        selected: selected,
-        label: label,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          onTap: enabled ? onPressed : null,
-          child: SizedBox(
-            height: 56,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: foreground),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: secondary,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _ReaderChromeRevealButton extends StatelessWidget {
-  const _ReaderChromeRevealButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.surface.withValues(alpha: 0.96),
-      elevation: 3,
-      shadowColor: Colors.black26,
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.x3,
-            vertical: AppSpacing.x2,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.menu, size: 18, color: colorScheme.onSurface),
-              const SizedBox(width: 6),
-              Text(
-                '菜单',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: colorScheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _ReaderFloatingChrome extends StatelessWidget {
-  const _ReaderFloatingChrome({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.surface.withValues(alpha: 0.94),
-      surfaceTintColor: Colors.transparent,
-      elevation: 2,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: colorScheme.appBorder),
-        ),
-        child: child,
-      ),
-    );
-  }
-}
-
-final class _ReaderBottomSheetFrame extends StatelessWidget {
-  const _ReaderBottomSheetFrame({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.86,
-      child: child,
-    );
-  }
-}
-
-enum _SelectionAction { highlight, underline, note, search, copy, ai }
-
-/// Actions offered after drawing a box over an image.
-enum _ImageAnnotationAction { annotate, save, copyCaption }
-
-final class _DesktopSelectionOverlay extends StatelessWidget {
-  const _DesktopSelectionOverlay({
-    required this.selection,
-    required this.onAction,
-    required this.onDismiss,
-  });
-
-  final RendererTextSelected selection;
-  final ValueChanged<_SelectionAction> onAction;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final preview = selection.text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    final shortPreview = preview.length <= 18
-        ? preview
-        : '${preview.substring(0, 18).trim()}…';
-
-    Widget action({
-      required IconData icon,
-      required String label,
-      required _SelectionAction value,
-      bool accent = false,
-    }) {
-      final fg = accent ? colorScheme.primary : colorScheme.onSurface;
-      final bg = accent
-          ? colorScheme.primaryContainer.withValues(alpha: 0.85)
-          : Colors.transparent;
-      return Tooltip(
-        message: label,
-        child: Material(
-          color: bg,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () => onAction(value),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 16, color: fg),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: fg,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Material(
-      elevation: 14,
-      color: colorScheme.surface,
-      shadowColor: colorScheme.shadow.withValues(alpha: 0.22),
-      borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.95),
-          ),
-          color: colorScheme.surface.withValues(alpha: 0.99),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (shortPreview.isNotEmpty) ...[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 120),
-                  child: Tooltip(
-                    message: preview,
-                    child: Text(
-                      shortPreview,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-                Container(
-                  width: 1,
-                  height: 24,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  color: colorScheme.outlineVariant,
-                ),
-              ],
-              action(
-                icon: Icons.format_color_fill_outlined,
-                label: '高亮',
-                value: _SelectionAction.highlight,
-              ),
-              action(
-                icon: Icons.format_underlined,
-                label: '下划线',
-                value: _SelectionAction.underline,
-              ),
-              action(
-                icon: Icons.note_add_outlined,
-                label: '笔记',
-                value: _SelectionAction.note,
-              ),
-              action(
-                icon: Icons.copy_outlined,
-                label: '复制',
-                value: _SelectionAction.copy,
-              ),
-              action(
-                icon: Icons.search,
-                label: '搜索',
-                value: _SelectionAction.search,
-              ),
-              action(
-                icon: Icons.auto_awesome_outlined,
-                label: 'AI',
-                value: _SelectionAction.ai,
-                accent: true,
-              ),
-              IconButton(
-                tooltip: '关闭',
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                padding: EdgeInsets.zero,
-                onPressed: onDismiss,
-                icon: Icon(
-                  Icons.close,
-                  size: 16,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _ImageActionOverlay extends StatelessWidget {
-  const _ImageActionOverlay({
-    required this.hasCaption,
-    required this.onAction,
-    required this.onDismiss,
-  });
-
-  /// PDFs carry no alt text, so this is false until EPUB images land. The
-  /// action stays visible but disabled rather than vanishing: the same menu
-  /// layout across formats is easier to learn than a menu that rearranges.
-  final bool hasCaption;
-  final ValueChanged<_ImageAnnotationAction> onAction;
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    Widget action({
-      required IconData icon,
-      required String label,
-      required _ImageAnnotationAction value,
-      bool enabled = true,
-    }) {
-      final fg = enabled ? colorScheme.onSurface : colorScheme.onSurfaceVariant;
-      return Tooltip(
-        message: label,
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: enabled ? () => onAction(value) : null,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 16, color: fg),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: fg,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Material(
-      elevation: 14,
-      color: colorScheme.surface,
-      shadowColor: colorScheme.shadow.withValues(alpha: 0.22),
-      borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.95),
-          ),
-          color: colorScheme.surface.withValues(alpha: 0.99),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              action(
-                icon: Icons.edit_outlined,
-                label: '注释此图',
-                value: _ImageAnnotationAction.annotate,
-              ),
-              action(
-                icon: Icons.download_outlined,
-                label: '保存图片',
-                value: _ImageAnnotationAction.save,
-              ),
-              action(
-                icon: Icons.copy_all_outlined,
-                label: '复制图注',
-                value: _ImageAnnotationAction.copyCaption,
-                enabled: hasCaption,
-              ),
-              IconButton(
-                tooltip: '关闭',
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                padding: EdgeInsets.zero,
-                onPressed: onDismiss,
-                icon: Icon(
-                  Icons.close,
-                  size: 16,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _SelectionActionSurface extends StatelessWidget {
-  const _SelectionActionSurface({
-    required this.selection,
-    required this.onAction,
-    required this.onDismiss,
-    this.compact = false,
-  });
-
-  final RendererTextSelected selection;
-  final ValueChanged<_SelectionAction> onAction;
-  final VoidCallback onDismiss;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final preview = selection.text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        compact ? AppSpacing.x4 : AppSpacing.x3,
-        compact ? AppSpacing.x2 : AppSpacing.x3,
-        compact ? AppSpacing.x4 : AppSpacing.x3,
-        compact ? AppSpacing.x4 : AppSpacing.x3,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '选中文本',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: '关闭选择操作',
-                visualDensity: VisualDensity.compact,
-                onPressed: onDismiss,
-                icon: const Icon(Icons.close, size: 18),
-              ),
-            ],
-          ),
-          if (preview.isNotEmpty) ...[
-            Text(
-              preview,
-              maxLines: compact ? 2 : 3,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.x3),
-          ],
-          Wrap(
-            spacing: AppSpacing.x2,
-            runSpacing: AppSpacing.x2,
-            children: [
-              _SelectionChipAction(
-                icon: Icons.format_color_fill_outlined,
-                label: '高亮',
-                onTap: () => onAction(_SelectionAction.highlight),
-              ),
-              _SelectionChipAction(
-                icon: Icons.note_add_outlined,
-                label: '笔记',
-                onTap: () => onAction(_SelectionAction.note),
-              ),
-              _SelectionChipAction(
-                icon: Icons.copy_outlined,
-                label: '复制',
-                onTap: () => onAction(_SelectionAction.copy),
-              ),
-              _SelectionChipAction(
-                icon: Icons.auto_awesome_outlined,
-                label: 'AI',
-                accent: true,
-                onTap: () => onAction(_SelectionAction.ai),
-              ),
-              // Secondary actions last — keep the first row thumb-friendly.
-              _SelectionChipAction(
-                icon: Icons.format_underlined,
-                label: '下划线',
-                onTap: () => onAction(_SelectionAction.underline),
-              ),
-              _SelectionChipAction(
-                icon: Icons.search,
-                label: '搜索',
-                onTap: () => onAction(_SelectionAction.search),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-final class _SelectionChipAction extends StatelessWidget {
-  const _SelectionChipAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.accent = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final foreground = accent ? colorScheme.primary : colorScheme.onSurface;
-    final background = accent
-        ? colorScheme.primaryContainer
-        : colorScheme.surfaceSubtle;
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        button: true,
-        label: label,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          onTap: onTap,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: background,
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(
-                color: accent
-                    ? colorScheme.primary.withValues(alpha: 0.28)
-                    : colorScheme.outlineVariant,
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 18, color: foreground),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: foreground,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _ContextTabChip extends StatelessWidget {
-  const _ContextTabChip({
-    required this.tab,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final _ReaderContextTab tab;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          // The selected tab is the one that paints the rule under itself;
-          // the others keep the space so the row does not jump.
-          border: Border(
-            bottom: BorderSide(
-              color: selected ? colorScheme.primary : Colors.transparent,
-              width: 2,
-            ),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                tab.icon,
-                size: 16,
-                color: selected
-                    ? colorScheme.primary
-                    : colorScheme.textSecondary,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                tab.label,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: selected ? colorScheme.primary : colorScheme.onSurface,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _DesktopContextPane extends StatelessWidget {
-  const _DesktopContextPane({
-    required this.bookId,
-    required this.activeTab,
-    required this.searchQuery,
-    required this.currentLocator,
-    required this.selectedText,
-    required this.selectedLocator,
-    required this.onQueryChanged,
-    required this.onPreviewResult,
-    required this.onClear,
-    required this.onClose,
-    required this.onTabChanged,
-    required this.onAction,
-    required this.onAskAi,
-    this.bookPath,
-    required this.format,
-    this.onNoteSaved,
-  });
-
-  final String bookId;
-
-  /// The book on disk, so the AI panel can read a page or chapter.
-  final String? bookPath;
-
-  final BookFormat format;
-  final _ReaderContextTab activeTab;
-  final String? searchQuery;
-  final ReadingLocator? currentLocator;
-  final String? selectedText;
-  final ReadingLocator? selectedLocator;
-  final ValueChanged<String> onQueryChanged;
-  final ValueChanged<ReadingLocator> onPreviewResult;
-  final VoidCallback onClear;
-  final VoidCallback onClose;
-  final ValueChanged<_ReaderContextTab> onTabChanged;
-  final ValueChanged<_InBookSearchAction> onAction;
-  final Future<void> Function(BuildContext context) onAskAi;
-  final VoidCallback? onNoteSaved;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.surface,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(
-              color: colorScheme.appBorder.withValues(alpha: 0.95),
-            ),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.x4,
-                AppSpacing.x3,
-                AppSpacing.x2,
-                AppSpacing.x2,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          activeTab.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.2,
-                              ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          switch (activeTab) {
-                            _ReaderContextTab.search => '在本书内查找并跳转',
-                            _ReaderContextTab.notebook => '书签、标注与笔记',
-                            _ReaderContextTab.ai => '对选中文本提问',
-                          },
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colorScheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '收起侧栏',
-                    onPressed: onClose,
-                    icon: const Icon(Icons.keyboard_tab),
-                  ),
-                ],
-              ),
-            ),
-            // Flat tabs over one hairline, same as the AI panel's own
-            // 提问 / 历史 strip. As a bordered pill this stacked a pill
-            // inside a pill directly above another pill bar, which is what
-            // made the rail read as a column of frames.
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x3),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: colorScheme.appBorder.withValues(alpha: 0.9),
-                    ),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    for (final tab in _ReaderContextTab.values)
-                      Expanded(
-                        child: _ContextTabChip(
-                          tab: tab,
-                          selected: activeTab == tab,
-                          onTap: () => onTabChanged(tab),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            Expanded(child: _buildTab(context)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTab(BuildContext context) {
-    return switch (activeTab) {
-      _ReaderContextTab.search => _InBookSearchSheet(
-        bookId: bookId,
-        initialQuery: searchQuery,
-        currentLocator: currentLocator,
-        onQueryChanged: onQueryChanged,
-        onPreviewResult: onPreviewResult,
-        onClear: onClear,
-        onClose: onClose,
-        onAction: onAction,
-        embedded: true,
-      ),
-      _ReaderContextTab.notebook => _DesktopNotebookPane(
-        bookId: bookId,
-        onSelected: onPreviewResult,
-      ),
-      _ReaderContextTab.ai => AiPanel(
-        bookId: bookId,
-        bookPath: bookPath,
-        format: format,
-        locator: selectedLocator ?? currentLocator,
-        initialContext: selectedText ?? currentLocator?.excerpt,
-        onJumpTo: onPreviewResult,
-        onNoteSaved: onNoteSaved,
-        embedded: true,
-      ),
-    };
-  }
-}
-
-final class _SearchNavigationBar extends StatelessWidget {
-  const _SearchNavigationBar({
-    required this.state,
-    required this.onPrevious,
-    required this.onNext,
-    required this.onJump,
-  });
-
-  final InBookSearchState state;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
-  final VoidCallback onJump;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text('${state.selectedIndex + 1}/${state.results.length}'),
-        const Spacer(),
-        IconButton(
-          tooltip: '上一条',
-          onPressed: onPrevious,
-          icon: const Icon(Icons.keyboard_arrow_up),
-        ),
-        IconButton(
-          tooltip: '下一条',
-          onPressed: onNext,
-          icon: const Icon(Icons.keyboard_arrow_down),
-        ),
-        FilledButton.icon(
-          onPressed: state.selectedResult?.locator == null ? null : onJump,
-          icon: const Icon(Icons.near_me_outlined),
-          label: const Text('跳转'),
-        ),
-      ],
-    );
-  }
-}
-
-final class _SearchResultTile extends StatelessWidget {
-  const _SearchResultTile({
-    required this.result,
-    required this.selected,
-    required this.onSelected,
-    required this.onSaveNote,
-    required this.onAskAi,
-  });
-
-  final SearchResult result;
-  final bool selected;
-  final VoidCallback onSelected;
-  final VoidCallback onSaveNote;
-  final VoidCallback onAskAi;
-
-  @override
-  Widget build(BuildContext context) {
-    final snippet = _plainSearchSnippet(result.snippet);
-    return ListTile(
-      selected: selected,
-      leading: Icon(
-        selected ? Icons.arrow_right_outlined : Icons.article_outlined,
-      ),
-      title: Text(result.title),
-      subtitle: Text(snippet, maxLines: 3, overflow: TextOverflow.ellipsis),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            tooltip: '保存搜索结果为笔记',
-            onPressed: result.locator == null ? null : onSaveNote,
-            icon: const Icon(Icons.note_add_outlined),
-          ),
-          IconButton(
-            tooltip: '对搜索结果片段提问',
-            onPressed: result.locator == null ? null : onAskAi,
-            icon: const Icon(Icons.auto_awesome_outlined),
-          ),
-        ],
-      ),
-      onTap: result.locator == null ? null : onSelected,
-    );
-  }
-}
-
-enum _InBookSearchIntent { jump, askAi }
-
-final class _InBookSearchAction {
-  const _InBookSearchAction({
-    required this.locator,
-    required this.sourceText,
-    required this.intent,
-  });
-
-  final ReadingLocator locator;
-  final String sourceText;
-  final _InBookSearchIntent intent;
-}
-
-String _plainSearchSnippet(String value) {
-  return value.replaceAll(RegExp('<[^>]+>'), '').trim();
-}
-
-final bookmarksByBookProvider = StreamProvider.family<List<Bookmark>, String>((
-  ref,
-  bookId,
-) {
-  return ref.watch(bookmarkRepositoryProvider).watchByBook(bookId);
-});
-
-final notesByBookProvider = FutureProvider.family<List<Note>, String>((
-  ref,
-  bookId,
-) {
-  return ref.watch(noteRepositoryProvider).getByBook(bookId);
-});
-
-final class _DesktopNotebookPane extends ConsumerWidget {
-  const _DesktopNotebookPane({required this.bookId, required this.onSelected});
-
-  final String bookId;
-  final ValueChanged<ReadingLocator> onSelected;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return _NotebookContent(bookId: bookId, onSelected: onSelected);
-  }
-}
-
-final class _NotebookSheet extends ConsumerWidget {
-  const _NotebookSheet({required this.bookId});
-
-  final String bookId;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return SafeArea(
-      child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.86,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 12, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Notebook',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '关闭 Notebook',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: _NotebookContent(
-                bookId: bookId,
-                onSelected: (locator) => Navigator.of(context).pop(locator),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-final class _NotebookContent extends ConsumerWidget {
-  const _NotebookContent({required this.bookId, required this.onSelected});
-
-  final String bookId;
-  final ValueChanged<ReadingLocator> onSelected;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bookmarks = ref.watch(bookmarksByBookProvider(bookId));
-    final annotations = ref.watch(annotationsByBookProvider(bookId));
-    final notes = ref.watch(notesByBookProvider(bookId));
-    if (bookmarks.isLoading || annotations.isLoading || notes.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (bookmarks.hasError || annotations.hasError || notes.hasError) {
-      return const Center(child: Text('无法读取 Notebook'));
-    }
-    return StreamBuilder<List<AiConversation>>(
-      stream: ref.watch(aiConversationRepositoryProvider).watchConversations(),
-      builder: (context, snapshot) {
-        final entries = _buildNotebookEntries(
-          bookmarks.value ?? const [],
-          annotations.value ?? const [],
-          notes.value ?? const [],
-          (snapshot.data ?? const <AiConversation>[])
-              .where((conversation) => conversation.bookId == bookId)
-              .toList(growable: false),
-        );
-        if (entries.isEmpty) {
-          return const _ContextEmptyState(
-            icon: Icons.library_books_outlined,
-            message: '这本书还没有 Notebook 条目',
-          );
-        }
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.x3,
-            AppSpacing.x3,
-            AppSpacing.x3,
-            AppSpacing.x6,
-          ),
-          itemCount: entries.length,
-          itemBuilder: (context, index) =>
-              _NotebookEntryTile(entry: entries[index], onSelected: onSelected),
-        );
-      },
-    );
-  }
-}
-
-final class _NotebookEntryTile extends ConsumerWidget {
-  const _NotebookEntryTile({required this.entry, required this.onSelected});
-
-  final _NotebookEntry entry;
-  final ValueChanged<ReadingLocator> onSelected;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final accent = entry.color ?? _notebookTypeColor(context, entry.type);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.x2),
-      child: Material(
-        color: colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          side: BorderSide(color: colorScheme.outlineVariant),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          onTap: entry.locator == null
-              ? null
-              : () => onSelected(entry.locator!),
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.x3),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    border: Border.all(color: accent.withValues(alpha: 0.30)),
-                  ),
-                  child: Icon(entry.icon, size: 19, color: accent),
-                ),
-                const SizedBox(width: AppSpacing.x3),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          _NotebookMetaChip(label: entry.label, color: accent),
-                          const SizedBox(width: AppSpacing.x2),
-                          Expanded(
-                            child: Text(
-                              _formatNotebookTime(entry.timestamp),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(color: colorScheme.textSecondary),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppSpacing.x2),
-                      Text(
-                        entry.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: colorScheme.onSurface,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (entry.subtitle.trim().isNotEmpty) ...[
-                        const SizedBox(height: AppSpacing.x1),
-                        Text(
-                          entry.subtitle,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colorScheme.textSecondary),
-                        ),
-                      ],
-                      if (entry.locator != null) ...[
-                        const SizedBox(height: AppSpacing.x2),
-                        _NotebookMetaChip(
-                          label: entry.locator!.displayLabel,
-                          color: colorScheme.primary,
-                          subtle: true,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                PopupMenuButton<_NotebookAction>(
-                  tooltip: 'Notebook 条目操作',
-                  itemBuilder: (context) => _notebookMenuItems(entry),
-                  onSelected: (action) => _handleNotebookAction(
-                    context,
-                    ref,
-                    entry,
-                    action,
-                    onSelected,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _NotebookMetaChip extends StatelessWidget {
-  const _NotebookMetaChip({
-    required this.label,
-    required this.color,
-    this.subtle = false,
-  });
-
-  final String label;
-  final Color color;
-  final bool subtle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.x2,
-        vertical: AppSpacing.x1,
-      ),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: subtle ? 0.07 : 0.12),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-enum _NotebookEntryType { bookmark, annotation, image, note, ai }
-
-enum _NotebookAction { jump, edit, note, copy, delete, openNotes }
-
-final class _NotebookEntry {
-  const _NotebookEntry({
-    required this.type,
-    required this.title,
-    required this.subtitle,
-    required this.timestamp,
-    required this.source,
-    this.locator,
-    this.color,
-  });
-
-  final _NotebookEntryType type;
-  final String title;
-  final String subtitle;
-  final int timestamp;
-  final Object source;
-  final ReadingLocator? locator;
-  final Color? color;
-
-  String get label {
-    return switch (type) {
-      _NotebookEntryType.bookmark => '书签',
-      _NotebookEntryType.annotation => '标注',
-      // Image annotations are annotations in storage; they are listed apart
-      // because a frame with no words is hard to find in a wall of text.
-      _NotebookEntryType.image => '图片',
-      _NotebookEntryType.note => '笔记',
-      _NotebookEntryType.ai => 'AI',
-    };
-  }
-
-  IconData get icon {
-    return switch (type) {
-      _NotebookEntryType.bookmark => Icons.bookmark_border,
-      _NotebookEntryType.annotation => Icons.border_color_outlined,
-      _NotebookEntryType.image => Icons.image_outlined,
-      _NotebookEntryType.note => Icons.sticky_note_2_outlined,
-      _NotebookEntryType.ai => Icons.auto_awesome_outlined,
-    };
-  }
-}
-
-List<_NotebookEntry> _buildNotebookEntries(
-  List<Bookmark> bookmarks,
-  List<Annotation> annotations,
-  List<Note> notes,
-  List<AiConversation> conversations,
-) {
-  final entries = <_NotebookEntry>[
-    for (final bookmark in bookmarks)
-      _NotebookEntry(
-        type: _NotebookEntryType.bookmark,
-        title: bookmark.title ?? bookmark.locator.displayLabel,
-        subtitle: bookmark.note?.isNotEmpty == true
-            ? bookmark.note!
-            : bookmark.excerpt ?? bookmark.locator.displayLabel,
-        timestamp: bookmark.updatedAt,
-        locator: bookmark.locator,
-        source: bookmark,
-      ),
-    for (final annotation in annotations)
-      _NotebookEntry(
-        type: annotation.target == AnnotationTarget.image
-            ? _NotebookEntryType.image
-            : _NotebookEntryType.annotation,
-        // An image annotation often has no caption, and an entry titled '' is
-        // a blank row: name it by position instead, which is what the reader
-        // would say out loud anyway.
-        title: annotation.selectedText.isNotEmpty
-            ? annotation.selectedText
-            : annotation.target == AnnotationTarget.image
-            ? '图片 · ${annotation.locator.displayLabel}'
-            : annotation.selectedText,
-        subtitle: annotation.target == AnnotationTarget.image
-            ? (annotation.selectedText.isNotEmpty
-                  ? annotation.locator.displayLabel
-                  : '没有图注')
-            : annotation.locator.displayLabel,
-        timestamp: annotation.updatedAt,
-        locator: annotation.locator,
-        source: annotation,
-        color: _annotationUiColor(annotation.color),
-      ),
-    for (final note in notes)
-      _NotebookEntry(
-        type: _NotebookEntryType.note,
-        title: note.title?.isNotEmpty == true ? note.title! : '无标题笔记',
-        subtitle: note.sourceText?.isNotEmpty == true
-            ? note.sourceText!
-            : note.content,
-        timestamp: note.updatedAt,
-        locator: note.locator,
-        source: note,
-      ),
-    for (final conversation in conversations)
-      _NotebookEntry(
-        type: _NotebookEntryType.ai,
-        title: conversation.prompt,
-        subtitle: conversation.answer,
-        timestamp: conversation.createdAt,
-        locator: conversation.locator,
-        source: conversation,
-      ),
-  ];
-  entries.sort((a, b) {
-    final aKey = _notebookLocatorSortKey(a.locator);
-    final bKey = _notebookLocatorSortKey(b.locator);
-    if (aKey != null && bKey != null && aKey != bKey) {
-      return aKey.compareTo(bKey);
-    }
-    if (aKey != null && bKey == null) {
-      return -1;
-    }
-    if (aKey == null && bKey != null) {
-      return 1;
-    }
-    return b.timestamp.compareTo(a.timestamp);
-  });
-  return entries;
-}
-
-double? _notebookLocatorSortKey(ReadingLocator? locator) {
-  if (locator == null) {
-    return null;
-  }
-  return switch (locator.type) {
-    ReadingLocatorType.pdf => (locator.page ?? 1).toDouble(),
-    ReadingLocatorType.epub || ReadingLocatorType.markdown =>
-      ((locator.chapterIndex ?? 0) * 1000000000 + (locator.chapterOffset ?? 0))
-          .toDouble(),
-  };
-}
-
-Color _notebookTypeColor(BuildContext context, _NotebookEntryType type) {
-  final colorScheme = Theme.of(context).colorScheme;
-  return switch (type) {
-    _NotebookEntryType.bookmark => colorScheme.statusWarning,
-    _NotebookEntryType.annotation => colorScheme.primary,
-    _NotebookEntryType.image => colorScheme.statusInfo,
-    _NotebookEntryType.note => colorScheme.statusInfo,
-    _NotebookEntryType.ai => colorScheme.aiAccent,
-  };
-}
-
-List<PopupMenuEntry<_NotebookAction>> _notebookMenuItems(_NotebookEntry entry) {
-  return [
-    PopupMenuItem(
-      value: _NotebookAction.jump,
-      enabled: entry.locator != null,
-      child: const ListTile(
-        dense: true,
-        leading: Icon(Icons.near_me_outlined),
-        title: Text('跳回原文'),
-      ),
-    ),
-    if (entry.type == _NotebookEntryType.bookmark)
-      const PopupMenuItem(
-        value: _NotebookAction.edit,
-        child: ListTile(
-          dense: true,
-          leading: Icon(Icons.edit_note_outlined),
-          title: Text('编辑备注'),
-        ),
-      ),
-    if (entry.type == _NotebookEntryType.annotation ||
-        entry.type == _NotebookEntryType.image)
-      const PopupMenuItem(
-        value: _NotebookAction.edit,
-        child: ListTile(
-          dense: true,
-          leading: Icon(Icons.palette_outlined),
-          title: Text('修改样式'),
-        ),
-      ),
-    if (entry.type == _NotebookEntryType.annotation ||
-        entry.type == _NotebookEntryType.image ||
-        entry.type == _NotebookEntryType.ai)
-      const PopupMenuItem(
-        value: _NotebookAction.note,
-        child: ListTile(
-          dense: true,
-          leading: Icon(Icons.note_add_outlined),
-          title: Text('保存为笔记'),
-        ),
-      ),
-    if (entry.type == _NotebookEntryType.note)
-      const PopupMenuItem(
-        value: _NotebookAction.openNotes,
-        child: ListTile(
-          dense: true,
-          leading: Icon(Icons.open_in_new),
-          title: Text('打开笔记页'),
-        ),
-      ),
-    const PopupMenuItem(
-      value: _NotebookAction.copy,
-      child: ListTile(
-        dense: true,
-        leading: Icon(Icons.copy_outlined),
-        title: Text('复制内容'),
-      ),
-    ),
-    if (entry.type != _NotebookEntryType.ai)
-      const PopupMenuItem(
-        value: _NotebookAction.delete,
-        child: ListTile(
-          dense: true,
-          leading: Icon(Icons.delete_outline),
-          title: Text('删除'),
-        ),
-      ),
-  ];
-}
-
-Future<void> _handleNotebookAction(
-  BuildContext context,
-  WidgetRef ref,
-  _NotebookEntry entry,
-  _NotebookAction action,
-  ValueChanged<ReadingLocator> onSelected,
-) async {
-  switch (action) {
-    case _NotebookAction.jump:
-      final locator = entry.locator;
-      if (locator != null) {
-        final fallback = switch (entry.source) {
-          final Note note => note.sourceText,
-          final Annotation annotation => annotation.selectedText,
-          final Bookmark bookmark => bookmark.excerpt ?? bookmark.note,
-          final AiConversation conversation =>
-            conversation.sourceText ?? conversation.contextText,
-          _ => entry.subtitle,
-        };
-        onSelected(enrichLocatorForJump(locator, fallbackExcerpt: fallback));
-      }
-    case _NotebookAction.edit:
-      switch (entry.source) {
-        case final Bookmark bookmark:
-          await _editBookmarkNote(context, ref, bookmark);
-        case final Annotation annotation:
-          await _editAnnotation(context, ref, annotation);
-      }
-    case _NotebookAction.note:
-      switch (entry.source) {
-        case final Annotation annotation:
-          await _saveAnnotationAsNote(context, ref, annotation);
-        case final AiConversation conversation:
-          await _saveNotebookAiAsNote(context, ref, conversation);
-      }
-    case _NotebookAction.copy:
-      await Clipboard.setData(ClipboardData(text: entry.subtitle));
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('已复制内容')));
-      }
-    case _NotebookAction.delete:
-      switch (entry.source) {
-        case final Bookmark bookmark:
-          await _deleteBookmarkWithUndo(context, ref, bookmark);
-        case final Annotation annotation:
-          await _deleteAnnotation(context, ref, annotation);
-        case final Note note:
-          await _deleteNotebookNote(context, ref, note);
-      }
-    case _NotebookAction.openNotes:
-      context.go('/notes');
-  }
-}
-
-Future<void> _saveNotebookAiAsNote(
-  BuildContext context,
-  WidgetRef ref,
-  AiConversation conversation,
-) async {
-  final note = await ref
-      .read(noteRepositoryProvider)
-      .saveNote(
-        bookId: conversation.bookId,
-        title: conversation.prompt,
-        content: conversation.answer,
-        sourceText: conversation.sourceText ?? conversation.contextText,
-        locator: conversation.locator,
-        noteType: NoteType.ai,
-      );
-  await ref
-      .read(aiConversationRepositoryProvider)
-      .linkNote(conversationId: conversation.id, noteId: note.id);
-  if (conversation.bookId != null) {
-    ref.invalidate(notesByBookProvider(conversation.bookId!));
-  }
-  if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('已保存为笔记'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-}
-
-Future<void> _deleteNotebookNote(
-  BuildContext context,
-  WidgetRef ref,
-  Note note,
-) async {
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('删除笔记？'),
-      content: const Text('删除后不会影响书籍原文和已有标注。'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('删除'),
-        ),
-      ],
-    ),
-  );
-  if (confirmed != true) {
-    return;
-  }
-  await ref.read(noteRepositoryProvider).deleteNote(note.id);
-  if (note.bookId != null) {
-    ref.invalidate(notesByBookProvider(note.bookId!));
-  }
-}
-
-String _formatNotebookTime(int millis) {
-  final value = DateTime.fromMillisecondsSinceEpoch(millis);
-  return '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
-}
-
 Bookmark? _bookmarkAtLocator(
   List<Bookmark> bookmarks,
   ReadingLocator? locator,
@@ -6237,2231 +3998,9 @@ Bookmark? _bookmarkAtLocator(
   return null;
 }
 
-Future<void> _editBookmarkNote(
-  BuildContext context,
-  WidgetRef ref,
-  Bookmark bookmark,
-) async {
-  final controller = TextEditingController(text: bookmark.note ?? '');
-  final note = await showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('编辑书签备注'),
-      content: TextField(
-        controller: controller,
-        minLines: 3,
-        maxLines: 6,
-        decoration: const InputDecoration(
-          labelText: '备注',
-          border: OutlineInputBorder(),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(controller.text),
-          child: const Text('保存'),
-        ),
-      ],
-    ),
-  );
-  controller.dispose();
-  if (note == null) {
-    return;
-  }
-  await ref
-      .read(bookmarkRepositoryProvider)
-      .saveBookmark(
-        id: bookmark.id,
-        bookId: bookmark.bookId,
-        locator: bookmark.locator,
-        title: bookmark.title,
-        note: note.trim().isEmpty ? null : note.trim(),
-        excerpt: bookmark.excerpt,
-      );
-  if (!context.mounted) {
-    return;
-  }
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(const SnackBar(content: Text('书签备注已保存')));
-}
-
-Future<void> _deleteBookmarkWithUndo(
-  BuildContext context,
-  WidgetRef ref,
-  Bookmark bookmark,
-) async {
-  await ref.read(bookmarkRepositoryProvider).deleteBookmark(bookmark.id);
-  if (!context.mounted) {
-    return;
-  }
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: const Text('已删除书签'),
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 4),
-      action: SnackBarAction(
-        label: '撤销',
-        onPressed: () => unawaited(
-          ref
-              .read(bookmarkRepositoryProvider)
-              .saveBookmark(
-                id: bookmark.id,
-                bookId: bookmark.bookId,
-                locator: bookmark.locator,
-                title: bookmark.title,
-                note: bookmark.note,
-                excerpt: bookmark.excerpt,
-              ),
-        ),
-      ),
-    ),
-  );
-}
-
-Future<_AnnotationEditorResult?> _showAnnotationEditor(
-  BuildContext context, {
-  required String initialText,
-  AnnotationColor initialColor = AnnotationColor.yellow,
-  AnnotationStyle initialStyle = AnnotationStyle.highlight,
-  bool textEditable = true,
-}) async {
-  final textController = TextEditingController(text: initialText);
-  var color = initialColor;
-  var style = initialStyle;
-  final result = await showDialog<_AnnotationEditorResult>(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        title: Text(textEditable ? '添加标注' : '修改标注样式'),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: textController,
-                minLines: 3,
-                maxLines: 8,
-                readOnly: !textEditable,
-                decoration: const InputDecoration(
-                  labelText: '原文',
-                  helperText: 'EPUB 中能匹配到的文本会被高亮显示',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text('颜色', style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: AnnotationColor.values
-                    .map((value) {
-                      return ChoiceChip(
-                        selected: color == value,
-                        avatar: CircleAvatar(
-                          backgroundColor: _annotationUiColor(value),
-                        ),
-                        label: Text(_annotationColorLabel(value)),
-                        onSelected: (_) => setDialogState(() => color = value),
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-              const SizedBox(height: 16),
-              Text('样式', style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(height: 8),
-              SegmentedButton<AnnotationStyle>(
-                segments: const [
-                  ButtonSegment(
-                    value: AnnotationStyle.highlight,
-                    label: Text('高亮'),
-                    icon: Icon(Icons.format_color_fill_outlined),
-                  ),
-                  ButtonSegment(
-                    value: AnnotationStyle.underline,
-                    label: Text('下划线'),
-                    icon: Icon(Icons.format_underlined),
-                  ),
-                ],
-                selected: {style},
-                onSelectionChanged: (values) {
-                  setDialogState(() => style = values.single);
-                },
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(
-              _AnnotationEditorResult(
-                selectedText: textController.text,
-                color: color,
-                style: style,
-              ),
-            ),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    ),
-  );
-  textController.dispose();
-  return result;
-}
-
-final class _AnnotationEditorResult {
-  const _AnnotationEditorResult({
-    required this.selectedText,
-    required this.color,
-    required this.style,
-  });
-
-  final String selectedText;
-  final AnnotationColor color;
-  final AnnotationStyle style;
-}
-
-Color _annotationUiColor(AnnotationColor color) {
-  return switch (color) {
-    AnnotationColor.yellow => const Color(0xFFFFD85A),
-    AnnotationColor.blue => const Color(0xFF7CB7FF),
-    AnnotationColor.green => const Color(0xFF74D18A),
-    AnnotationColor.red => const Color(0xFFFF8A8A),
-    AnnotationColor.purple => const Color(0xFFB79CFF),
-  };
-}
-
-String _annotationColorLabel(AnnotationColor color) {
-  return switch (color) {
-    AnnotationColor.yellow => '黄色',
-    AnnotationColor.blue => '蓝色',
-    AnnotationColor.green => '绿色',
-    AnnotationColor.red => '红色',
-    AnnotationColor.purple => '紫色',
-  };
-}
-
-final class _EpubTocSheet extends StatefulWidget {
-  const _EpubTocSheet({
-    required this.document,
-    required this.currentChapterIndex,
-    required this.onSelected,
-  });
-
-  final EpubDocument document;
-  final int? currentChapterIndex;
-  final ValueChanged<EpubTocItem> onSelected;
-
-  @override
-  State<_EpubTocSheet> createState() => _EpubTocSheetState();
-}
-
-final class _EpubTocSheetState extends State<_EpubTocSheet> {
-  final Set<String> _expanded = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _expanded.addAll(
-      _tocAncestorKeys(widget.document.toc, widget.currentChapterIndex),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final rows = _flattenTocRows(
-      widget.document.toc,
-      expanded: _expanded,
-      filter: '',
-    );
-    return SafeArea(
-      child: ListView.builder(
-        shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-        itemCount: rows.length + 1,
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: Text('目录', style: Theme.of(context).textTheme.titleLarge),
-            );
-          }
-          final row = rows[index - 1];
-          final item = row.item;
-          final expandable = item.children.isNotEmpty;
-          final expanded = _expanded.contains(row.key);
-          return ListTile(
-            selected: widget.currentChapterIndex == item.chapterIndex,
-            contentPadding: EdgeInsets.only(
-              left: 12.0 + row.level * 18,
-              right: 12,
-            ),
-            leading: IconButton(
-              tooltip: expanded ? '折叠' : '展开',
-              onPressed: expandable
-                  ? () => setState(() {
-                      if (expanded) {
-                        _expanded.remove(row.key);
-                      } else {
-                        _expanded.add(row.key);
-                      }
-                    })
-                  : null,
-              icon: Icon(
-                expandable
-                    ? (expanded
-                          ? Icons.keyboard_arrow_down
-                          : Icons.chevron_right)
-                    : Icons.article_outlined,
-              ),
-            ),
-            title: Text(
-              item.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              item.chapterIndex == null ? '目录项暂不可跳转' : item.href,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            enabled: item.chapterIndex != null,
-            onTap: item.chapterIndex == null
-                ? null
-                : () => widget.onSelected(item),
-          );
-        },
-      ),
-    );
-  }
-}
-
-final class _PdfTocSheet extends StatelessWidget {
-  const _PdfTocSheet({
-    required this.outline,
-    required this.totalPages,
-    required this.currentPage,
-  });
-
-  final List<RendererOutlineItem> outline;
-  final int totalPages;
-  final int? currentPage;
-
-  @override
-  Widget build(BuildContext context) {
-    final items = outline.isEmpty ? _fallbackPageItems() : outline;
-    return SafeArea(
-      child: ListView.builder(
-        shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-        itemCount: items.length + 1,
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: Text(
-                outline.isEmpty ? '页码' : 'PDF 目录',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            );
-          }
-          final item = items[index - 1];
-          return ListTile(
-            selected: currentPage == item.page,
-            contentPadding: EdgeInsets.only(
-              left: 16.0 + item.level * 18.0,
-              right: 16,
-            ),
-            leading: CircleAvatar(child: Text('${item.page}')),
-            title: Text(
-              item.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text('第 ${item.page} 页'),
-            onTap: () => Navigator.of(context).pop(
-              ReadingLocator.pdf(
-                page: item.page,
-                progress: _pageProgress(item.page),
-                // A destination that names a position lands on the heading
-                // instead of the page's top edge.
-                pageOffsetFraction: item.offsetFraction,
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  List<RendererOutlineItem> _fallbackPageItems() {
-    return [
-      for (var page = 1; page <= totalPages; page += 1)
-        RendererOutlineItem(title: '第 $page 页', page: page),
-    ];
-  }
-
-  double _pageProgress(int page) {
-    if (totalPages <= 1) {
-      return 1;
-    }
-    return ((page - 1) / (totalPages - 1)).clamp(0, 1).toDouble();
-  }
-}
-
-final class _TocRow {
-  const _TocRow({required this.item, required this.level, required this.key});
-
-  final EpubTocItem item;
-  final int level;
-  final String key;
-}
-
-List<_TocRow> _flattenTocRows(
-  List<EpubTocItem> items, {
-  required Set<String> expanded,
-  required String filter,
-  int level = 0,
-  String prefix = '',
-}) {
-  final rows = <_TocRow>[];
-  for (var index = 0; index < items.length; index += 1) {
-    final item = items[index];
-    final key = prefix.isEmpty ? '$index' : '$prefix.$index';
-    final titleMatches =
-        filter.isEmpty ||
-        item.title.toLowerCase().contains(filter) ||
-        (item.chapterIndex != null &&
-            '${item.chapterIndex! + 1}'.contains(filter));
-    final childRows = _flattenTocRows(
-      item.children,
-      expanded: expanded,
-      filter: filter,
-      level: level + 1,
-      prefix: key,
-    );
-    if (filter.isNotEmpty) {
-      if (titleMatches) {
-        rows.add(_TocRow(item: item, level: level, key: key));
-      }
-      rows.addAll(childRows);
-      continue;
-    }
-    rows.add(_TocRow(item: item, level: level, key: key));
-    if (expanded.contains(key)) {
-      rows.addAll(childRows);
-    }
-  }
-  return rows;
-}
-
-Set<String> _tocAncestorKeys(List<EpubTocItem> items, int? chapterIndex) {
-  if (chapterIndex == null) {
-    return {};
-  }
-  final path = <String>[];
-  bool visit(List<EpubTocItem> nodes, String prefix) {
-    for (var index = 0; index < nodes.length; index += 1) {
-      final key = prefix.isEmpty ? '$index' : '$prefix.$index';
-      final item = nodes[index];
-      if (item.chapterIndex == chapterIndex) {
-        return true;
-      }
-      if (visit(item.children, key)) {
-        path.add(key);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  visit(items, '');
-  return path.toSet();
-}
-
-final class _DesktopTocPane extends StatefulWidget {
-  const _DesktopTocPane({
-    required this.book,
-    required this.pdfOutline,
-    required this.totalPages,
-    required this.currentLocator,
-    required this.locationListenable,
-    required this.onSelected,
-    required this.onClose,
-  });
-
-  final Book book;
-  final List<RendererOutlineItem> pdfOutline;
-  final int? totalPages;
-  final ReadingLocator? currentLocator;
-  final ValueListenable<RendererLocationChanged?> locationListenable;
-  final ValueChanged<ReadingLocator> onSelected;
-  final VoidCallback onClose;
-
-  @override
-  State<_DesktopTocPane> createState() => _DesktopTocPaneState();
-}
-
-final class _DesktopTocPaneState extends State<_DesktopTocPane> {
-  Future<EpubDocument>? _epubDocumentFuture;
-  final _filterController = TextEditingController();
-  final _filterFocusNode = FocusNode();
-  final _scrollController = ScrollController();
-  final Set<String> _expandedTocKeys = {};
-  String _filter = '';
-  String _appliedFilter = '';
-  Timer? _filterDebounce;
-  int? _lastAutoScrolledChapter;
-  int? _lastAutoScrolledPage;
-  bool _seededExpanded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _updateDocumentFuture();
-  }
-
-  @override
-  void dispose() {
-    _filterDebounce?.cancel();
-    _filterController.dispose();
-    _filterFocusNode.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  void didUpdateWidget(covariant _DesktopTocPane oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.book.id != widget.book.id ||
-        oldWidget.book.libraryFilePath != widget.book.libraryFilePath) {
-      _seededExpanded = false;
-      _expandedTocKeys.clear();
-      _lastAutoScrolledChapter = null;
-      _lastAutoScrolledPage = null;
-      _filterController.clear();
-      _filter = '';
-      _appliedFilter = '';
-      _updateDocumentFuture();
-    }
-  }
-
-  void _updateDocumentFuture() {
-    _epubDocumentFuture = widget.book.format.isReflowable
-        ? _documentLoaderFor(widget.book).load(widget.book.libraryFilePath)
-        : null;
-  }
-
-  void _onFilterChanged(String value) {
-    final next = value.trim();
-    // Keep raw text in the field; only rebuild the list after a short debounce
-    // so typing stays responsive and the caret doesn't fight rebuilds.
-    _filter = next;
-    _filterDebounce?.cancel();
-    _filterDebounce = Timer(const Duration(milliseconds: 120), () {
-      if (!mounted || _appliedFilter == next) {
-        return;
-      }
-      setState(() => _appliedFilter = next);
-    });
-    // Rebuild trailing clear button immediately when emptiness flips.
-    final hadFilter = _appliedFilter.isNotEmpty || _filter.isNotEmpty;
-    final hasFilter = next.isNotEmpty;
-    if (hadFilter != hasFilter) {
-      setState(() {});
-    }
-  }
-
-  void _clearFilter() {
-    _filterDebounce?.cancel();
-    _filterController.clear();
-    setState(() {
-      _filter = '';
-      _appliedFilter = '';
-    });
-    _filterFocusNode.requestFocus();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final hasFilter = _filter.isNotEmpty || _appliedFilter.isNotEmpty;
-    return AppSidePanel(
-      title: widget.book.format == BookFormat.pdf ? 'PDF 目录' : '目录',
-      border: AppSidePanelBorder.right,
-      trailing: IconButton(
-        tooltip: '收起目录',
-        onPressed: widget.onClose,
-        icon: const Icon(Icons.chevron_left),
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.x3,
-              AppSpacing.x2,
-              AppSpacing.x3,
-              AppSpacing.x2,
-            ),
-            child: TextField(
-              controller: _filterController,
-              focusNode: _filterFocusNode,
-              textInputAction: TextInputAction.search,
-              onChanged: _onFilterChanged,
-              onSubmitted: (value) {
-                _filterDebounce?.cancel();
-                final next = value.trim();
-                if (_appliedFilter != next) {
-                  setState(() {
-                    _filter = next;
-                    _appliedFilter = next;
-                  });
-                }
-              },
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: widget.book.format == BookFormat.pdf
-                    ? '过滤标题或页码'
-                    : '过滤章节标题',
-                prefixIcon: const Icon(Icons.search, size: 18),
-                prefixIconConstraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
-                suffixIcon: hasFilter
-                    ? IconButton(
-                        tooltip: '清空',
-                        onPressed: _clearFilter,
-                        icon: const Icon(Icons.close, size: 18),
-                      )
-                    : null,
-                suffixIconConstraints: const BoxConstraints(
-                  minWidth: 36,
-                  minHeight: 36,
-                ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(
-                  alpha: 0.45,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: colorScheme.outlineVariant),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: colorScheme.outlineVariant),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(
-                    color: colorScheme.primary,
-                    width: 1.2,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: widget.book.format == BookFormat.pdf
-                ? _buildPdfToc(context)
-                : _buildEpubToc(context),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEpubToc(BuildContext context) {
-    final future = _epubDocumentFuture;
-    if (future == null) {
-      return const SizedBox.shrink();
-    }
-    return FutureBuilder<EpubDocument>(
-      future: future,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const Center(child: Text('无法读取目录'));
-        }
-        final document = snapshot.data;
-        if (document == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        return ValueListenableBuilder<RendererLocationChanged?>(
-          valueListenable: widget.locationListenable,
-          builder: (context, location, _) {
-            final currentChapter =
-                location?.locator.chapterIndex ??
-                widget.currentLocator?.chapterIndex;
-            final filter = _appliedFilter.toLowerCase();
-            if (!_seededExpanded) {
-              _seededExpanded = true;
-              _expandedTocKeys.addAll(
-                _tocAncestorKeys(document.toc, currentChapter),
-              );
-            } else if (filter.isEmpty && currentChapter != null) {
-              // Expand ancestors of the current chapter without collapsing user state.
-              _expandedTocKeys.addAll(
-                _tocAncestorKeys(document.toc, currentChapter),
-              );
-            }
-            final rows = _flattenTocRows(
-              document.toc,
-              expanded: _expandedTocKeys,
-              filter: filter,
-            );
-            if (rows.isEmpty) {
-              return const _ContextEmptyState(
-                icon: Icons.toc,
-                message: '没有匹配的章节',
-              );
-            }
-            // Only auto-scroll when not filtering, and only when the chapter changes.
-            if (filter.isEmpty &&
-                currentChapter != null &&
-                currentChapter != _lastAutoScrolledChapter &&
-                !_filterFocusNode.hasFocus) {
-              _lastAutoScrolledChapter = currentChapter;
-              _scrollSelectedIntoView(
-                rows.indexWhere(
-                  (row) => row.item.chapterIndex == currentChapter,
-                ),
-              );
-            }
-            return ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
-              itemCount: rows.length,
-              itemBuilder: (context, index) {
-                final row = rows[index];
-                final item = row.item;
-                final selected = currentChapter == item.chapterIndex;
-                final expandable = item.children.isNotEmpty && filter.isEmpty;
-                final expanded = _expandedTocKeys.contains(row.key);
-                return ListTile(
-                  selected: selected,
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
-                  enabled: item.chapterIndex != null,
-                  contentPadding: EdgeInsets.only(
-                    left: 4.0 + row.level * 14,
-                    right: 8,
-                  ),
-                  leading: IconButton(
-                    tooltip: expandable ? (expanded ? '折叠' : '展开') : null,
-                    visualDensity: VisualDensity.compact,
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                    padding: EdgeInsets.zero,
-                    onPressed: expandable
-                        ? () => setState(() {
-                            if (expanded) {
-                              _expandedTocKeys.remove(row.key);
-                            } else {
-                              _expandedTocKeys.add(row.key);
-                            }
-                          })
-                        : null,
-                    icon: Icon(
-                      item.children.isEmpty
-                          ? Icons.article_outlined
-                          : expanded || filter.isNotEmpty
-                          ? Icons.keyboard_arrow_down
-                          : Icons.chevron_right,
-                      size: 20,
-                    ),
-                  ),
-                  title: Text(
-                    item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    item.chapterIndex == null
-                        ? '目录项暂不可跳转'
-                        : '${(document.progressForChapterIndex(item.chapterIndex!) * 100).round()}%',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: item.chapterIndex == null
-                      ? null
-                      : () {
-                          widget.onSelected(
-                            ReadingLocator.epub(
-                              href: item.href,
-                              chapterIndex: item.chapterIndex,
-                              chapterOffset: item.chapterOffset,
-                              progress: document.progressForChapter(
-                                chapterIndex: item.chapterIndex!,
-                                chapterOffset: item.chapterOffset ?? 0,
-                              ),
-                            ),
-                          );
-                        },
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildPdfToc(BuildContext context) {
-    final totalPages = widget.totalPages ?? 0;
-    final items = widget.pdfOutline.isEmpty
-        ? [
-            for (var page = 1; page <= totalPages; page += 1)
-              RendererOutlineItem(title: '第 $page 页', page: page),
-          ]
-        : widget.pdfOutline;
-    if (items.isEmpty) {
-      return const Center(child: Text('页码准备中'));
-    }
-    return ValueListenableBuilder<RendererLocationChanged?>(
-      valueListenable: widget.locationListenable,
-      builder: (context, location, _) {
-        final filter = _appliedFilter.toLowerCase();
-        final filtered = items
-            .where((item) {
-              if (filter.isEmpty) {
-                return true;
-              }
-              return item.title.toLowerCase().contains(filter) ||
-                  '${item.page}'.contains(filter);
-            })
-            .toList(growable: false);
-        if (filtered.isEmpty) {
-          return const _ContextEmptyState(icon: Icons.toc, message: '没有匹配的目录项');
-        }
-        final currentPage =
-            location?.pageNumber ??
-            location?.locator.page ??
-            widget.currentLocator?.page;
-        if (filter.isEmpty &&
-            currentPage != null &&
-            currentPage != _lastAutoScrolledPage &&
-            !_filterFocusNode.hasFocus) {
-          _lastAutoScrolledPage = currentPage;
-          _scrollSelectedIntoView(
-            filtered.indexWhere((item) => item.page == currentPage),
-          );
-        }
-        return ListView.builder(
-          controller: _scrollController,
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
-          itemCount: filtered.length,
-          itemBuilder: (context, index) {
-            final item = filtered[index];
-            return ListTile(
-              selected: currentPage == item.page,
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              contentPadding: EdgeInsets.only(
-                left: 8.0 + item.level * 14.0,
-                right: 8,
-              ),
-              leading: SizedBox(
-                width: 36,
-                child: Text(
-                  '${item.page}',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-              ),
-              title: Text(
-                item.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text('第 ${item.page} 页'),
-              onTap: () {
-                widget.onSelected(
-                  ReadingLocator.pdf(
-                    page: item.page,
-                    progress: _pdfPageProgress(item.page, totalPages),
-                    pageOffsetFraction: item.offsetFraction,
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
-
-  double _pdfPageProgress(int page, int totalPages) {
-    if (totalPages <= 1) {
-      return 1;
-    }
-    return ((page - 1) / (totalPages - 1)).clamp(0, 1).toDouble();
-  }
-
-  void _scrollSelectedIntoView(int index) {
-    if (index < 0) {
-      return;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
-      const estimatedTileHeight = 56.0;
-      final target = (index * estimatedTileHeight - 96).clamp(
-        _scrollController.position.minScrollExtent,
-        _scrollController.position.maxScrollExtent,
-      );
-      if ((_scrollController.offset - target).abs() < estimatedTileHeight) {
-        return;
-      }
-      _scrollController.jumpTo(target.toDouble());
-    });
-  }
-}
-
-/// Leaf host: only this subtree rebuilds when annotations change.
-final class _ReaderAnnotationsHost extends ConsumerWidget {
-  const _ReaderAnnotationsHost({
-    required this.bookId,
-    required this.book,
-    required this.progress,
-    required this.settings,
-    required this.version,
-    required this.jumpToken,
-    required this.searchQuery,
-    required this.focusLocator,
-    required this.clearSearchHighlightsVersion,
-    required this.clearSelectionVersion,
-    required this.onEvent,
-    required this.ocrOverlayToken,
-    required this.ocrOverlayPage,
-    required this.ocrOverlayBlocks,
-    this.onZoomChanged,
-    this.imageDragMode = false,
-    this.onImageAreaSelected,
-  });
-
-  final String bookId;
-  final Book book;
-  final ReadingProgressSnapshot? progress;
-  final ReaderSettings settings;
-  final int version;
-  final int jumpToken;
-  final String? searchQuery;
-  final ReadingLocator? focusLocator;
-  final int clearSearchHighlightsVersion;
-  final int clearSelectionVersion;
-  final ValueChanged<RendererEvent> onEvent;
-  final int ocrOverlayToken;
-  final int? ocrOverlayPage;
-  final List<Map<String, Object?>> ocrOverlayBlocks;
-  final PdfZoomChanged? onZoomChanged;
-  final bool imageDragMode;
-  final ValueChanged<RendererImageAreaSelected>? onImageAreaSelected;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final annotations =
-        ref.watch(annotationsByBookProvider(bookId)).value ??
-        const <Annotation>[];
-    return ref.watch(readerRendererHostProvider)(
-      ReaderRendererHostConfig(
-        book: book,
-        progress: progress,
-        settings: settings,
-        annotations: annotations,
-        version: version,
-        jumpToken: jumpToken,
-        searchQuery: searchQuery,
-        focusLocator: focusLocator,
-        clearSearchHighlightsVersion: clearSearchHighlightsVersion,
-        clearSelectionVersion: clearSelectionVersion,
-        onEvent: onEvent,
-        ocrOverlayToken: ocrOverlayToken,
-        ocrOverlayPage: ocrOverlayPage,
-        ocrOverlayBlocks: ocrOverlayBlocks,
-        onZoomChanged: onZoomChanged,
-        imageDragMode: imageDragMode,
-        onImageAreaSelected: onImageAreaSelected,
-      ),
-    );
-  }
-}
-
-final annotationsByBookProvider =
-    StreamProvider.family<List<Annotation>, String>((ref, bookId) {
-      return ref.watch(annotationRepositoryProvider).watchByBook(bookId);
-    });
-
-final class _ContextEmptyState extends StatelessWidget {
-  const _ContextEmptyState({required this.icon, required this.message});
-
-  final IconData icon;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 36, color: colorScheme.onSurfaceVariant),
-            const SizedBox(height: 12),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-Future<void> _showAnnotationActions(
-  BuildContext context,
-  WidgetRef ref,
-  Annotation annotation,
-) async {
-  await showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (context) => SafeArea(
-      child: ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-        children: [
-          Text('标注', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text(
-            annotation.selectedText,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 12),
-          FutureBuilder<Note?>(
-            future: annotation.noteId == null
-                ? Future<Note?>.value(null)
-                : ref.read(noteRepositoryProvider).getNote(annotation.noteId!),
-            builder: (context, snapshot) {
-              final note = snapshot.data;
-              final hasNote = note != null;
-              return Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _editAnnotation(context, ref, annotation);
-                    },
-                    icon: const Icon(Icons.palette_outlined),
-                    label: const Text('修改样式'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      if (hasNote) {
-                        _openLinkedAnnotationNote(context, note);
-                      } else {
-                        _saveAnnotationAsNote(context, ref, annotation);
-                      }
-                    },
-                    icon: Icon(
-                      hasNote
-                          ? Icons.sticky_note_2_outlined
-                          : Icons.note_add_outlined,
-                    ),
-                    label: Text(hasNote ? '查看笔记' : '添加笔记'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _deleteAnnotation(context, ref, annotation);
-                    },
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('删除标注'),
-                  ),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-Future<void> _openLinkedAnnotationNote(BuildContext context, Note note) async {
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: Text(note.title?.trim().isNotEmpty == true ? note.title! : '关联笔记'),
-      content: SizedBox(
-        width: 480,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (note.sourceText?.trim().isNotEmpty == true) ...[
-                Text('原文', style: Theme.of(dialogContext).textTheme.labelLarge),
-                const SizedBox(height: 6),
-                Text(note.sourceText!),
-                const SizedBox(height: 12),
-              ],
-              Text('笔记', style: Theme.of(dialogContext).textTheme.labelLarge),
-              const SizedBox(height: 6),
-              Text(note.content),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('关闭'),
-        ),
-        FilledButton(
-          onPressed: () {
-            Navigator.of(dialogContext).pop();
-            context.go('/notes');
-          },
-          child: const Text('打开笔记页'),
-        ),
-      ],
-    ),
-  );
-}
-
-Future<void> _saveAnnotationAsNote(
-  BuildContext context,
-  WidgetRef ref,
-  Annotation annotation,
-) async {
-  if (annotation.noteId != null) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('这条标注已关联笔记')));
-    return;
-  }
-  final note = await ref
-      .read(noteRepositoryProvider)
-      .saveNote(
-        bookId: annotation.bookId,
-        annotationId: annotation.id,
-        title: '标注笔记',
-        content: annotation.selectedText,
-        sourceText: annotation.selectedText,
-        locator: annotation.locator,
-        noteType: NoteType.excerpt,
-      );
-  await ref
-      .read(annotationRepositoryProvider)
-      .linkNote(annotationId: annotation.id, noteId: note.id);
-  ref.invalidate(notesByBookProvider(annotation.bookId));
-  if (!context.mounted) {
-    return;
-  }
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('已保存为笔记'),
-      behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: 2),
-    ),
-  );
-}
-
-Future<void> _editAnnotation(
-  BuildContext context,
-  WidgetRef ref,
-  Annotation annotation,
-) async {
-  final result = await _showAnnotationEditor(
-    context,
-    initialText: annotation.selectedText,
-    initialColor: annotation.color,
-    initialStyle: annotation.style,
-    textEditable: false,
-  );
-  if (result == null) {
-    return;
-  }
-  await ref
-      .read(annotationRepositoryProvider)
-      .saveAnnotation(
-        id: annotation.id,
-        bookId: annotation.bookId,
-        locator: annotation.locator,
-        selectedText: annotation.selectedText,
-        color: result.color,
-        style: result.style,
-        // Re-saving without the anchor would turn an image annotation into a
-        // text one with no geometry: it would vanish from the page, and its
-        // frame could never be found again.
-        imageAnchor: annotation.imageAnchor,
-      );
-}
-
-Future<void> _deleteAnnotation(
-  BuildContext context,
-  WidgetRef ref,
-  Annotation annotation,
-) async {
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('删除标注？'),
-      content: Text(
-        annotation.noteId == null ? '删除后不会影响书籍原文。' : '只删除这条标注，关联笔记会保留。',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('删除'),
-        ),
-      ],
-    ),
-  );
-  if (confirmed == true) {
-    await ref
-        .read(annotationRepositoryProvider)
-        .deleteAnnotation(annotation.id);
-    // The cached picture was cut from the book for this one annotation. With
-    // the annotation gone it is unreachable, so it goes too.
-    final anchor = annotation.imageAnchor;
-    if (anchor != null) {
-      await ref
-          .read(imageCacheStoreProvider)
-          .delete(bookId: annotation.bookId, anchor: anchor);
-    }
-  }
-}
-
 /// The loader that opens this book's file.
 BookDocumentLoader _documentLoaderFor(Book book) {
   return book.format == BookFormat.markdown
       ? const MarkdownDocumentLoader()
       : const EpubDocumentLoader();
-}
-
-final class _DefaultRendererHost extends StatelessWidget {
-  const _DefaultRendererHost({required this.config});
-
-  final ReaderRendererHostConfig config;
-
-  @override
-  Widget build(BuildContext context) {
-    return switch (config.book.format) {
-      BookFormat.epub => EpubRendererView(
-        key: ValueKey('epub-${config.book.id}-${config.version}'),
-        book: config.book,
-        settings: config.settings,
-        initialProgress: config.progress,
-        annotations: config.annotations,
-        searchQuery: config.searchQuery,
-        focusLocator: config.focusLocator,
-        jumpToken: config.jumpToken,
-        onEvent: config.onEvent,
-      ),
-      // One renderer for every platform now. The WebView backend rendered
-      // PDFs on Windows and Android because it was the only one with
-      // selection, search and annotation overlays; the canvas renderer has
-      // all three, so keeping two paths would just mean two sets of bugs.
-      // See docs/10-pdf-renderer-migration.md.
-      // A Markdown book is read by the same renderer as an EPUB: chapters,
-      // blocks and character offsets. Only the loader that turns the file
-      // into that document is different.
-      BookFormat.markdown => EpubRendererView(
-        key: ValueKey('md-${config.book.id}-${config.version}'),
-        book: config.book,
-        settings: config.settings,
-        initialProgress: config.progress,
-        annotations: config.annotations,
-        searchQuery: config.searchQuery,
-        focusLocator: config.focusLocator,
-        jumpToken: config.jumpToken,
-        documentLoader: const MarkdownDocumentLoader(),
-        onEvent: config.onEvent,
-      ),
-      BookFormat.pdf => PdfCanvasView(
-        key: ValueKey('pdf-canvas-${config.book.id}-${config.version}'),
-        book: config.book,
-        settings: config.settings,
-        initialProgress: config.progress,
-        annotations: config.annotations,
-        ocrOverlayPage: config.ocrOverlayPage,
-        ocrOverlayBlocks: config.ocrOverlayBlocks,
-        ocrOverlayToken: config.ocrOverlayToken,
-        searchQuery: config.searchQuery,
-        focusLocator: config.focusLocator,
-        jumpToken: config.jumpToken,
-        clearSearchHighlightsVersion: config.clearSearchHighlightsVersion,
-        clearSelectionVersion: config.clearSelectionVersion,
-        onZoomChanged: config.onZoomChanged,
-        imageDragMode: config.imageDragMode,
-        onImageAreaSelected: config.onImageAreaSelected,
-        onEvent: config.onEvent,
-      ),
-    };
-  }
-}
-
-final class _ReaderSettingsSheet extends ConsumerStatefulWidget {
-  const _ReaderSettingsSheet({required this.initialSettings});
-
-  final ReaderSettings initialSettings;
-
-  @override
-  ConsumerState<_ReaderSettingsSheet> createState() =>
-      _ReaderSettingsSheetState();
-}
-
-final class _ReaderSettingsSheetState
-    extends ConsumerState<_ReaderSettingsSheet> {
-  late ReaderSettings _settings = widget.initialSettings;
-  late final TextEditingController _fontController = TextEditingController(
-    text: _settings.fontFamily,
-  );
-
-  @override
-  void dispose() {
-    _fontController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.x5,
-          AppSpacing.x2,
-          AppSpacing.x5,
-          AppSpacing.x6,
-        ),
-        shrinkWrap: true,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '阅读设置',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: () => _update(const ReaderSettings()),
-                icon: const Icon(Icons.restart_alt_outlined),
-                label: const Text('重置'),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.x2),
-          _ReaderSettingsPreview(settings: _settings),
-          const SizedBox(height: AppSpacing.x4),
-          _ReaderSettingsSection(
-            icon: Icons.auto_awesome_outlined,
-            title: '常用预设',
-            initiallyExpanded: true,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: AppSpacing.x2,
-                  runSpacing: AppSpacing.x2,
-                  children: [
-                    _ReaderSettingsPresetChip(
-                      label: '舒适阅读',
-                      selected: _isComfortPreset,
-                      onSelected: () => _applyPreset(
-                        const ReaderSettings(
-                          fontSize: 18,
-                          lineHeight: 1.7,
-                          paragraphSpacing: 12,
-                          pageMargin: 24,
-                          themePreset: ReaderThemePreset.day,
-                        ),
-                      ),
-                    ),
-                    _ReaderSettingsPresetChip(
-                      label: '长时间阅读',
-                      selected: _isLongReadingPreset,
-                      onSelected: () => _applyPreset(
-                        const ReaderSettings(
-                          fontSize: 19,
-                          lineHeight: 1.8,
-                          paragraphSpacing: 14,
-                          pageMargin: 30,
-                          themePreset: ReaderThemePreset.green,
-                        ),
-                      ),
-                    ),
-                    _ReaderSettingsPresetChip(
-                      label: '高密度',
-                      selected: _isDensePreset,
-                      onSelected: () => _applyPreset(
-                        const ReaderSettings(
-                          fontSize: 16,
-                          lineHeight: 1.45,
-                          paragraphSpacing: 8,
-                          pageMargin: 18,
-                          themePreset: ReaderThemePreset.day,
-                        ),
-                      ),
-                    ),
-                    _ReaderSettingsPresetChip(
-                      label: '夜间',
-                      selected:
-                          _settings.themePreset == ReaderThemePreset.night,
-                      onSelected: () => _update(
-                        _settings.copyWith(
-                          themePreset: ReaderThemePreset.night,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.x4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SegmentedButton<ReaderMode>(
-                    segments: ReaderMode.values
-                        .map(
-                          (mode) => ButtonSegment(
-                            value: mode,
-                            label: Text(mode.label),
-                          ),
-                        )
-                        .toList(growable: false),
-                    selected: {_settings.readerMode},
-                    onSelectionChanged: (values) {
-                      _update(_settings.copyWith(readerMode: values.single));
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          _ReaderSettingsSection(
-            icon: Icons.palette_outlined,
-            title: '外观',
-            initiallyExpanded: true,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: AppSpacing.x2,
-                  runSpacing: AppSpacing.x2,
-                  children: ReaderThemePreset.values.map((preset) {
-                    final selected = _settings.themePreset == preset;
-                    return ChoiceChip(
-                      label: Text(preset.label),
-                      selected: selected,
-                      avatar: CircleAvatar(backgroundColor: preset.background),
-                      onSelected: (_) =>
-                          _update(_settings.copyWith(themePreset: preset)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: AppSpacing.x4),
-                Text(
-                  'EPUB 字体',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: AppSpacing.x2),
-                Wrap(
-                  spacing: AppSpacing.x2,
-                  runSpacing: AppSpacing.x2,
-                  children: ReaderFonts.options
-                      .map((font) {
-                        final selected =
-                            ReaderFonts.resolve(_settings.fontFamily).id ==
-                            font.id;
-                        return ChoiceChip(
-                          label: Text(font.label),
-                          selected: selected,
-                          onSelected: (_) {
-                            _fontController.text = font.id;
-                            _update(_settings.copyWith(fontFamily: font.id));
-                          },
-                        );
-                      })
-                      .toList(growable: false),
-                ),
-                const SizedBox(height: AppSpacing.x2),
-                Text(
-                  ReaderFonts.resolve(_settings.fontFamily).description,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          _ReaderSettingsSection(
-            icon: Icons.article_outlined,
-            title: 'EPUB 排版',
-            child: Column(
-              children: [
-                _SliderSetting(
-                  label: '字号',
-                  value: _settings.fontSize,
-                  min: 14,
-                  max: 32,
-                  divisions: 18,
-                  displayValue: _settings.fontSize.round().toString(),
-                  onChanged: (value) =>
-                      _update(_settings.copyWith(fontSize: value)),
-                ),
-                _SliderSetting(
-                  label: '行高',
-                  value: _settings.lineHeight,
-                  min: 1.2,
-                  max: 2.2,
-                  divisions: 10,
-                  displayValue: _settings.lineHeight.toStringAsFixed(1),
-                  onChanged: (value) =>
-                      _update(_settings.copyWith(lineHeight: value)),
-                ),
-                _SliderSetting(
-                  label: '段距',
-                  value: _settings.paragraphSpacing,
-                  min: 0,
-                  max: 32,
-                  divisions: 16,
-                  displayValue: _settings.paragraphSpacing.round().toString(),
-                  onChanged: (value) =>
-                      _update(_settings.copyWith(paragraphSpacing: value)),
-                ),
-                _SliderSetting(
-                  label: '页边距',
-                  value: _settings.pageMargin,
-                  min: 12,
-                  max: 72,
-                  divisions: 20,
-                  displayValue: _settings.pageMargin.round().toString(),
-                  onChanged: (value) =>
-                      _update(_settings.copyWith(pageMargin: value)),
-                ),
-              ],
-            ),
-          ),
-          _ReaderSettingsSection(
-            icon: Icons.picture_as_pdf_outlined,
-            title: 'PDF 缩放',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SegmentedButton<PdfZoomMode>(
-                    segments: const [
-                      ButtonSegment(
-                        value: PdfZoomMode.fitWidth,
-                        label: Text('适宽'),
-                        icon: Icon(Icons.fit_screen_outlined),
-                      ),
-                      ButtonSegment(
-                        value: PdfZoomMode.fitPage,
-                        label: Text('整页'),
-                        icon: Icon(Icons.fullscreen_outlined),
-                      ),
-                      ButtonSegment(
-                        value: PdfZoomMode.actual,
-                        label: Text('实际'),
-                        icon: Icon(Icons.center_focus_strong_outlined),
-                      ),
-                      ButtonSegment(
-                        value: PdfZoomMode.custom,
-                        label: Text('自定义'),
-                        icon: Icon(Icons.tune),
-                      ),
-                    ],
-                    selected: {_settings.pdfZoomMode},
-                    onSelectionChanged: (values) {
-                      final mode = values.single;
-                      _update(
-                        _settings.copyWith(
-                          pdfZoomMode: mode,
-                          pdfScale: mode == PdfZoomMode.actual
-                              ? 1
-                              : _settings.pdfScale,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.x3),
-                _SliderSetting(
-                  label: '自定义缩放',
-                  value: _settings.pdfScale,
-                  min: ReaderSettings.pdfScaleMin,
-                  max: ReaderSettings.pdfScaleMax,
-                  divisions: 25,
-                  displayValue: '${(_settings.pdfScale * 100).round()}%',
-                  onChanged: (value) => _update(
-                    _settings.copyWith(
-                      pdfScale: value,
-                      pdfZoomMode: PdfZoomMode.custom,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          _ReaderSettingsSection(
-            icon: Icons.settings_outlined,
-            title: '高级',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SegmentedButton<ThemeMode>(
-                    segments: const [
-                      ButtonSegment(value: ThemeMode.system, label: Text('系统')),
-                      ButtonSegment(value: ThemeMode.light, label: Text('亮色')),
-                      ButtonSegment(value: ThemeMode.dark, label: Text('暗色')),
-                    ],
-                    selected: {_settings.appThemeMode},
-                    onSelectionChanged: (values) {
-                      _update(_settings.copyWith(appThemeMode: values.single));
-                    },
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.x3),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('减少动画'),
-                  subtitle: const Text('阅读器尽量减少过渡动画'),
-                  value: _settings.reduceMotion,
-                  onChanged: (value) =>
-                      _update(_settings.copyWith(reduceMotion: value)),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  bool get _isComfortPreset {
-    return _settings.fontSize.round() == 18 &&
-        _settings.lineHeight.toStringAsFixed(1) == '1.7' &&
-        _settings.paragraphSpacing.round() == 12 &&
-        _settings.pageMargin.round() == 24 &&
-        _settings.themePreset == ReaderThemePreset.day;
-  }
-
-  bool get _isLongReadingPreset {
-    return _settings.fontSize.round() == 19 &&
-        _settings.lineHeight.toStringAsFixed(1) == '1.8' &&
-        _settings.paragraphSpacing.round() == 14 &&
-        _settings.pageMargin.round() == 30 &&
-        _settings.themePreset == ReaderThemePreset.green;
-  }
-
-  bool get _isDensePreset {
-    return _settings.fontSize.round() == 16 &&
-        _settings.lineHeight.toStringAsFixed(2) == '1.45' &&
-        _settings.paragraphSpacing.round() == 8 &&
-        _settings.pageMargin.round() == 18 &&
-        _settings.themePreset == ReaderThemePreset.day;
-  }
-
-  void _applyPreset(ReaderSettings preset) {
-    _update(
-      _settings.copyWith(
-        fontSize: preset.fontSize,
-        lineHeight: preset.lineHeight,
-        paragraphSpacing: preset.paragraphSpacing,
-        pageMargin: preset.pageMargin,
-        themePreset: preset.themePreset,
-      ),
-    );
-  }
-
-  void _update(ReaderSettings settings) {
-    setState(() => _settings = settings);
-    ref.read(readerSettingsControllerProvider).save(settings);
-  }
-}
-
-final class _QuickThemeChip extends StatelessWidget {
-  const _QuickThemeChip({
-    required this.preset,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final ReaderThemePreset preset;
-  final bool selected;
-  final VoidCallback onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(preset.label),
-      selected: selected,
-      avatar: CircleAvatar(
-        backgroundColor: preset.background,
-        foregroundColor: preset.foreground,
-        child: selected
-            ? Icon(Icons.check, size: 14, color: preset.foreground)
-            : null,
-      ),
-      onSelected: (_) => onSelected(),
-    );
-  }
-}
-
-final class _ReaderSettingsPresetChip extends StatelessWidget {
-  const _ReaderSettingsPresetChip({
-    required this.label,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onSelected(),
-    );
-  }
-}
-
-final class _ReaderSettingsSection extends StatelessWidget {
-  const _ReaderSettingsSection({
-    required this.icon,
-    required this.title,
-    required this.child,
-    this.initiallyExpanded = false,
-  });
-
-  final IconData icon;
-  final String title;
-  final Widget child;
-  final bool initiallyExpanded;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.x3),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: Theme.of(context).colorScheme.appBorder),
-        ),
-        child: ExpansionTile(
-          initiallyExpanded: initiallyExpanded,
-          leading: Icon(icon),
-          title: Text(
-            title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          tilePadding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.x4,
-            vertical: AppSpacing.x1,
-          ),
-          childrenPadding: const EdgeInsets.fromLTRB(
-            AppSpacing.x4,
-            0,
-            AppSpacing.x4,
-            AppSpacing.x4,
-          ),
-          children: [child],
-        ),
-      ),
-    );
-  }
-}
-
-final class _ReaderSettingsPreview extends StatelessWidget {
-  const _ReaderSettingsPreview({required this.settings});
-
-  final ReaderSettings settings;
-
-  @override
-  Widget build(BuildContext context) {
-    final preset = settings.themePreset;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: preset.background,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: preset.foreground.withValues(alpha: 0.18)),
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(settings.pageMargin.clamp(12, 28).toDouble()),
-        child: DefaultTextStyle(
-          style: TextStyle(
-            color: preset.foreground,
-            fontFamily: () {
-              final family = ReaderFonts.renderFamilyFor(settings.fontFamily);
-              return family.isEmpty ? null : family;
-            }(),
-            fontSize: settings.fontSize,
-            height: settings.lineHeight,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                preset.epubInk ? '墨水屏预览' : '阅读预览',
-                style: TextStyle(
-                  fontSize: settings.fontSize * 1.08,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              SizedBox(height: settings.paragraphSpacing.clamp(6, 20)),
-              const Text('这是一段用于对照字号、行高、段距和页边距的样张。调整后会实时影响当前阅读页。'),
-              SizedBox(height: settings.paragraphSpacing.clamp(6, 20)),
-              Text(
-                'PageSage 保持本地优先，标注、笔记和 AI 历史都可以沉淀到 Notebook。',
-                style: TextStyle(
-                  color: preset.foreground.withValues(alpha: 0.82),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _SliderSetting extends StatelessWidget {
-  const _SliderSetting({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.divisions,
-    required this.displayValue,
-    required this.onChanged,
-  });
-
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final int divisions;
-  final String displayValue;
-  final ValueChanged<double> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(child: Text(label)),
-            Text(displayValue, style: Theme.of(context).textTheme.labelLarge),
-          ],
-        ),
-        Slider(
-          value: value,
-          min: min,
-          max: max,
-          divisions: divisions,
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-}
-
-final class _ReaderMessage extends StatelessWidget {
-  const _ReaderMessage({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(child: Text(message));
-  }
-}
-
-final class _ReaderErrorPanel extends StatelessWidget {
-  const _ReaderErrorPanel({
-    required this.message,
-    required this.onRetry,
-    required this.onShowDetails,
-  });
-
-  final String message;
-  final VoidCallback onRetry;
-  final VoidCallback onShowDetails;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return ColoredBox(
-      color: colorScheme.surface.withValues(alpha: 0.96),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.error_outline, size: 42, color: colorScheme.error),
-                const SizedBox(height: 12),
-                Text(
-                  '无法渲染书籍',
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  message,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: onRetry,
-                      icon: const Icon(Icons.refresh_outlined),
-                      label: const Text('重试'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: onShowDetails,
-                      icon: const Icon(Icons.info_outline),
-                      label: const Text('查看详情'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _PanelResizeHandle extends StatefulWidget {
-  const _PanelResizeHandle({required this.semanticLabel, required this.onDrag});
-
-  final String semanticLabel;
-  final ValueChanged<DragUpdateDetails> onDrag;
-
-  @override
-  State<_PanelResizeHandle> createState() => _PanelResizeHandleState();
-}
-
-final class _PanelResizeHandleState extends State<_PanelResizeHandle> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Semantics(
-      label: widget.semanticLabel,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.resizeColumn,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onHorizontalDragUpdate: widget.onDrag,
-          child: Center(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              width: _hovered ? 3 : 1,
-              color: _hovered
-                  ? colorScheme.primary
-                  : colorScheme.outlineVariant,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _ReaderStatusBar extends StatelessWidget {
-  const _ReaderStatusBar({
-    required this.book,
-    required this.locator,
-    required this.progress,
-    required this.chapterTitle,
-    required this.pageNumber,
-    required this.totalPages,
-    required this.settings,
-    required this.tocOpen,
-    required this.contextOpen,
-    required this.tocWidth,
-    required this.contextWidth,
-  });
-
-  final Book book;
-  final ReadingLocator? locator;
-  final double? progress;
-  final String? chapterTitle;
-  final int? pageNumber;
-  final int? totalPages;
-  final ReaderSettings settings;
-  final bool tocOpen;
-  final bool contextOpen;
-  final double tocWidth;
-  final double contextWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final percentage = ((progress ?? locator?.progress ?? 0).clamp(0, 1) * 100)
-        .round();
-    final location = _readerLocationText(
-      book: book,
-      locator: locator,
-      chapterTitle: chapterTitle,
-      pageNumber: pageNumber,
-      totalPages: totalPages,
-    );
-    return Material(
-      color: colorScheme.surface,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            children: [
-              SizedBox(width: tocOpen ? tocWidth - 8 : 0),
-              Expanded(
-                child: Text(
-                  location,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              _StatusBarPill(label: '$percentage%'),
-              const SizedBox(width: 8),
-              _StatusBarPill(label: _readerScaleText(book, settings)),
-              const SizedBox(width: 8),
-              _StatusBarPill(label: settings.readerMode.label),
-              const SizedBox(width: 8),
-              _StatusBarPill(label: _readerFormatLabel(book.format)),
-              SizedBox(width: contextOpen ? contextWidth - 4 : 0),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _readerLocationText({
-  required Book book,
-  required ReadingLocator? locator,
-  required String? chapterTitle,
-  required int? pageNumber,
-  required int? totalPages,
-}) {
-  if (book.format == BookFormat.pdf) {
-    final page = pageNumber ?? locator?.page;
-    final total = totalPages;
-    if (page != null && total != null && total > 0) {
-      return '第 $page / $total 页';
-    }
-    if (page != null) {
-      return '第 $page 页';
-    }
-    return 'PDF 阅读中';
-  }
-  final chapter = chapterTitle?.trim();
-  if (chapter != null && chapter.isNotEmpty) {
-    return chapter;
-  }
-  final index = locator?.chapterIndex;
-  if (index != null) {
-    return '第 ${index + 1} 章';
-  }
-  return 'EPUB 阅读中';
-}
-
-String _readerScaleText(Book book, ReaderSettings settings) {
-  return switch (book.format) {
-    BookFormat.epub || BookFormat.markdown => '字号 ${settings.fontSize.round()}',
-    BookFormat.pdf => switch (settings.pdfZoomMode) {
-      PdfZoomMode.fitWidth => '适宽',
-      PdfZoomMode.fitPage => '整页',
-      PdfZoomMode.actual => '100%',
-      PdfZoomMode.custom => '${(settings.pdfScale * 100).round()}%',
-    },
-  };
-}
-
-String _readerFormatLabel(BookFormat format) {
-  return switch (format) {
-    BookFormat.epub => 'EPUB',
-    BookFormat.pdf => 'PDF',
-    BookFormat.markdown => 'MD',
-  };
-}
-
-final class _StatusBarPill extends StatelessWidget {
-  const _StatusBarPill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        child: Text(
-          label,
-          style: Theme.of(
-            context,
-          ).textTheme.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
-        ),
-      ),
-    );
-  }
-}
-
-/// Says that dragging now means "draw a box around a picture", and offers the
-/// way out.
-///
-/// A transient toast was not enough: the mode lasts until the reader leaves it,
-/// and someone who turned it on, drew badly and gave up needs to see the state
-/// they are in, not remember a message from ten seconds ago.
-final class _ImageBoxModeBanner extends StatelessWidget {
-  const _ImageBoxModeBanner({required this.onExit});
-
-  final VoidCallback onExit;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Semantics(
-      liveRegion: true,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colorScheme.inverseSurface,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.crop_free,
-                size: 18,
-                color: colorScheme.onInverseSurface,
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  '框选图片：拖出图片范围',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colorScheme.onInverseSurface,
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: onExit,
-                style: TextButton.styleFrom(
-                  foregroundColor: colorScheme.onInverseSurface,
-                  visualDensity: VisualDensity.compact,
-                ),
-                child: const Text('退出'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _ReaderStatusBanner extends StatelessWidget {
-  const _ReaderStatusBanner({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Align(
-      alignment: Alignment.center,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colorScheme.inverseSurface,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Text(
-            message,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: colorScheme.onInverseSurface,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

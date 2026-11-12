@@ -1,6 +1,6 @@
 interface:
-  display_name: "Workstream Triage"
-  short_description: "Anchor active work and prevent scope drift"
-  default_prompt: "Use $workstream-triage to identify the active workstream and reconcile what remains."
+  display_name: "PageSage 工作续接"
+  short_description: "核对当前实现、任务与验证证据，找出下一项工作并避免重复实施"
+  default_prompt: "使用 $workstream-triage 核对当前工作和证据，确定尚未完成的下一步。"
 policy:
   allow_implicit_invocation: true

@@ -1,7 +1,78 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:pagesage/core/platform/file_picker_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'Android exports stream a generated file and preserve content URIs',
+    () async {
+      const channel = MethodChannel('test/pagesage/files');
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return 'content://documents/tree/export.md';
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final picker = FilePickerService(isAndroid: true, filesChannel: channel);
+      expect(picker.supportsExportPathSelection, isFalse);
+      final path = File('/tmp/notes.md');
+      expect(
+        await picker.saveExportedFile(path),
+        'content://documents/tree/export.md',
+      );
+      expect(calls.single.method, 'saveExport');
+      expect(calls.single.arguments, {
+        'sourcePath': path.absolute.path,
+        'name': 'notes.md',
+        'mimeType': 'text/markdown',
+      });
+    },
+  );
+
+  test('Android document picker cancellation stays cancellation', () async {
+    const channel = MethodChannel('test/pagesage/files');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (_) async => null);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    expect(
+      await FilePickerService(
+        isAndroid: true,
+        filesChannel: channel,
+      ).saveExportedFile(File('/tmp/backup.zip')),
+      isNull,
+    );
+  });
+  test(
+    'selecting an export destination does not truncate an existing file',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'pagesage-picker-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final target = File('${directory.path}/notes.md');
+      await target.writeAsString('原导出');
+      final picker = FilePickerService(
+        adapter: FilePickerPluginAdapter(
+          pickSaveLocation: (request) async => target.path,
+        ),
+      );
+      expect(await picker.pickNotesMarkdownExportPath(), target.path);
+      expect(await target.readAsString(), '原导出');
+    },
+  );
+
+  test('cancelling destination selection creates no files', () async {
+    final picker = FilePickerService(
+      adapter: FilePickerPluginAdapter(pickSaveLocation: (_) async => null),
+    );
+    expect(await picker.pickNotesMarkdownExportPath(), isNull);
+  });
   test('pickBookFile requests a single EPUB, PDF, or Markdown file', () async {
     final adapter = _FakeFilePickerAdapter([
       const PickedPlatformFile(path: r'C:\books\demo.epub', name: 'demo.epub'),
