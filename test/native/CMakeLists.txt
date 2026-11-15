@@ -12,6 +12,17 @@ else()
 endif()
 add_test(NAME pdf_render_budget COMMAND pdf_render_budget_test)
 
+if(UNIX AND NOT APPLE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
+  add_executable(linux_window_drop_paths_test linux_window_drop_paths_test.cpp
+    ../../linux/runner/window_drop_paths.cc)
+  target_compile_features(linux_window_drop_paths_test PRIVATE cxx_std_14)
+  target_compile_options(linux_window_drop_paths_test PRIVATE -Wall -Werror)
+  target_link_libraries(linux_window_drop_paths_test PRIVATE PkgConfig::GLIB)
+  add_test(NAME linux_window_drop_paths COMMAND linux_window_drop_paths_test)
+endif()
+
 if(WIN32)
   # Run `flutter build windows --release` first. Reuse its wrapper and engine
   # without creating a Flutter window or opening the user's library.

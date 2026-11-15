@@ -22,6 +22,7 @@ import '../../import/application/import_providers.dart';
 import '../../import/application/import_result.dart';
 import '../application/library_controller.dart';
 import '../application/library_providers.dart';
+import 'library_file_drop_target.dart';
 
 final class LibraryPage extends ConsumerStatefulWidget {
   const LibraryPage({super.key});
@@ -66,7 +67,7 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
     final libraryState = ref.watch(libraryControllerProvider);
     final libraryController = ref.read(libraryControllerProvider.notifier);
 
-    return Scaffold(
+    final content = Scaffold(
       body: SafeArea(
         child: books.when(
           data: (items) {
@@ -191,6 +192,11 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
         ),
       ),
     );
+    return LibraryFileDropTarget(
+      dragging: _dropImportService.dragging,
+      isImporting: _isImporting,
+      child: content,
+    );
   }
 
   Future<void> _pickAndImport(BuildContext context) async {
@@ -277,7 +283,13 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
   }
 
   Future<void> _importDroppedFiles(List<String> paths) async {
-    if (_isImporting || !mounted) {
+    if (!mounted) {
+      return;
+    }
+    if (_isImporting) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('正在导入，请完成后再拖入文件')));
       return;
     }
     // A dropped folder is not a book here: what it holds decides whether it
@@ -286,7 +298,6 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
     final validPaths = paths
         .where((path) => _isSupportedBookPath(path))
         .toList(growable: false);
-    final invalidCount = paths.length - validPaths.length;
     if (validPaths.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('请拖入 EPUB、PDF 或 Markdown 文件')),
@@ -295,13 +306,18 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
     }
     setState(() => _isImporting = true);
     try {
+      final importUseCase = ref.read(importUseCaseProvider);
       final successes = <Book>[];
       final duplicates = <ImportBookDuplicate>[];
       final failures = <ImportBookFailure>[
-        if (invalidCount > 0) ImportBookFailure('已跳过 $invalidCount 个不支持的文件'),
+        for (final path in paths)
+          if (!_isSupportedBookPath(path)) const ImportBookFailure('不支持的文件类型'),
       ];
       for (final path in validPaths) {
-        final result = await ref.read(importUseCaseProvider).importPath(path);
+        if (!mounted) {
+          return;
+        }
+        final result = await importUseCase.importPath(path);
         switch (result) {
           case ImportBookSuccess(:final book):
             successes.add(book);
@@ -314,6 +330,19 @@ final class _LibraryPageState extends ConsumerState<LibraryPage> {
         }
       }
       if (!mounted) {
+        return;
+      }
+      if (successes.isEmpty && duplicates.isEmpty && failures.length == 1) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        await _handleImportResult(context, failures.single);
+        return;
+      }
+      if (failures.isEmpty && successes.length + duplicates.length == 1) {
+        final book = successes.isNotEmpty
+            ? successes.single
+            : duplicates.single.existingBook;
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        context.goNamed('reader', pathParameters: {'bookId': book.id});
         return;
       }
       await _handleImportBooksResult(
@@ -2032,7 +2061,9 @@ final class _EmptyLibrary extends StatelessWidget {
       icon: Icons.local_library_outlined,
       illustrationAsset: 'assets/images/empty-states/empty-library.png',
       title: '还没有书籍',
-      message: '导入 EPUB/PDF/Markdown 文件，或把一个 Markdown 文件夹作为一本书来读。',
+      message: Platform.isLinux || Platform.isWindows
+          ? '拖入 PDF、EPUB 或 Markdown 文件即可阅读，也可以使用导入菜单添加文件或文件夹。'
+          : '导入 EPUB/PDF/Markdown 文件，或把一个 Markdown 文件夹作为一本书来读。',
       action: _ImportMenuButton(
         key: const ValueKey('import-books-button'),
         compact: false,

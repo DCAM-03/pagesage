@@ -12,6 +12,10 @@ final openFileLocationServiceProvider = Provider<OpenFileLocationService>(
   (ref) => OpenFileLocationService(),
 );
 
-final windowDropImportServiceProvider = Provider<WindowDropImportService>(
-  (ref) => WindowDropImportService(),
-);
+final windowDropImportServiceProvider = Provider<WindowDropImportService>((
+  ref,
+) {
+  final service = WindowDropImportService();
+  ref.onDispose(service.dispose);
+  return service;
+});

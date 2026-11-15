@@ -54,7 +54,24 @@ bool FlutterWindow::OnCreate() {
           flutter_controller_->engine()->messenger(), "pagesage/window_drop",
           &flutter::StandardMethodCodec::GetInstance());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
-  DragAcceptFiles(GetHandle(), TRUE);
+  drop_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() != "setEnabled") {
+          result->NotImplemented();
+          return;
+        }
+        const auto* enabled = call.arguments()
+                                  ? std::get_if<bool>(call.arguments())
+                                  : nullptr;
+        if (enabled == nullptr) {
+          result->Error("invalid-arguments", "Expected an enabled flag");
+          return;
+        }
+        DragAcceptFiles(GetHandle(), *enabled ? TRUE : FALSE);
+        result->Success();
+      });
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
