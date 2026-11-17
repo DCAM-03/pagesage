@@ -12,6 +12,7 @@ import 'package:pagesage/renderers/common/book_document_loader.dart';
 import 'package:pagesage/renderers/common/renderer_event.dart';
 import 'package:pagesage/renderers/epub/epub_document.dart';
 import 'package:pagesage/renderers/epub/epub_document_loader.dart';
+import 'package:pagesage/renderers/epub/epub_paginator.dart' as pagination;
 import 'package:pagesage/renderers/epub/epub_renderer_view.dart';
 
 import '../../support/reader_workbench_capture.dart';
@@ -276,6 +277,55 @@ void main() {
       events.whereType<RendererLocationChanged>().last.locator.chapterIndex,
       1,
     );
+  });
+
+  testWidgets('paged layout width changes preserve the current text anchor', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1100, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final events = <RendererEvent>[];
+    const settings = ReaderSettings(
+      readerMode: ReaderMode.paged,
+      reduceMotion: true,
+    );
+    const chapterIndex = 320;
+    await _pumpReader(
+      tester,
+      loader: _DocumentLoader(document),
+      events: events,
+      chapterIndex: chapterIndex,
+      chapterOffset: document.chapters[chapterIndex].blocks[32].startOffset,
+      settings: settings,
+    );
+    await tester.pumpAndSettle();
+
+    for (final width in [620.0, 1100.0, 720.0]) {
+      final anchor = events.whereType<RendererLocationChanged>().last;
+      await tester.binding.setSurfaceSize(Size(width, 700));
+      await tester.pumpAndSettle();
+      final pages = const pagination.EpubPaginator().paginateChapter(
+        chapter: document.chapters[chapterIndex],
+        settings: settings,
+        viewport: Size(width, 700),
+        globalOffset: document.chapters
+            .take(chapterIndex)
+            .fold(0, (sum, chapter) => sum + chapter.text.length),
+        totalLength: document.totalTextLength,
+      );
+      final pageView = tester.widget<PageView>(find.byType(PageView));
+      final currentPage = pages[pageView.controller!.page!.round()];
+      expect(currentPage.chapter.index, chapterIndex);
+      expect(
+        currentPage.startOffset,
+        lessThanOrEqualTo(anchor.locator.chapterOffset!),
+      );
+      expect(
+        currentPage.endOffset,
+        greaterThanOrEqualTo(anchor.locator.chapterOffset!),
+      );
+      expect(tester.takeException(), isNull);
+    }
   });
 
   testWidgets(

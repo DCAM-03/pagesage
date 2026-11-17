@@ -828,7 +828,9 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
     final targetPage = _restorePageIndex(pages, locator);
     _currentPagedPage = targetPage;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_pageController.hasClients) {
+      if (!mounted ||
+          !_pageController.hasClients ||
+          !identical(pages, _lastPages)) {
         return;
       }
       _pageController.jumpToPage(targetPage);
@@ -932,6 +934,17 @@ final class _EpubRendererViewState extends State<EpubRendererView> {
       settings.fontFamily,
     ].join('|');
     if (signature != _measurementSignature) {
+      if (_pagedRestored && _lastPages.isNotEmpty) {
+        final page =
+            _lastPages[_currentPagedPage.clamp(0, _lastPages.length - 1)];
+        _pendingRestoreLocator = _locator(
+          href: page.chapter.href,
+          chapterIndex: page.chapter.index,
+          chapterOffset: page.startOffset,
+          progress: page.progress,
+        );
+        _pagedRestored = false;
+      }
       // Every measured page belongs to the old geometry or the old type.
       _invalidateMeasuredPages();
       _measurementSignature = signature;

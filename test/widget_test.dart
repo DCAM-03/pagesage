@@ -33,6 +33,7 @@ import 'package:pagesage/domain/search/search_models.dart';
 import 'package:pagesage/features/ai/application/ai_context_range.dart';
 import 'package:pagesage/features/ocr/application/ocr_providers.dart';
 import 'package:pagesage/features/reader/presentation/reader_page.dart';
+import 'package:pagesage/features/reader/presentation/reader_desktop_toc_pane.dart';
 import 'package:pagesage/features/reader/presentation/reader_desktop_toolbar.dart';
 import 'package:pagesage/features/reader/presentation/reader_pdf_toolbar.dart';
 import 'package:pagesage/features/reader/presentation/reader_renderer_host.dart';
@@ -41,6 +42,9 @@ import 'package:pagesage/features/notes/presentation/notes_page.dart';
 import 'package:pagesage/features/search/presentation/search_page.dart';
 import 'package:pagesage/features/settings/application/ai_settings_providers.dart';
 import 'package:pagesage/renderers/common/renderer_event.dart';
+import 'package:pagesage/renderers/common/book_document_loader.dart';
+import 'package:pagesage/renderers/epub/epub_document.dart';
+import 'package:pagesage/renderers/epub/epub_renderer_view.dart';
 import 'package:pagesage/renderers/pdf/pdf_page_image_source.dart';
 
 import 'support/reader_workbench_capture.dart';
@@ -51,6 +55,17 @@ void main() {
       await loadWorkbenchCaptureFonts();
     }
   });
+
+  Future<void> settleReaderFiles(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      for (var round = 0; round < 5; round++) {
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('compact notes open inline and return to the list', (
     tester,
   ) async {
@@ -169,6 +184,7 @@ void main() {
     ReaderSettings initialSettings = const ReaderSettings(
       desktopTocOpen: false,
     ),
+    Widget Function(ReaderRendererHostConfig)? rendererBuilder,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1440, 960);
@@ -214,8 +230,11 @@ void main() {
             const _FakeAiConversationRepository(),
           ),
           readerRendererHostProvider.overrideWithValue(
-            (config) =>
-                _FakeRendererHost(config: config, event: const RendererReady()),
+            rendererBuilder ??
+                (config) => _FakeRendererHost(
+                  config: config,
+                  event: const RendererReady(),
+                ),
           ),
         ],
         child: MaterialApp(
@@ -226,11 +245,100 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    if (rendererBuilder == null) {
+      await tester.pumpAndSettle();
+    } else {
+      await settleReaderFiles(tester);
+    }
     expect(
       MediaQuery.sizeOf(tester.element(find.byType(ReaderPage))).width,
       1440,
     );
+  }
+
+  for (final format in [BookFormat.epub, BookFormat.markdown]) {
+    for (final mode in ReaderMode.values) {
+      testWidgets('desktop $format $mode panels retain the jumped chapter', (
+        tester,
+      ) async {
+        final loader = _PanelReaderLoader();
+        final locations = <RendererLocationChanged>[];
+        await pumpToolbarReader(
+          tester,
+          format: format,
+          initialSettings: ReaderSettings(
+            desktopTocOpen: true,
+            readerMode: mode,
+            reduceMotion: true,
+          ),
+          rendererBuilder: (config) => EpubRendererView(
+            book: config.book,
+            settings: config.settings,
+            initialProgress: config.progress,
+            annotations: config.annotations,
+            jumpToken: config.jumpToken,
+            focusLocator: config.focusLocator,
+            onEvent: (event) {
+              if (event is RendererLocationChanged) locations.add(event);
+              config.onEvent(event);
+            },
+            documentLoader: loader,
+          ),
+        );
+        const target = 17;
+        final targetOffset = loader.document.chapters[target].text.indexOf(
+          'Chapter $target paragraph 16.',
+        );
+        final toc = tester.widget<DesktopTocPane>(find.byType(DesktopTocPane));
+        toc.onSelected(
+          format == BookFormat.markdown
+              ? ReadingLocator.markdown(
+                  chapterIndex: target,
+                  chapterOffset: targetOffset,
+                )
+              : ReadingLocator.epub(
+                  chapterIndex: target,
+                  chapterOffset: targetOffset,
+                ),
+        );
+        await tester.pumpAndSettle();
+        expect(locations.last.locator.chapterIndex, target);
+        final rendererState = tester.state(find.byType(EpubRendererView));
+        final loadCount = loader.loads;
+        final toolbar = find.byType(ReaderDesktopToolbar);
+        Finder action(String label) =>
+            find.descendant(of: toolbar, matching: find.byTooltip(label));
+
+        for (final label in ['收起目录', '目录', '搜索', '收起侧栏']) {
+          final button = label == '收起侧栏'
+              ? find.byTooltip(label)
+              : action(label);
+          await tester.tap(button);
+          await settleReaderFiles(tester);
+          expect(
+            tester.state(find.byType(EpubRendererView)),
+            same(rendererState),
+            reason: '$label must not recreate the renderer',
+          );
+          expect(loader.loads, loadCount);
+          expect(locations.last.locator.chapterIndex, target);
+          expect(tester.takeException(), isNull);
+        }
+        for (final width in [850.0, 1440.0]) {
+          tester.view.physicalSize = Size(width, 960);
+          await settleReaderFiles(tester);
+          expect(
+            tester.state(find.byType(EpubRendererView)),
+            same(rendererState),
+          );
+          expect(loader.loads, loadCount);
+          expect(locations.last.locator.chapterIndex, target);
+          expect(tester.takeException(), isNull);
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+      });
+    }
   }
 
   for (final format in [BookFormat.epub, BookFormat.markdown, BookFormat.pdf]) {
@@ -2806,6 +2914,32 @@ Future<void> _sendControlShiftShortcut(
   await tester.sendKeyUpEvent(key);
   await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
   await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+}
+
+final class _PanelReaderLoader implements BookDocumentLoader {
+  final document = EpubDocument(
+    chapters: [
+      for (var chapter = 0; chapter < 24; chapter++)
+        EpubChapter(
+          index: chapter,
+          href: 'chapter-$chapter.xhtml',
+          title: 'Panel chapter $chapter',
+          text: List.generate(
+            32,
+            (paragraph) =>
+                'Chapter $chapter paragraph $paragraph. '
+                '${List.filled(4, 'Reader panel position fixture. ').join()}',
+          ).join('\n\n'),
+        ),
+    ],
+  );
+  int loads = 0;
+
+  @override
+  Future<EpubDocument> load(String filePath) async {
+    loads++;
+    return document;
+  }
 }
 
 final class _FakeRendererHost extends StatefulWidget {

@@ -863,6 +863,7 @@ final class _ReaderPageState extends ConsumerState<_ReaderContent>
                                   ),
                                 ),
                               Positioned.fill(
+                                key: const ValueKey('reader-content'),
                                 left: showDesktopToc ? tocWidth : 0,
                                 right: showDesktopContext ? contextWidth : 0,
                                 bottom: showDesktopChrome
